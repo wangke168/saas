@@ -19,7 +19,17 @@ class OrderController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', Order::class);
+
         $query = Order::with(['otaPlatform', 'product', 'hotel', 'roomType', 'resourceProvider']);
+
+        // 权限过滤：非管理员只能查看自己景区下的订单
+        if (!$request->user()->isAdmin()) {
+            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $query->whereHas('product', function ($q) use ($scenicSpotIds) {
+                $q->whereIn('scenic_spot_id', $scenicSpotIds);
+            });
+        }
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -56,6 +66,8 @@ class OrderController extends Controller
      */
     public function show(Order $order): JsonResponse
     {
+        $this->authorize('view', $order);
+
         $order->load([
             'otaPlatform',
             'product',
@@ -75,6 +87,8 @@ class OrderController extends Controller
      */
     public function updateStatus(Request $request, Order $order): JsonResponse
     {
+        $this->authorize('updateStatus', $order);
+
         $validated = $request->validate([
             'status' => ['required', 'in:' . implode(',', array_column(OrderStatus::cases(), 'value'))],
             'remark' => 'nullable|string',

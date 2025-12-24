@@ -20,12 +20,13 @@ class CtripService
     protected function getClient(): CtripClient
     {
         if ($this->client === null) {
-            $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
-            $config = $platform?->config;
-
-            // 如果数据库配置不存在，尝试从环境变量读取
+            // 优先使用环境变量配置（如果存在）
+            $config = $this->createConfigFromEnv();
+            
+            // 如果环境变量配置不存在，尝试从数据库读取
             if (!$config) {
-                $config = $this->createConfigFromEnv();
+                $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
+                $config = $platform?->config;
             }
 
             if (!$config) {
@@ -105,12 +106,11 @@ class CtripService
         }
 
         // 构建请求体
-        $bodyData = [
+        $bodyData = array_merge([
             'sequenceId' => date('Y-m-d') . str_replace('-', '', \Illuminate\Support\Str::uuid()->toString()),
-            'supplierOptionId' => trim((string)$product->code), // 强制转换为字符串并去除空格
             'dateType' => $dateType,
             'prices' => [],
-        ];
+        ], $this->buildProductIdentifier($product));
 
         // 转换价格数据，应用加价规则
         // 注意：一个产品可能关联多个房型，同一日期可能有多个房型的价格
@@ -221,6 +221,35 @@ class CtripService
         $inventoryByDate = [];
         foreach ($inventoryList as $inventory) {
             $date = $inventory->date->format('Y-m-d');
+            
+            // 检查销售日期范围
+            $isInSalePeriod = true;
+            if ($product->sale_start_date || $product->sale_end_date) {
+                $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
+                $saleEndDate = $product->sale_end_date ? $product->sale_end_date->format('Y-m-d') : null;
+                
+                if ($saleStartDate && $date < $saleStartDate) {
+                    $isInSalePeriod = false;
+                }
+                if ($saleEndDate && $date > $saleEndDate) {
+                    $isInSalePeriod = false;
+                }
+            }
+            
+            // 如果不在销售日期范围内，将库存设为0
+            if (!$isInSalePeriod) {
+                if (!isset($inventoryByDate[$date])) {
+                    $inventoryByDate[$date] = [
+                        'quantity' => 0,
+                        'is_closed' => false,
+                    ];
+                }
+                // 不在销售日期范围内，库存设为0
+                $inventoryByDate[$date]['quantity'] = 0;
+                $inventoryByDate[$date]['is_closed'] = true; // 标记为关闭状态
+                continue;
+            }
+            
             if (!isset($inventoryByDate[$date])) {
                 $inventoryByDate[$date] = [
                     'quantity' => 0,
@@ -288,12 +317,11 @@ class CtripService
         }
 
         // 构建请求体
-        $bodyData = [
+        $bodyData = array_merge([
             'sequenceId' => date('Y-m-d') . str_replace('-', '', \Illuminate\Support\Str::uuid()->toString()),
-            'supplierOptionId' => trim((string)$product->code), // 强制转换为字符串并去除空格
             'dateType' => $dateType,
             'inventorys' => [],
-        ];
+        ], $this->buildProductIdentifier($product));
 
         // 转换库存数据
         if ($dateType === 'DATE_NOT_REQUIRED') {
@@ -402,11 +430,44 @@ class CtripService
     }
 
     /**
-     * 生成携程产品编码（格式：产品编码|酒店编码|房型编码）
+     * 生成携程产品编码（格式：酒店编码|房型编码|产品编码）
      */
     public function generateCtripProductCode(string $productCode, string $hotelCode, string $roomTypeCode): string
     {
-        return "{$productCode}|{$hotelCode}|{$roomTypeCode}";
+        return "{$hotelCode}|{$roomTypeCode}|{$productCode}";
+    }
+
+    /**
+     * 构建携程请求体中的产品标识字段
+     * 优先使用 otaOptionId（携程资源编号），如果没有则使用 supplierOptionId（供应商PLU）
+     * 
+     * @param \App\Models\Product $product 产品
+     * @param string|null $ctripProductCode 携程产品编码（格式：酒店编码|房型编码|产品编码）
+     * @return array 包含 otaOptionId 或 supplierOptionId 的数组
+     */
+    protected function buildProductIdentifier(\App\Models\Product $product, ?string $ctripProductCode = null): array
+    {
+        // 获取 OTA 产品关联，看是否有携程资源编号
+        $otaProduct = $product->otaProducts()
+            ->where('ota_platform_id', \App\Models\OtaPlatform::where('code', OtaPlatform::CTRIP->value)->first()?->id)
+            ->first();
+
+        // 如果存在 ota_product_id（携程资源编号），优先使用
+        if ($otaProduct && !empty($otaProduct->ota_product_id)) {
+            return ['otaOptionId' => (int)$otaProduct->ota_product_id];
+        }
+
+        // 否则使用 supplierOptionId
+        if ($ctripProductCode) {
+            return ['supplierOptionId' => trim($ctripProductCode)];
+        }
+
+        // 如果都没有，使用产品编码
+        if (!empty($product->code)) {
+            return ['supplierOptionId' => trim((string)$product->code)];
+        }
+
+        throw new \Exception('无法构建产品标识：缺少 otaOptionId 或 supplierOptionId');
     }
 
     /**
@@ -448,12 +509,11 @@ class CtripService
         }
 
         // 构建请求体
-        $bodyData = [
+        $bodyData = array_merge([
             'sequenceId' => date('Ymd') . str_replace('-', '', \Illuminate\Support\Str::uuid()->toString()),
-            'supplierOptionId' => $ctripProductCode,
             'dateType' => $dateType,
             'prices' => [],
-        ];
+        ], $this->buildProductIdentifier($product, $ctripProductCode));
 
         // 转换价格数据，应用加价规则
         if ($dateType === 'DATE_NOT_REQUIRED') {
@@ -544,6 +604,35 @@ class CtripService
         $inventoryByDate = [];
         foreach ($inventoryList as $inventory) {
             $date = $inventory->date->format('Y-m-d');
+            
+            // 检查销售日期范围
+            $isInSalePeriod = true;
+            if ($product->sale_start_date || $product->sale_end_date) {
+                $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
+                $saleEndDate = $product->sale_end_date ? $product->sale_end_date->format('Y-m-d') : null;
+                
+                if ($saleStartDate && $date < $saleStartDate) {
+                    $isInSalePeriod = false;
+                }
+                if ($saleEndDate && $date > $saleEndDate) {
+                    $isInSalePeriod = false;
+                }
+            }
+            
+            // 如果不在销售日期范围内，将库存设为0
+            if (!$isInSalePeriod) {
+                if (!isset($inventoryByDate[$date])) {
+                    $inventoryByDate[$date] = [
+                        'quantity' => 0,
+                        'is_closed' => false,
+                    ];
+                }
+                // 不在销售日期范围内，库存设为0
+                $inventoryByDate[$date]['quantity'] = 0;
+                $inventoryByDate[$date]['is_closed'] = true; // 标记为关闭状态
+                continue;
+            }
+            
             if (!isset($inventoryByDate[$date])) {
                 $inventoryByDate[$date] = [
                     'quantity' => 0,
@@ -594,12 +683,11 @@ class CtripService
         }
 
         // 构建请求体
-        $bodyData = [
+        $bodyData = array_merge([
             'sequenceId' => date('Ymd') . str_replace('-', '', \Illuminate\Support\Str::uuid()->toString()),
-            'supplierOptionId' => $ctripProductCode,
             'dateType' => $dateType,
             'inventorys' => [],
-        ];
+        ], $this->buildProductIdentifier($product, $ctripProductCode));
 
         // 转换库存数据
         if ($dateType === 'DATE_NOT_REQUIRED') {

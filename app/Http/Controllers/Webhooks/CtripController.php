@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
+use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,7 +25,8 @@ class CtripController extends Controller
 
     public function __construct(
         protected OrderService $orderService,
-        protected OrderProcessorService $orderProcessorService
+        protected OrderProcessorService $orderProcessorService,
+        protected InventoryService $inventoryService
     ) {}
 
     /**
@@ -33,8 +35,14 @@ class CtripController extends Controller
     protected function getClient(): ?CtripClient
     {
         if ($this->client === null) {
-            $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
-            $config = $platform?->config;
+            // 优先使用环境变量配置（如果存在）
+            $config = $this->createConfigFromEnv();
+            
+            // 如果环境变量配置不存在，尝试从数据库读取
+            if (!$config) {
+                $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
+                $config = $platform?->config;
+            }
 
             if (!$config) {
                 return null;
@@ -44,6 +52,37 @@ class CtripController extends Controller
         }
 
         return $this->client;
+    }
+
+    /**
+     * 从环境变量创建配置对象
+     */
+    protected function createConfigFromEnv(): ?\App\Models\OtaConfig
+    {
+        // 检查环境变量是否存在
+        if (!env('CTRIP_ACCOUNT_ID') || !env('CTRIP_SECRET_KEY')) {
+            return null;
+        }
+
+        // 创建临时配置对象（不保存到数据库）
+        $config = new \App\Models\OtaConfig();
+        $config->account = env('CTRIP_ACCOUNT_ID');
+        $config->secret_key = env('CTRIP_SECRET_KEY');
+        $config->aes_key = env('CTRIP_ENCRYPT_KEY', '');
+        $config->aes_iv = env('CTRIP_ENCRYPT_IV', '');
+        
+        // API URL 配置
+        $priceApiUrl = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
+        $stockApiUrl = env('CTRIP_STOCK_API_URL', 'https://ttdopen.ctrip.com/api/product/stock.do');
+        $orderApiUrl = env('CTRIP_ORDER_API_URL', 'https://ttdopen.ctrip.com/api/order/notice.do');
+        
+        // 使用价格API URL作为基础URL（CtripClient会根据接口类型选择正确的URL）
+        $config->api_url = $priceApiUrl;
+        $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
+        $config->environment = 'production';
+        $config->is_active = true;
+
+        return $config;
     }
 
     /**
@@ -1041,87 +1080,26 @@ class CtripController extends Controller
                 $stayDays = $product->stay_days ?: 1;
             }
 
-            $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
-            $roomTypeId = $order->room_type_id;
-            $quantity = $order->room_count;
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
 
-            // 使用 Redis 分布式锁，防止并发问题
-            // 锁的粒度：按房型和日期
-            $lockKeys = [];
-            for ($i = 0; $i < $stayDays; $i++) {
-                $date = $checkInDate->copy()->addDays($i);
-                $lockKey = "inventory_lock:{$roomTypeId}:{$date->format('Y-m-d')}";
-                $lockKeys[] = $lockKey;
-            }
+            // 使用统一的库存服务锁定库存
+            $success = $this->inventoryService->lockInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
 
-            // 尝试获取所有日期的锁
-            $acquiredLocks = [];
-            foreach ($lockKeys as $lockKey) {
-                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
-                if (!$lock) {
-                    // 获取锁失败，释放已获取的锁
-                    foreach ($acquiredLocks as $acquiredLock) {
-                        Redis::del($acquiredLock);
-                    }
-                    return [
-                        'success' => false,
-                        'message' => '库存锁定失败：并发冲突，请稍后重试',
-                    ];
-                }
-                $acquiredLocks[] = $lockKey;
-            }
-
-            try {
-                // 再次检查库存（在锁内检查，确保准确性）
-                $checkResult = $this->checkInventoryForStayDays($roomTypeId, $checkInDate, $stayDays, $quantity);
-                if (!$checkResult['success']) {
-                    return $checkResult;
-                }
-
-                // 锁定库存：增加 locked_quantity，减少 available_quantity
-                for ($i = 0; $i < $stayDays; $i++) {
-                    $date = $checkInDate->copy()->addDays($i);
-                    $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
-                        ->where('date', $date->format('Y-m-d'))
-                        ->lockForUpdate() // 行级锁，防止并发
-                        ->first();
-
-                    if (!$inventory) {
-                        return [
-                            'success' => false,
-                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 没有库存记录',
-                        ];
-                    }
-
-                    // 再次检查（双重检查，确保在获取行锁后库存仍然足够）
-                    if ($inventory->is_closed || $inventory->available_quantity < $quantity) {
-                        return [
-                            'success' => false,
-                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 库存不足或已关闭',
-                        ];
-                    }
-
-                    // 锁定库存
-                    $inventory->available_quantity -= $quantity;
-                    $inventory->locked_quantity += $quantity;
-                    $inventory->save();
-
-                    Log::info('预下单库存锁定成功', [
-                        'order_id' => $order->id,
-                        'room_type_id' => $roomTypeId,
-                        'date' => $date->format('Y-m-d'),
-                        'quantity' => $quantity,
-                        'available_quantity' => $inventory->available_quantity,
-                        'locked_quantity' => $inventory->locked_quantity,
-                    ]);
-                }
-
-                return ['success' => true, 'message' => ''];
-            } finally {
-                // 释放所有 Redis 锁
-                foreach ($acquiredLocks as $lockKey) {
-                    Redis::del($lockKey);
-                }
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存锁定成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存锁定失败：库存不足或并发冲突',
+                ];
             }
         } catch (\Exception $e) {
             Log::error('预下单库存锁定异常', [
@@ -1132,7 +1110,7 @@ class CtripController extends Controller
 
             return [
                 'success' => false,
-                'message' => '库存锁定异常：' . $e->getMessage(),
+                'message' => '库存锁定失败：系统异常',
             ];
         }
     }
@@ -1180,46 +1158,26 @@ class CtripController extends Controller
                 $acquiredLocks[] = $lockKey;
             }
 
-            try {
-                // 释放库存：减少 locked_quantity，增加 available_quantity
-                for ($i = 0; $i < $stayDays; $i++) {
-                    $date = $checkInDate->copy()->addDays($i);
-                    $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
-                        ->where('date', $date->format('Y-m-d'))
-                        ->lockForUpdate() // 行级锁
-                        ->first();
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
 
-                    if (!$inventory) {
-                        Log::warning('预下单库存释放：库存记录不存在', [
-                            'order_id' => $order->id,
-                            'room_type_id' => $roomTypeId,
-                            'date' => $date->format('Y-m-d'),
-                        ]);
-                        continue; // 继续处理其他日期
-                    }
+            // 使用统一的库存服务释放库存
+            $success = $this->inventoryService->releaseInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
 
-                    // 释放库存（确保不会出现负数）
-                    $releaseQuantity = min($quantity, $inventory->locked_quantity);
-                    $inventory->locked_quantity -= $releaseQuantity;
-                    $inventory->available_quantity += $releaseQuantity;
-                    $inventory->save();
-
-                    Log::info('预下单库存释放成功', [
-                        'order_id' => $order->id,
-                        'room_type_id' => $roomTypeId,
-                        'date' => $date->format('Y-m-d'),
-                        'quantity' => $releaseQuantity,
-                        'available_quantity' => $inventory->available_quantity,
-                        'locked_quantity' => $inventory->locked_quantity,
-                    ]);
-                }
-
-                return ['success' => true, 'message' => ''];
-            } finally {
-                // 释放所有 Redis 锁
-                foreach ($acquiredLocks as $lockKey) {
-                    Redis::del($lockKey);
-                }
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存释放成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存释放失败：并发冲突',
+                ];
             }
         } catch (\Exception $e) {
             Log::error('预下单库存释放异常', [
@@ -1230,7 +1188,7 @@ class CtripController extends Controller
 
             return [
                 'success' => false,
-                'message' => '库存释放异常：' . $e->getMessage(),
+                'message' => '库存释放失败：系统异常',
             ];
         }
     }

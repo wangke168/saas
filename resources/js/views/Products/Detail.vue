@@ -22,7 +22,16 @@
                             {{ product.is_active ? '启用' : '禁用' }}
                         </el-tag>
                     </el-descriptions-item>
+                    <el-descriptions-item label="入住天数">
+                        {{ product.stay_days ? `${product.stay_days} 晚` : '单晚' }}
+                    </el-descriptions-item>
                     <el-descriptions-item label="创建时间">{{ formatDate(product.created_at) }}</el-descriptions-item>
+                    <el-descriptions-item label="销售开始日期">
+                        {{ product.sale_start_date ? formatDateOnly(product.sale_start_date) : '不限制' }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="销售结束日期">
+                        {{ product.sale_end_date ? formatDateOnly(product.sale_end_date) : '不限制' }}
+                    </el-descriptions-item>
                     <el-descriptions-item label="产品描述" :span="2">
                         {{ product.description || '-' }}
                     </el-descriptions-item>
@@ -183,12 +192,13 @@
                                 :rules="priceFormRules"
                                 label-width="120px"
                             >
-                                <el-form-item label="选择房型" prop="room_type_id">
+                                <el-form-item label="选择房型" prop="room_type_ids">
                                     <el-select
-                                        v-model="priceForm.room_type_id"
-                                        placeholder="请选择房型"
+                                        v-model="priceForm.room_type_ids"
+                                        :multiple="!editingPriceId"
+                                        :disabled="!!editingPriceId"
+                                        :placeholder="editingPriceId ? '编辑模式下不可修改房型' : '请选择房型（可多选）'"
                                         style="width: 100%"
-                                        @change="handleRoomTypeChange"
                                     >
                                         <el-option
                                             v-for="roomType in roomTypes"
@@ -197,18 +207,35 @@
                                             :value="roomType.id"
                                         />
                                     </el-select>
+                                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                                        <span v-if="editingPriceId">编辑模式下只能修改价格，不能修改房型</span>
+                                        <span v-else>可同时为多个房型设置价格</span>
+                                    </span>
                                 </el-form-item>
-                                <el-form-item label="日期范围" prop="dateRange">
-                                    <el-date-picker
-                                        v-model="priceForm.dateRange"
-                                        type="daterange"
-                                        range-separator="至"
-                                        start-placeholder="开始日期"
-                                        end-placeholder="结束日期"
-                                        style="width: 100%"
-                                        format="YYYY-MM-DD"
-                                        value-format="YYYY-MM-DD"
-                                    />
+                                <el-form-item label="日期范围">
+                                    <el-alert
+                                        v-if="product.sale_start_date || product.sale_end_date"
+                                        type="info"
+                                        :closable="false"
+                                    >
+                                        <template #title>
+                                            <span>将使用产品的销售日期范围：</span>
+                                            <span v-if="product.sale_start_date">{{ formatDateOnly(product.sale_start_date) }}</span>
+                                            <span v-else>不限制</span>
+                                            <span> 至 </span>
+                                            <span v-if="product.sale_end_date">{{ formatDateOnly(product.sale_end_date) }}</span>
+                                            <span v-else>不限制</span>
+                                        </template>
+                                    </el-alert>
+                                    <el-alert
+                                        v-else
+                                        type="warning"
+                                        :closable="false"
+                                    >
+                                        <template #title>
+                                            <span>产品未设置销售日期范围，请先在产品编辑页面设置销售开始日期和结束日期</span>
+                                        </template>
+                                    </el-alert>
                                 </el-form-item>
                                 <el-form-item label="门市价（元）" prop="market_price">
                                     <el-input-number
@@ -385,7 +412,7 @@
                                                     @change="handlePriceRuleHotelChange($index)"
                                                 >
                                                     <el-option
-                                                        v-for="hotel in hotels"
+                                                        v-for="hotel in availableHotelsForPriceRule"
                                                         :key="hotel.id"
                                                         :label="hotel.name"
                                                         :value="hotel.id"
@@ -401,7 +428,7 @@
                                                     style="width: 100%"
                                                 >
                                                     <el-option
-                                                        v-for="roomType in getRoomTypesByHotel(row.hotel_id)"
+                                                        v-for="roomType in getAvailableRoomTypesForPriceRule(row.hotel_id)"
                                                         :key="roomType.id"
                                                         :label="roomType.name"
                                                         :value="roomType.id"
@@ -532,8 +559,7 @@ const priceDialogVisible = ref(false);
 const priceSubmitting = ref(false);
 const priceFormRef = ref(null);
 const priceForm = ref({
-    room_type_id: null,
-    dateRange: null,
+    room_type_ids: [],
     market_price: 0,
     settlement_price: 0,
     sale_price: 0,
@@ -574,8 +600,20 @@ const otaPushForm = ref({
 
 // 表单验证规则
 const priceFormRules = {
-    room_type_id: [{ required: true, message: '请选择房型', trigger: 'change' }],
-    dateRange: [{ required: true, message: '请选择日期范围', trigger: 'change' }],
+    room_type_ids: [
+        { 
+            required: true, 
+            message: '请至少选择一个房型', 
+            trigger: 'change',
+            validator: (rule, value, callback) => {
+                if (!value || value.length === 0) {
+                    callback(new Error('请至少选择一个房型'));
+                } else {
+                    callback();
+                }
+            }
+        }
+    ],
     market_price: [{ required: true, message: '请输入门市价', trigger: 'blur' }],
     settlement_price: [{ required: true, message: '请输入结算价', trigger: 'blur' }],
     sale_price: [{ required: true, message: '请输入销售价', trigger: 'blur' }],
@@ -632,6 +670,41 @@ const priceRuleFormRules = {
 
 const priceDialogTitle = computed(() => editingPriceId.value ? '编辑价格' : '添加价格');
 const priceRuleDialogTitle = computed(() => editingPriceRuleId.value ? '编辑加价规则' : '添加加价规则');
+
+// 获取已添加价格的酒店和房型列表（用于加价规则）
+const availableHotelsForPriceRule = computed(() => {
+    if (!prices.value || prices.value.length === 0) {
+        return [];
+    }
+    
+    // 获取所有已添加价格的房型ID
+    const roomTypeIds = [...new Set(prices.value.map(p => p.room_type_id))];
+    
+    // 获取这些房型对应的酒店
+    const hotelIds = new Set();
+    roomTypeIds.forEach(roomTypeId => {
+        const roomType = allRoomTypes.value.find(rt => rt.id === roomTypeId);
+        if (roomType && roomType.hotel_id) {
+            hotelIds.add(roomType.hotel_id);
+        }
+    });
+    
+    // 返回这些酒店
+    return hotels.value.filter(h => hotelIds.has(h.id));
+});
+
+// 获取指定酒店下已添加价格的房型列表
+const getAvailableRoomTypesForPriceRule = (hotelId) => {
+    if (!hotelId) return [];
+    
+    // 获取所有已添加价格的房型ID
+    const roomTypeIdsWithPrice = new Set(prices.value.map(p => p.room_type_id));
+    
+    // 返回该酒店下已添加价格的房型
+    return allRoomTypes.value.filter(rt => 
+        rt.hotel_id === hotelId && roomTypeIdsWithPrice.has(rt.id)
+    );
+};
 
 // 价格筛选和分组
 const filteredPrices = computed(() => {
@@ -793,6 +866,15 @@ const formatDate = (date) => {
     });
 };
 
+const formatDateOnly = (date) => {
+    if (!date) return '';
+    return new Date(date).toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+};
+
 const formatPrice = (price) => {
     if (!price) return '0.00';
     return (parseFloat(price) / 100).toFixed(2);
@@ -813,6 +895,12 @@ const formatWeekdays = (weekdays) => {
 };
 
 const handleAddPrice = () => {
+    // 检查产品是否有销售日期范围
+    if (!product.value.sale_start_date || !product.value.sale_end_date) {
+        ElMessage.warning('请先在产品编辑页面设置销售开始日期和结束日期');
+        return;
+    }
+    
     editingPriceId.value = null;
     resetPriceForm();
     priceDialogVisible.value = true;
@@ -821,8 +909,7 @@ const handleAddPrice = () => {
 const handleEditPrice = (row) => {
     editingPriceId.value = row.id;
     priceForm.value = {
-        room_type_id: row.room_type_id,
-        dateRange: [row.date, row.date],
+        room_type_ids: [row.room_type_id], // 编辑时只显示当前房型
         market_price: parseFloat(row.market_price) / 100,
         settlement_price: parseFloat(row.settlement_price) / 100,
         sale_price: parseFloat(row.sale_price) / 100,
@@ -875,8 +962,7 @@ const handleEditPriceRange = (group, range) => {
         const firstPrice = pricesInRange[0];
         editingPriceId.value = null; // 批量编辑时，创建新的价格记录
         priceForm.value = {
-            room_type_id: group.roomTypeId,
-            dateRange: [range.start, range.end],
+            room_type_ids: [group.roomTypeId], // 批量编辑时只显示当前房型
             market_price: parseFloat(firstPrice.market_price) / 100,
             settlement_price: parseFloat(firstPrice.settlement_price) / 100,
             sale_price: parseFloat(firstPrice.sale_price) / 100,
@@ -978,6 +1064,8 @@ const handleSubmitPrice = async () => {
             priceSubmitting.value = true;
             try {
                 if (editingPriceId.value) {
+                    // 编辑模式：只更新单个价格记录的价格值
+                    // 注意：编辑模式下，room_type_ids 只包含一个房型，但后端只需要价格值
                     await axios.put(`/prices/${editingPriceId.value}`, {
                         market_price: Math.round(priceForm.value.market_price * 100),
                         settlement_price: Math.round(priceForm.value.settlement_price * 100),
@@ -985,7 +1073,16 @@ const handleSubmitPrice = async () => {
                     });
                     ElMessage.success('价格更新成功');
                 } else {
-                    const [startDate, endDate] = priceForm.value.dateRange;
+                    // 检查产品是否有销售日期范围
+                    if (!product.value.sale_start_date || !product.value.sale_end_date) {
+                        ElMessage.warning('请先在产品编辑页面设置销售开始日期和结束日期');
+                        priceSubmitting.value = false;
+                        return;
+                    }
+                    
+                    // 使用产品的销售日期范围
+                    const startDate = product.value.sale_start_date;
+                    const endDate = product.value.sale_end_date;
                     const prices = [];
                     const start = new Date(startDate);
                     const end = new Date(endDate);
@@ -999,12 +1096,17 @@ const handleSubmitPrice = async () => {
                         });
                     }
                     
-                    await axios.post('/prices', {
-                        product_id: product.value.id,
-                        room_type_id: priceForm.value.room_type_id,
-                        prices: prices,
+                    // 为每个选中的房型批量创建价格
+                    const promises = priceForm.value.room_type_ids.map(roomTypeId => {
+                        return axios.post('/prices', {
+                            product_id: product.value.id,
+                            room_type_id: roomTypeId,
+                            prices: prices,
+                        });
                     });
-                    ElMessage.success('价格创建成功');
+                    
+                    await Promise.all(promises);
+                    ElMessage.success(`成功为 ${priceForm.value.room_type_ids.length} 个房型创建价格`);
                 }
                 priceDialogVisible.value = false;
                 resetPriceForm();
@@ -1021,8 +1123,7 @@ const handleSubmitPrice = async () => {
 
 const resetPriceForm = () => {
     priceForm.value = {
-        room_type_id: null,
-        dateRange: null,
+        room_type_ids: [],
         market_price: 0,
         settlement_price: 0,
         sale_price: 0,

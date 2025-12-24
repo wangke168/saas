@@ -21,6 +21,8 @@ class Product extends Model
         'price_source',
         'is_active',
         'stay_days',
+        'sale_start_date',
+        'sale_end_date',
     ];
 
     protected function casts(): array
@@ -28,6 +30,8 @@ class Product extends Model
         return [
             'price_source' => PriceSource::class,
             'is_active' => 'boolean',
+            'sale_start_date' => 'date',
+            'sale_end_date' => 'date',
         ];
     }
 

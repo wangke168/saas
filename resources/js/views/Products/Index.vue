@@ -161,6 +161,34 @@
                         产品需要连续入住的天数，为空或1表示单晚产品
                     </span>
                 </el-form-item>
+                <el-form-item label="销售开始日期" prop="sale_start_date">
+                    <el-date-picker
+                        v-model="form.sale_start_date"
+                        type="date"
+                        placeholder="选择销售开始日期"
+                        format="YYYY-MM-DD"
+                        value-format="YYYY-MM-DD"
+                        style="width: 100%"
+                        :disabled-date="(date) => form.sale_end_date && date > new Date(form.sale_end_date)"
+                    />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        产品开始销售的日期（必填）
+                    </span>
+                </el-form-item>
+                <el-form-item label="销售结束日期" prop="sale_end_date">
+                    <el-date-picker
+                        v-model="form.sale_end_date"
+                        type="date"
+                        placeholder="选择销售结束日期"
+                        format="YYYY-MM-DD"
+                        value-format="YYYY-MM-DD"
+                        style="width: 100%"
+                        :disabled-date="(date) => form.sale_start_date && date < new Date(form.sale_start_date)"
+                    />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        产品结束销售的日期（必填），不能早于开始日期
+                    </span>
+                </el-form-item>
                 <el-form-item label="状态" prop="is_active">
                     <el-switch v-model="form.is_active" />
                 </el-form-item>
@@ -209,8 +237,20 @@ const form = ref({
     description: '',
     price_source: 'manual',
     stay_days: null,
+    sale_start_date: null,
+    sale_end_date: null,
     is_active: true,
 });
+
+const validateSaleEndDate = (rule, value, callback) => {
+    if (!value) {
+        callback(new Error('请选择销售结束日期'));
+    } else if (form.value.sale_start_date && value < form.value.sale_start_date) {
+        callback(new Error('销售结束日期不能早于开始日期'));
+    } else {
+        callback();
+    }
+};
 
 const rules = {
     scenic_spot_id: [
@@ -226,6 +266,12 @@ const rules = {
     ],
     price_source: [
         { required: true, message: '请选择价格来源', trigger: 'change' }
+    ],
+    sale_start_date: [
+        { required: true, message: '请选择销售开始日期', trigger: 'change' }
+    ],
+    sale_end_date: [
+        { validator: validateSaleEndDate, trigger: 'change' }
     ],
 };
 
@@ -342,6 +388,8 @@ const handleEdit = (row) => {
         description: row.description || '',
         price_source: row.price_source || 'manual',
         stay_days: row.stay_days || null,
+        sale_start_date: row.sale_start_date || null,
+        sale_end_date: row.sale_end_date || null,
         is_active: row.is_active,
     };
     dialogVisible.value = true;
@@ -350,15 +398,23 @@ const handleEdit = (row) => {
 const handleSubmit = async () => {
     if (!formRef.value) return;
     
-    await formRef.value.validate(async (valid) => {
+        await formRef.value.validate(async (valid) => {
         if (valid) {
             submitting.value = true;
             try {
+                // 准备提交数据，确保空值转换为 null
+                const submitData = {
+                    ...form.value,
+                    stay_days: form.value.stay_days || null,
+                    sale_start_date: form.value.sale_start_date || null,
+                    sale_end_date: form.value.sale_end_date || null,
+                };
+                
                 if (isEdit.value) {
-                    await axios.put(`/products/${editingId.value}`, form.value);
+                    await axios.put(`/products/${editingId.value}`, submitData);
                     ElMessage.success('产品更新成功');
                 } else {
-                    await axios.post('/products', form.value);
+                    await axios.post('/products', submitData);
                     ElMessage.success('产品创建成功');
                 }
                 dialogVisible.value = false;
@@ -407,6 +463,9 @@ const resetForm = () => {
         code: '',
         description: '',
         price_source: 'manual',
+        stay_days: null,
+        sale_start_date: null,
+        sale_end_date: null,
         is_active: true,
     };
     formRef.value?.clearValidate();

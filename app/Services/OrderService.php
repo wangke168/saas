@@ -39,6 +39,11 @@ class OrderService
      */
     public function updateOrderStatus(Order $order, OrderStatus $newStatus, ?string $remark = null, ?int $operatorId = null): void
     {
+        // 验证状态流转是否合法
+        if (!$this->canTransition($order->status, $newStatus)) {
+            throw new \InvalidArgumentException("订单状态不能从 {$order->status->label()} 转换为 {$newStatus->label()}");
+        }
+
         DB::transaction(function () use ($order, $newStatus, $remark, $operatorId) {
             $oldStatus = $order->status;
             $order->update(['status' => $newStatus]);
@@ -53,6 +58,39 @@ class OrderService
                 $order->update(['cancelled_at' => now()]);
             }
         });
+    }
+
+    /**
+     * 检查订单状态是否可以流转
+     */
+    protected function canTransition(OrderStatus $from, OrderStatus $to): bool
+    {
+        return match($from) {
+            OrderStatus::PAID_PENDING => in_array($to, [
+                OrderStatus::CONFIRMING,
+                OrderStatus::REJECTED,
+                OrderStatus::CANCEL_APPROVED, // 允许预下单取消
+            ]),
+            OrderStatus::CONFIRMING => in_array($to, [
+                OrderStatus::CONFIRMED,
+                OrderStatus::REJECTED,
+            ]),
+            OrderStatus::CONFIRMED => in_array($to, [
+                OrderStatus::CANCEL_REQUESTED,
+                OrderStatus::VERIFIED,
+            ]),
+            OrderStatus::CANCEL_REQUESTED => in_array($to, [
+                OrderStatus::CANCEL_APPROVED,
+                OrderStatus::CANCEL_REJECTED,
+            ]),
+            OrderStatus::CANCEL_REJECTED => in_array($to, [
+                OrderStatus::CONFIRMED, // 取消被拒绝，回到确认状态
+            ]),
+            // 终止状态不能再流转
+            OrderStatus::CANCEL_APPROVED,
+            OrderStatus::VERIFIED,
+            OrderStatus::REJECTED => false,
+        };
     }
 
     /**

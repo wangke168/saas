@@ -113,6 +113,9 @@ class ProductController extends Controller
             'code' => 'required|string|max:255|unique:products,code',
             'description' => 'nullable|string',
             'price_source' => 'sometimes|in:manual,api',
+            'stay_days' => 'nullable|integer|min:1|max:30',
+            'sale_start_date' => 'required|date',
+            'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
             'is_active' => 'boolean',
         ]);
 
@@ -120,6 +123,19 @@ class ProductController extends Controller
         $policy = app(\App\Policies\ProductPolicy::class);
         if (! $policy->create($request->user(), $validated['scenic_spot_id'])) {
             abort(403, '无权在该景区下创建产品');
+        }
+
+        // 确保 stay_days 为空时转换为 null
+        if (isset($validated['stay_days']) && ($validated['stay_days'] === '' || $validated['stay_days'] === 0)) {
+            $validated['stay_days'] = null;
+        }
+
+        // 确保销售日期为空字符串时转换为 null
+        if (isset($validated['sale_start_date']) && $validated['sale_start_date'] === '') {
+            $validated['sale_start_date'] = null;
+        }
+        if (isset($validated['sale_end_date']) && $validated['sale_end_date'] === '') {
+            $validated['sale_end_date'] = null;
         }
 
         $product = $this->productService->createProduct($validated);
@@ -141,6 +157,9 @@ class ProductController extends Controller
             'code' => ['sometimes', 'required', 'string', 'max:255', 'unique:products,code,' . $product->id],
             'description' => 'nullable|string',
             'price_source' => 'sometimes|in:manual,api',
+            'stay_days' => 'nullable|integer|min:1|max:30',
+            'sale_start_date' => 'required|date',
+            'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
             'is_active' => 'sometimes|boolean',
         ]);
 
@@ -149,6 +168,19 @@ class ProductController extends Controller
         $policy = app(\App\Policies\ProductPolicy::class);
         if (! $policy->update($request->user(), $product, $newScenicSpotId)) {
             abort(403, '无权更新该产品');
+        }
+
+        // 确保 stay_days 为空时转换为 null
+        if (isset($validated['stay_days']) && ($validated['stay_days'] === '' || $validated['stay_days'] === 0)) {
+            $validated['stay_days'] = null;
+        }
+
+        // 确保销售日期为空字符串时转换为 null
+        if (isset($validated['sale_start_date']) && $validated['sale_start_date'] === '') {
+            $validated['sale_start_date'] = null;
+        }
+        if (isset($validated['sale_end_date']) && $validated['sale_end_date'] === '') {
+            $validated['sale_end_date'] = null;
         }
 
         $product = $this->productService->updateProduct($product, $validated);

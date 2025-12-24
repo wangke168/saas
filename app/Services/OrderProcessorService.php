@@ -8,6 +8,7 @@ use App\Models\ExceptionOrder;
 use App\Models\Inventory;
 use App\Models\Order;
 use App\Services\Resource\HengdianService;
+use App\Services\InventoryService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
@@ -16,7 +17,8 @@ class OrderProcessorService
 {
     public function __construct(
         protected OrderService $orderService,
-        protected HengdianService $hengdianService
+        protected HengdianService $hengdianService,
+        protected InventoryService $inventoryService
     ) {}
 
     /**
@@ -98,8 +100,6 @@ class OrderProcessorService
             }
 
             // 检查锁定的库存是否足够（预下单时已经锁定）
-            // 注意：这里不检查 available_quantity，因为预下单时已经减少了
-            // 只需要确认 locked_quantity 包含了订单数量（或者至少不为0，说明已经锁定过）
             if ($inventory->locked_quantity >= $order->room_count) {
                 Log::info('预下单订单处理：库存已锁定，跳过锁定步骤', [
                     'order_id' => $order->id,
@@ -118,38 +118,15 @@ class OrderProcessorService
             return false;
         }
 
-        // 非预下单流程：正常锁定库存
-        $lockKey = "inventory_lock:{$order->room_type_id}:{$order->check_in_date}";
-        
-        // 使用Redis分布式锁
-        $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
-        
-        if (!$lock) {
-            return false; // 获取锁失败
-        }
+        // 非预下单流程：使用统一的库存服务锁定库存
+        $stayDays = $order->product->stay_days ?? 1;
+        $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
 
-        try {
-            $inventory = Inventory::where('room_type_id', $order->room_type_id)
-                ->where('date', $order->check_in_date)
-                ->first();
-
-            if (!$inventory || $inventory->is_closed) {
-                return false;
-            }
-
-            if ($inventory->available_quantity < $order->room_count) {
-                return false;
-            }
-
-            // 更新库存
-            $inventory->available_quantity -= $order->room_count;
-            $inventory->locked_quantity += $order->room_count;
-            $inventory->save();
-
-            return true;
-        } finally {
-            Redis::del($lockKey);
-        }
+        return $this->inventoryService->lockInventoryForDates(
+            $order->room_type_id,
+            $dates,
+            $order->room_count
+        );
     }
 
     /**
