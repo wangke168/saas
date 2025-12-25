@@ -2,6 +2,8 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::get('/{any}', function () {
-    return view('welcome');
-})->where('any', '.*');
+Route::prefix('manage')->group(function () {
+    Route::get('/{any}', function () {
+        return view('app');
+    })->where('any', '.*');
+});

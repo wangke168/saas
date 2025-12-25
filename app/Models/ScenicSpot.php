@@ -19,22 +19,33 @@ class ScenicSpot extends Model
         'address',
         'contact_phone',
         'software_provider_id',
+        'resource_config_id',
+        'is_system_connected',
         'is_active',
     ];
 
     protected function casts(): array
     {
         return [
+            'is_system_connected' => 'boolean',
             'is_active' => 'boolean',
         ];
     }
 
     /**
-     * 软件服务商
+     * 系统服务商（资源方系统）
      */
     public function softwareProvider(): BelongsTo
     {
         return $this->belongsTo(SoftwareProvider::class);
+    }
+
+    /**
+     * 系统配置（该景区在系统中的配置）
+     */
+    public function resourceConfig(): BelongsTo
+    {
+        return $this->belongsTo(ResourceConfig::class);
     }
 
     /**

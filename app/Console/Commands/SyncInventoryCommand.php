@@ -32,9 +32,9 @@ class SyncInventoryCommand extends Command
         
         $this->info("开始同步库存，日期：{$date}");
 
-        // 获取所有直连的酒店
+        // 获取所有直连的酒店（通过景区关联系统服务商）
         $hotels = Hotel::where('is_connected', true)
-            ->whereHas('resourceProvider', function ($query) {
+            ->whereHas('scenicSpot.softwareProvider', function ($query) {
                 $query->where('api_type', 'hengdian');
             })
             ->get();

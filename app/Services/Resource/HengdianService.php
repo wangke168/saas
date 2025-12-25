@@ -5,7 +5,7 @@ namespace App\Services\Resource;
 use App\Http\Client\HengdianClient;
 use App\Models\Order;
 use App\Models\ResourceConfig;
-use App\Models\ResourceProvider;
+use App\Models\SoftwareProvider;
 use Illuminate\Support\Facades\Log;
 
 class HengdianService
@@ -15,8 +15,10 @@ class HengdianService
     protected function getClient(): HengdianClient
     {
         if ($this->client === null) {
-            $provider = ResourceProvider::where('api_type', 'hengdian')->first();
-            $config = $provider?->config;
+            $provider = SoftwareProvider::where('api_type', 'hengdian')->first();
+            // 注意：现在配置是景区级别的，需要根据具体订单的景区来获取配置
+            // 这里暂时使用第一个配置，后续需要根据订单的景区来获取
+            $config = $provider?->resourceConfigs()->first();
             
             if (!$config) {
                 throw new \Exception('横店配置不存在');

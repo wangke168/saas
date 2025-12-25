@@ -33,7 +33,6 @@ class Order extends Model
         'total_amount',
         'settlement_amount',
         'resource_order_no',
-        'resource_provider_id',
         'remark',
         'paid_at',
         'confirmed_at',
@@ -88,11 +87,11 @@ class Order extends Model
     }
 
     /**
-     * 资源方
+     * 获取系统服务商（通过酒店->景区关联）
      */
-    public function resourceProvider(): BelongsTo
+    public function getSoftwareProviderAttribute(): ?SoftwareProvider
     {
-        return $this->belongsTo(ResourceProvider::class);
+        return $this->hotel->scenicSpot->softwareProvider ?? null;
     }
 
     /**

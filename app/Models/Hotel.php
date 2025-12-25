@@ -19,7 +19,8 @@ class Hotel extends Model
         'address',
         'contact_phone',
         'is_connected',
-        'resource_provider_id',
+        'external_id',
+        'external_code',
         'is_active',
     ];
 
@@ -40,11 +41,11 @@ class Hotel extends Model
     }
 
     /**
-     * 资源方
+     * 获取系统服务商（通过景区关联）
      */
-    public function resourceProvider(): BelongsTo
+    public function getSoftwareProviderAttribute(): ?SoftwareProvider
     {
-        return $this->belongsTo(ResourceProvider::class);
+        return $this->scenicSpot->softwareProvider ?? null;
     }
 
     /**

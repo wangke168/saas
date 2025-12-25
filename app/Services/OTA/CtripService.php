@@ -439,35 +439,34 @@ class CtripService
 
     /**
      * 构建携程请求体中的产品标识字段
-     * 优先使用 otaOptionId（携程资源编号），如果没有则使用 supplierOptionId（供应商PLU）
+     * 优先使用 supplierOptionId（供应商PLU），如果没有则使用 otaOptionId（携程资源编号）
      * 
      * @param \App\Models\Product $product 产品
      * @param string|null $ctripProductCode 携程产品编码（格式：酒店编码|房型编码|产品编码）
-     * @return array 包含 otaOptionId 或 supplierOptionId 的数组
+     * @return array 包含 supplierOptionId 或 otaOptionId 的数组
      */
     protected function buildProductIdentifier(\App\Models\Product $product, ?string $ctripProductCode = null): array
     {
-        // 获取 OTA 产品关联，看是否有携程资源编号
-        $otaProduct = $product->otaProducts()
-            ->where('ota_platform_id', \App\Models\OtaPlatform::where('code', OtaPlatform::CTRIP->value)->first()?->id)
-            ->first();
-
-        // 如果存在 ota_product_id（携程资源编号），优先使用
-        if ($otaProduct && !empty($otaProduct->ota_product_id)) {
-            return ['otaOptionId' => (int)$otaProduct->ota_product_id];
-        }
-
-        // 否则使用 supplierOptionId
+        // 优先使用 supplierOptionId（供应商PLU）
         if ($ctripProductCode) {
             return ['supplierOptionId' => trim($ctripProductCode)];
         }
 
-        // 如果都没有，使用产品编码
+        // 如果没有传入 ctripProductCode，尝试使用产品编码
         if (!empty($product->code)) {
             return ['supplierOptionId' => trim((string)$product->code)];
         }
 
-        throw new \Exception('无法构建产品标识：缺少 otaOptionId 或 supplierOptionId');
+        // 如果 supplierOptionId 不可用，再使用 otaOptionId（携程资源编号）
+        $otaProduct = $product->otaProducts()
+            ->where('ota_platform_id', \App\Models\OtaPlatform::where('code', OtaPlatform::CTRIP->value)->first()?->id)
+            ->first();
+
+        if ($otaProduct && !empty($otaProduct->ota_product_id)) {
+            return ['otaOptionId' => (int)$otaProduct->ota_product_id];
+        }
+
+        throw new \Exception('无法构建产品标识：缺少 supplierOptionId 或 otaOptionId');
     }
 
     /**

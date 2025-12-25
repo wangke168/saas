@@ -54,9 +54,12 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // 资源方管理（只读，用于下拉选择）
-    Route::prefix('resource-providers')->group(function () {
-        Route::get('/', [\App\Http\Controllers\ResourceProviderController::class, 'index']);
-        Route::get('/{resourceProvider}', [\App\Http\Controllers\ResourceProviderController::class, 'show']);
+    Route::prefix('software-providers')->group(function () {
+        Route::get('/', [\App\Http\Controllers\SoftwareProviderController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\SoftwareProviderController::class, 'store']);
+        Route::get('/{softwareProvider}', [\App\Http\Controllers\SoftwareProviderController::class, 'show']);
+        Route::put('/{softwareProvider}', [\App\Http\Controllers\SoftwareProviderController::class, 'update']);
+        Route::delete('/{softwareProvider}', [\App\Http\Controllers\SoftwareProviderController::class, 'destroy']);
     });
 
     // 酒店管理
@@ -91,8 +94,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [\App\Http\Controllers\ProductController::class, 'store']);
         // 导出路由需要在通用路由之前，避免路由冲突
         Route::get('/{product}/export', [\App\Http\Controllers\ProductController::class, 'export']);
-        // OTA推送
-        Route::post('/{product}/push-to-ota', [\App\Http\Controllers\OtaProductController::class, 'pushToOta']);
+        // OTA绑定
+        Route::post('/{product}/bind-ota', [\App\Http\Controllers\OtaProductController::class, 'bindOta']);
         // 携程同步
         Route::post('/{product}/sync-price-to-ctrip', [\App\Http\Controllers\CtripSyncController::class, 'syncPrice']);
         Route::post('/{product}/sync-stock-to-ctrip', [\App\Http\Controllers\CtripSyncController::class, 'syncStock']);
@@ -104,8 +107,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // OTA产品管理
     Route::prefix('ota-products')->group(function () {
+        Route::post('/{otaProduct}/push', [\App\Http\Controllers\OtaProductController::class, 'push']);
+        Route::put('/{otaProduct}', [\App\Http\Controllers\OtaProductController::class, 'update']);
         Route::delete('/{otaProduct}', [\App\Http\Controllers\OtaProductController::class, 'destroy']);
-        Route::post('/{otaProduct}/update-status', [\App\Http\Controllers\OtaProductController::class, 'updateStatus']);
     });
 
     // 价格管理

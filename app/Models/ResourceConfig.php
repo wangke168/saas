@@ -11,7 +11,8 @@ class ResourceConfig extends Model
     use HasFactory;
 
     protected $fillable = [
-        'resource_provider_id',
+        'software_provider_id',
+        'scenic_spot_id',
         'username',
         'password',
         'api_url',
@@ -33,10 +34,46 @@ class ResourceConfig extends Model
     }
 
     /**
-     * 资源方
+     * 系统服务商
      */
-    public function resourceProvider(): BelongsTo
+    public function softwareProvider(): BelongsTo
     {
-        return $this->belongsTo(ResourceProvider::class);
+        return $this->belongsTo(SoftwareProvider::class);
+    }
+
+    /**
+     * 景区
+     */
+    public function scenicSpot(): BelongsTo
+    {
+        return $this->belongsTo(ScenicSpot::class);
+    }
+
+    /**
+     * 获取同步模式配置
+     */
+    public function getSyncModeAttribute(): array
+    {
+        $extraConfig = $this->extra_config ?? [];
+        return [
+            'inventory' => $extraConfig['sync_mode']['inventory'] ?? 'manual',
+            'price' => $extraConfig['sync_mode']['price'] ?? 'manual',
+        ];
+    }
+
+    /**
+     * 库存是否推送
+     */
+    public function isInventoryPush(): bool
+    {
+        return $this->sync_mode['inventory'] === 'push';
+    }
+
+    /**
+     * 价格是否抓取
+     */
+    public function isPricePull(): bool
+    {
+        return $this->sync_mode['price'] === 'pull';
     }
 }

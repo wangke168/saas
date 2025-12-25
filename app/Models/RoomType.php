@@ -18,6 +18,8 @@ class RoomType extends Model
         'code',
         'max_occupancy',
         'description',
+        'external_id',
+        'external_code',
         'is_active',
     ];
 

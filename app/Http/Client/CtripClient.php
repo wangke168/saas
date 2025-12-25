@@ -201,13 +201,23 @@ class CtripClient
 
             return ['success' => false, 'message' => '请求失败'];
         } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            
+            // 如果是 DNS 解析失败，提供更友好的错误信息
+            if (str_contains($errorMessage, 'Could not resolve host') || str_contains($errorMessage, 'getaddrinfo failed')) {
+                $host = parse_url($url, PHP_URL_HOST);
+                $errorMessage = "DNS解析失败：无法解析域名 {$host}。请检查服务器网络配置或DNS设置。";
+            }
+            
             Log::error('携程API请求异常', [
                 'url' => $url,
+                'host' => parse_url($url, PHP_URL_HOST),
                 'error' => $e->getMessage(),
+                'error_type' => get_class($e),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return ['success' => false, 'message' => $e->getMessage()];
+            return ['success' => false, 'message' => $errorMessage];
         }
     }
 

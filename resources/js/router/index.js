@@ -55,6 +55,12 @@ const routes = [
         meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
+        path: '/software-providers',
+        name: 'SoftwareProviders',
+        component: () => import('../views/SoftwareProviders/Index.vue'),
+        meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
         path: '/profile',
         name: 'Profile',
         component: () => import('../views/Profile/Index.vue'),
@@ -63,7 +69,7 @@ const routes = [
 ];
 
 const router = createRouter({
-    history: createWebHistory(),
+    history: createWebHistory('/manage/'),
     routes
 });
 
@@ -80,12 +86,12 @@ router.beforeEach(async (to, from, next) => {
     }
     
     if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-        next('/login');
+        next('/manage/login');
     } else if (to.meta.requiresAdmin) {
         const role = authStore.user?.role;
         const isAdmin = role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
         if (!isAdmin) {
-            next('/');
+            next('/manage/');
         } else {
             next();
         }

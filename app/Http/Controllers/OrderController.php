@@ -21,7 +21,7 @@ class OrderController extends Controller
     {
         $this->authorize('viewAny', Order::class);
 
-        $query = Order::with(['otaPlatform', 'product', 'hotel', 'roomType', 'resourceProvider']);
+        $query = Order::with(['otaPlatform', 'product', 'hotel', 'roomType', 'hotel.scenicSpot.softwareProvider']);
 
         // 权限过滤：非管理员只能查看自己景区下的订单
         if (!$request->user()->isAdmin()) {
@@ -73,7 +73,7 @@ class OrderController extends Controller
             'product',
             'hotel',
             'roomType',
-            'resourceProvider',
+            'hotel.scenicSpot.softwareProvider',
             'items',
             'logs.operator',
             'exceptionOrder',

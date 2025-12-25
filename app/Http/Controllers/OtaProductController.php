@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Helpers\CtripErrorCodeHelper;
 use App\Models\OtaProduct;
 use App\Models\Product;
 use App\Services\OTA\CtripService;
+use App\Services\OTA\CtripResultHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,91 +21,122 @@ class OtaProductController extends Controller
     ) {}
 
     /**
-     * 推送产品到OTA平台
+     * 绑定产品到OTA平台（不执行推送）
      */
-    public function pushToOta(Request $request, Product $product): JsonResponse
+    public function bindOta(Request $request, Product $product): JsonResponse
     {
         $request->validate([
-            'ota_platform_ids' => 'required|array',
-            'ota_platform_ids.*' => 'exists:ota_platforms,id',
+            'ota_platform_id' => 'required|exists:ota_platforms,id',
         ]);
 
         try {
-            DB::beginTransaction();
+            $otaPlatformId = $request->input('ota_platform_id');
 
-            $otaPlatformIds = $request->input('ota_platform_ids');
-            $results = [];
+            // 检查是否已经绑定过
+            $existingOtaProduct = OtaProduct::where('product_id', $product->id)
+                ->where('ota_platform_id', $otaPlatformId)
+                ->first();
 
-            foreach ($otaPlatformIds as $otaPlatformId) {
-                // 检查是否已经推送过
-                $existingOtaProduct = OtaProduct::where('product_id', $product->id)
-                    ->where('ota_platform_id', $otaPlatformId)
-                    ->first();
-
-                if ($existingOtaProduct) {
-                    // 如果已存在，更新推送时间
-                    $existingOtaProduct->update([
-                        'is_active' => true,
-                        'pushed_at' => now(),
-                    ]);
-                    $results[] = [
-                        'ota_platform_id' => $otaPlatformId,
-                        'status' => 'updated',
-                        'ota_product' => $existingOtaProduct,
-                    ];
-                    continue;
-                }
-
-                // 根据OTA平台类型调用不同的服务
-                $otaPlatform = \App\Models\OtaPlatform::find($otaPlatformId);
-                
-                if (!$otaPlatform) {
-                    $results[] = [
-                        'ota_platform_id' => $otaPlatformId,
-                        'status' => 'failed',
-                        'message' => 'OTA平台不存在',
-                    ];
-                    continue;
-                }
-
-                // 调用对应的OTA服务推送产品
-                $pushResult = $this->pushProductToPlatform($product, $otaPlatform);
-
-                if ($pushResult['success']) {
-                    // 创建OTA产品记录
-                    $otaProduct = OtaProduct::create([
-                        'product_id' => $product->id,
-                        'ota_platform_id' => $otaPlatformId,
-                        'ota_product_id' => $pushResult['ota_product_id'] ?? null,
-                        'is_active' => true,
-                        'pushed_at' => now(),
-                    ]);
-
-                    $results[] = [
-                        'ota_platform_id' => $otaPlatformId,
-                        'status' => 'success',
-                        'ota_product' => $otaProduct,
-                    ];
-                } else {
-                    $results[] = [
-                        'ota_platform_id' => $otaPlatformId,
-                        'status' => 'failed',
-                        'message' => $pushResult['message'] ?? '推送失败',
-                    ];
-                }
+            if ($existingOtaProduct) {
+                return response()->json([
+                    'success' => false,
+                    'message' => '该产品已绑定到此OTA平台',
+                ], 422);
             }
 
-            DB::commit();
+            // 创建绑定记录（不执行推送）
+            $otaProduct = OtaProduct::create([
+                'product_id' => $product->id,
+                'ota_platform_id' => $otaPlatformId,
+                'ota_product_id' => null, // 绑定时为空
+                'is_active' => true,
+                'pushed_at' => null, // 绑定时为空
+            ]);
 
             return response()->json([
                 'success' => true,
-                'message' => '推送完成',
-                'data' => $results,
+                'message' => '绑定成功',
+                'data' => [
+                    'ota_product' => $otaProduct,
+                ],
             ]);
         } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('推送产品到OTA失败', [
+            Log::error('绑定产品到OTA失败', [
                 'product_id' => $product->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '绑定失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * 推送产品到OTA平台
+     */
+    public function push(OtaProduct $otaProduct): JsonResponse
+    {
+        try {
+            // 检查是否已推送
+            if ($otaProduct->pushed_at) {
+                // 已推送，执行重新推送
+                Log::info('重新推送产品到OTA', [
+                    'ota_product_id' => $otaProduct->id,
+                    'product_id' => $otaProduct->product_id,
+                ]);
+            }
+
+            $product = $otaProduct->product;
+            $otaPlatform = $otaProduct->otaPlatform;
+
+            if (!$otaPlatform) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'OTA平台不存在',
+                ], 422);
+            }
+
+            // 调用对应的OTA服务推送产品
+            $pushResult = $this->pushProductToPlatform($product, $otaPlatform);
+
+            if ($pushResult['success']) {
+                // 更新推送信息
+                $otaProduct->update([
+                    'ota_product_id' => $pushResult['ota_product_id'] ?? $otaProduct->ota_product_id,
+                    'is_active' => true,
+                    'pushed_at' => now(),
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => '推送成功',
+                    'data' => [
+                        'ota_product_id' => $otaProduct->ota_product_id,
+                        'pushed_at' => $otaProduct->pushed_at,
+                    ],
+                ]);
+            } else {
+                // 推送失败，但保留绑定关系
+                $errorMessage = $pushResult['message'] ?? '推送失败';
+                
+                // 如果是网络错误，提供更详细的提示
+                if (str_contains($errorMessage, 'DNS解析失败') || str_contains($errorMessage, 'Could not resolve host')) {
+                    $errorMessage .= '。提示：命令行可以成功但Web请求失败，可能是PHP-FPM的网络配置问题，请检查服务器DNS配置或网络策略。';
+                }
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => $errorMessage,
+                    'errors' => $pushResult['errors'] ?? [],
+                ], 422);
+            }
+        } catch (\Exception $e) {
+            Log::error('推送产品到OTA失败', [
+                'ota_product_id' => $otaProduct->id,
+                'product_id' => $otaProduct->product_id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -157,6 +190,7 @@ class OtaProductController extends Controller
             // 获取所有"产品-酒店-房型"组合
             $combos = [];
             $seen = [];
+            $missingCodes = []; // 记录缺少编码的酒店和房型
 
             foreach ($prices as $price) {
                 $roomType = $price->roomType;
@@ -170,7 +204,16 @@ class OtaProductController extends Controller
                 }
 
                 // 检查编码
-                if (empty($hotel->code) || empty($roomType->code)) {
+                $missingCodeParts = [];
+                if (empty($hotel->code)) {
+                    $missingCodeParts[] = "酒店[{$hotel->name}]编码";
+                }
+                if (empty($roomType->code)) {
+                    $missingCodeParts[] = "房型[{$roomType->name}]编码";
+                }
+                
+                if (!empty($missingCodeParts)) {
+                    $missingCodes[] = "{$hotel->name} - {$roomType->name}：" . implode('、', $missingCodeParts);
                     continue;
                 }
 
@@ -185,9 +228,16 @@ class OtaProductController extends Controller
             }
 
             if (empty($combos)) {
+                $errorMessage = '产品未关联有效的酒店和房型（编码为空）';
+                if (!empty($missingCodes)) {
+                    $errorMessage .= '。缺少编码的酒店/房型：' . implode('；', array_slice($missingCodes, 0, 5));
+                    if (count($missingCodes) > 5) {
+                        $errorMessage .= '等' . count($missingCodes) . '个';
+                    }
+                }
                 return [
                     'success' => false,
-                    'message' => '产品未关联有效的酒店和房型（编码为空）',
+                    'message' => $errorMessage,
                 ];
             }
 
@@ -218,13 +268,21 @@ class OtaProductController extends Controller
                     'DATE_REQUIRED'
                 );
 
-                if (($priceResult['success'] ?? false) && ($stockResult['success'] ?? false)) {
+                // 根据携程返回的 resultCode 判断成功（0000 表示成功）
+                $priceSuccess = CtripResultHelper::isSuccess($priceResult);
+                $stockSuccess = CtripResultHelper::isSuccess($stockResult);
+
+                if ($priceSuccess && $stockSuccess) {
                     $successCount++;
                 } else {
                     $failCount++;
-                    $errors[] = "酒店 {$hotel->name} 房型 {$roomType->name}: " . 
-                        ($priceResult['message'] ?? '价格推送失败') . '; ' . 
-                        ($stockResult['message'] ?? '库存推送失败');
+                    $priceError = $priceSuccess 
+                        ? '价格推送成功' 
+                        : CtripResultHelper::getErrorMessage($priceResult);
+                    $stockError = $stockSuccess 
+                        ? '库存推送成功' 
+                        : CtripResultHelper::getErrorMessage($stockResult);
+                    $errors[] = "酒店 {$hotel->name} 房型 {$roomType->name}: {$priceError}; {$stockError}";
                 }
             }
 
@@ -306,13 +364,12 @@ class OtaProductController extends Controller
     }
 
     /**
-     * 删除OTA产品推送
+     * 删除OTA产品绑定（不调用OTA API取消推送）
      */
     public function destroy(OtaProduct $otaProduct): JsonResponse
     {
         try {
-            // TODO: 如果需要，可以调用OTA API删除产品
-            // 目前只删除本地记录
+            // 只删除本地绑定记录，不调用OTA API取消推送
             $otaProduct->delete();
 
             return response()->json([
@@ -333,26 +390,62 @@ class OtaProductController extends Controller
     }
 
     /**
-     * 更新OTA产品状态
+     * 更新OTA产品（编辑）
      */
-    public function updateStatus(Request $request, OtaProduct $otaProduct): JsonResponse
+    public function update(Request $request, OtaProduct $otaProduct): JsonResponse
     {
         $request->validate([
-            'is_active' => 'required|boolean',
+            'ota_platform_id' => 'sometimes|exists:ota_platforms,id',
+            'is_active' => 'sometimes|boolean',
         ]);
 
         try {
-            $otaProduct->update([
-                'is_active' => $request->boolean('is_active'),
-            ]);
+            // 如果已推送，不允许修改平台
+            if ($otaProduct->pushed_at && $request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => '已推送的记录不允许修改OTA平台',
+                    ], 422);
+                }
+            }
+
+            // 检查新平台是否已绑定
+            if ($request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    $existing = OtaProduct::where('product_id', $otaProduct->product_id)
+                        ->where('ota_platform_id', $newPlatformId)
+                        ->where('id', '!=', $otaProduct->id)
+                        ->first();
+                    
+                    if ($existing) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => '该产品已绑定到此OTA平台',
+                        ], 422);
+                    }
+                }
+            }
+
+            $updateData = [];
+            if ($request->has('ota_platform_id')) {
+                $updateData['ota_platform_id'] = $request->input('ota_platform_id');
+            }
+            if ($request->has('is_active')) {
+                $updateData['is_active'] = $request->boolean('is_active');
+            }
+
+            $otaProduct->update($updateData);
 
             return response()->json([
                 'success' => true,
                 'message' => '更新成功',
-                'data' => $otaProduct,
+                'data' => $otaProduct->fresh(),
             ]);
         } catch (\Exception $e) {
-            Log::error('更新OTA产品状态失败', [
+            Log::error('更新OTA产品失败', [
                 'ota_product_id' => $otaProduct->id,
                 'error' => $e->getMessage(),
             ]);

@@ -41,9 +41,9 @@
                 </el-table-column>
                 <el-table-column prop="address" label="地址" show-overflow-tooltip />
                 <el-table-column prop="contact_phone" label="联系电话" width="150" />
-                <el-table-column label="资源方" width="150">
+                <el-table-column label="系统服务商" width="150">
                     <template #default="{ row }">
-                        {{ row.resource_provider?.name || '-' }}
+                        {{ row.scenic_spot?.software_provider?.name || '-' }}
                     </template>
                 </el-table-column>
                 <el-table-column prop="is_connected" label="是否直连" width="100">
@@ -120,21 +120,6 @@
                 </el-form-item>
                 <el-form-item label="联系电话" prop="contact_phone">
                     <el-input v-model="form.contact_phone" placeholder="请输入联系电话" />
-                </el-form-item>
-                <el-form-item label="资源方" prop="resource_provider_id">
-                    <el-select
-                        v-model="form.resource_provider_id"
-                        placeholder="请选择资源方"
-                        clearable
-                        style="width: 100%"
-                    >
-                        <el-option
-                            v-for="provider in resourceProviders"
-                            :key="provider.id"
-                            :label="provider.name"
-                            :value="provider.id"
-                        />
-                    </el-select>
                 </el-form-item>
                 <el-form-item label="是否直连" prop="is_connected">
                     <el-switch v-model="form.is_connected" />
@@ -390,7 +375,6 @@ const authStore = useAuthStore();
 
 const hotels = ref([]);
 const scenicSpots = ref([]);
-const resourceProviders = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
 const dialogVisible = ref(false);
@@ -437,7 +421,6 @@ const form = ref({
     code: '',
     address: '',
     contact_phone: '',
-    resource_provider_id: null,
     is_connected: false,
     is_active: true,
 });
@@ -562,14 +545,6 @@ const fetchScenicSpots = async () => {
     }
 };
 
-const fetchResourceProviders = async () => {
-    try {
-        const response = await axios.get('/resource-providers', { params: { all: true } });
-        resourceProviders.value = response.data.data || [];
-    } catch (error) {
-        console.error('获取资源方列表失败', error);
-    }
-};
 
 const handleSearch = () => {
     currentPage.value = 1;
@@ -595,7 +570,6 @@ const handleEdit = (row) => {
         code: row.code,
         address: row.address || '',
         contact_phone: row.contact_phone || '',
-        resource_provider_id: row.resource_provider_id,
         is_connected: row.is_connected || false,
         is_active: row.is_active,
     };
@@ -658,7 +632,6 @@ const resetForm = () => {
         code: '',
         address: '',
         contact_phone: '',
-        resource_provider_id: null,
         is_connected: false,
         is_active: true,
     };
@@ -945,7 +918,6 @@ const formatDate = (date) => {
 onMounted(() => {
     fetchHotels();
     fetchScenicSpots();
-    fetchResourceProviders();
 });
 </script>
 

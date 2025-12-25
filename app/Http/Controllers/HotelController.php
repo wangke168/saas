@@ -13,7 +13,7 @@ class HotelController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Hotel::with(['scenicSpot', 'resourceProvider']);
+        $query = Hotel::with(['scenicSpot', 'scenicSpot.softwareProvider']);
 
         // 权限控制：运营只能查看自己绑定的景区下的酒店
         if ($request->user()->isOperator()) {
@@ -57,8 +57,9 @@ class HotelController extends Controller
             'code' => 'required|string|max:255',
             'address' => 'nullable|string|max:255',
             'contact_phone' => 'nullable|string|max:20',
+            'external_id' => 'nullable|string|max:255',
+            'external_code' => 'nullable|string|max:255',
             'is_connected' => 'boolean',
-            'resource_provider_id' => 'nullable|exists:resource_providers,id',
             'is_active' => 'boolean',
         ]);
 
@@ -73,7 +74,7 @@ class HotelController extends Controller
         }
 
         $hotel = Hotel::create($validated);
-        $hotel->load(['scenicSpot', 'resourceProvider']);
+        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider']);
 
         return response()->json([
             'message' => '酒店创建成功',
@@ -86,7 +87,7 @@ class HotelController extends Controller
      */
     public function show(Hotel $hotel): JsonResponse
     {
-        $hotel->load(['scenicSpot', 'resourceProvider', 'roomTypes']);
+        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider', 'roomTypes']);
         
         // 权限控制：运营只能查看自己绑定的景区下的酒店
         if (request()->user()->isOperator()) {
@@ -140,7 +141,7 @@ class HotelController extends Controller
         }
 
         $hotel->update($validated);
-        $hotel->load(['scenicSpot', 'resourceProvider']);
+        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider']);
 
         return response()->json([
             'message' => '酒店更新成功',

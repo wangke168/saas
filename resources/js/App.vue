@@ -40,6 +40,10 @@
                         <el-icon><User /></el-icon>
                         <span>用户管理</span>
                     </el-menu-item>
+                    <el-menu-item v-if="isAdmin" index="/software-providers">
+                        <el-icon><Connection /></el-icon>
+                        <span>软件服务商</span>
+                    </el-menu-item>
                     <el-menu-item index="/profile">
                         <el-icon><Setting /></el-icon>
                         <span>账号设置</span>
@@ -60,7 +64,7 @@
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
-import { Document, Warning, Box, House, Location, User, Setting } from '@element-plus/icons-vue';
+import { Document, Warning, Box, House, Location, User, Setting, Connection } from '@element-plus/icons-vue';
 
 const router = useRouter();
 const authStore = useAuthStore();

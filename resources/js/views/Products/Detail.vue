@@ -471,7 +471,7 @@
                     <!-- OTA推送管理标签页 -->
                     <el-tab-pane label="OTA推送" name="otaProducts">
                         <div style="margin-bottom: 20px;">
-                            <el-button type="primary" @click="handlePushToOta">推送到OTA平台</el-button>
+                            <el-button type="primary" @click="handleBindOta">绑定OTA平台</el-button>
                         </div>
                         <el-table :data="otaProducts" border v-loading="otaProductsLoading">
                             <el-table-column label="OTA平台" width="150">
@@ -479,11 +479,23 @@
                                     {{ row.ota_platform?.name || '-' }}
                                 </template>
                             </el-table-column>
-                            <el-table-column prop="ota_product_id" label="OTA产品ID" width="200" />
-                            <el-table-column prop="is_active" label="推送状态" width="120">
+                            <el-table-column label="OTA产品ID" width="200">
+                                <template #default="{ row }">
+                                    <span v-if="row.ota_product_id">{{ row.ota_product_id }}</span>
+                                    <span v-else style="color: #909399;">-</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="is_active" label="状态" width="100">
                                 <template #default="{ row }">
                                     <el-tag :type="row.is_active ? 'success' : 'danger'">
-                                        {{ row.is_active ? '已推送' : '未推送' }}
+                                        {{ row.is_active ? '启用' : '禁用' }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="推送状态" width="120">
+                                <template #default="{ row }">
+                                    <el-tag :type="row.pushed_at ? 'success' : 'info'">
+                                        {{ row.pushed_at ? '已推送' : '未推送' }}
                                     </el-tag>
                                 </template>
                             </el-table-column>
@@ -492,26 +504,33 @@
                                     {{ row.pushed_at ? formatDate(row.pushed_at) : '-' }}
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作" width="150">
+                            <el-table-column label="操作" width="250" fixed="right">
                                 <template #default="{ row }">
                                     <el-button size="small" @click="handleEditOtaProduct(row)">编辑</el-button>
                                     <el-button size="small" type="danger" @click="handleDeleteOtaProduct(row)">删除</el-button>
+                                    <el-button 
+                                        size="small" 
+                                        type="primary" 
+                                        @click="handlePushOtaProduct(row)"
+                                        :disabled="!row.is_active"
+                                    >
+                                        {{ row.pushed_at ? '重新推送' : '推送' }}
+                                    </el-button>
                                 </template>
                             </el-table-column>
                         </el-table>
                         
-                        <!-- OTA推送对话框 -->
+                        <!-- OTA绑定对话框 -->
                         <el-dialog
-                            v-model="otaPushDialogVisible"
-                            :title="'推送到OTA平台'"
+                            v-model="otaBindDialogVisible"
+                            :title="'绑定OTA平台'"
                             width="500px"
                         >
-                            <el-form :model="otaPushForm" label-width="120px">
+                            <el-form :model="otaBindForm" label-width="120px">
                                 <el-form-item label="选择OTA平台" required>
                                     <el-select
-                                        v-model="otaPushForm.ota_platform_ids"
-                                        multiple
-                                        placeholder="请选择要推送的OTA平台"
+                                        v-model="otaBindForm.ota_platform_id"
+                                        placeholder="请选择要绑定的OTA平台"
                                         style="width: 100%"
                                     >
                                         <el-option
@@ -524,8 +543,8 @@
                                 </el-form-item>
                             </el-form>
                             <template #footer>
-                                <el-button @click="otaPushDialogVisible = false">取消</el-button>
-                                <el-button type="primary" @click="handleSubmitPushToOta" :loading="otaPushSubmitting">确定</el-button>
+                                <el-button @click="otaBindDialogVisible = false">取消</el-button>
+                                <el-button type="primary" @click="handleSubmitBindOta" :loading="otaBindSubmitting">确定</el-button>
                             </template>
                         </el-dialog>
                     </el-tab-pane>
@@ -592,10 +611,10 @@ const allRoomTypes = ref([]);
 const otaPlatforms = ref([]);
 
 // OTA推送相关
-const otaPushDialogVisible = ref(false);
-const otaPushSubmitting = ref(false);
-const otaPushForm = ref({
-    ota_platform_ids: [],
+const otaBindDialogVisible = ref(false);
+const otaBindSubmitting = ref(false);
+const otaBindForm = ref({
+    ota_platform_id: null,
 });
 
 // 表单验证规则
@@ -1269,59 +1288,117 @@ const fetchOtaPlatforms = async () => {
     }
 };
 
-const handlePushToOta = () => {
-    otaPushForm.value = {
-        ota_platform_ids: [],
+const handleBindOta = () => {
+    otaBindForm.value = {
+        ota_platform_id: null,
     };
-    otaPushDialogVisible.value = true;
+    otaBindDialogVisible.value = true;
 };
 
-const handleSubmitPushToOta = async () => {
-    if (!otaPushForm.value.ota_platform_ids || otaPushForm.value.ota_platform_ids.length === 0) {
-        ElMessage.warning('请至少选择一个OTA平台');
+const handleSubmitBindOta = async () => {
+    if (!otaBindForm.value.ota_platform_id) {
+        ElMessage.warning('请选择OTA平台');
         return;
     }
 
-    otaPushSubmitting.value = true;
+    otaBindSubmitting.value = true;
     try {
-        const response = await axios.post(`/products/${route.params.id}/push-to-ota`, {
-            ota_platform_ids: otaPushForm.value.ota_platform_ids,
+        const response = await axios.post(`/products/${route.params.id}/bind-ota`, {
+            ota_platform_id: otaBindForm.value.ota_platform_id,
         });
 
         if (response.data.success) {
+            ElMessage.success('绑定成功');
+            otaBindDialogVisible.value = false;
+            fetchProduct();
+        } else {
+            ElMessage.error(response.data.message || '绑定失败');
+        }
+    } catch (error) {
+        const message = error.response?.data?.message || '绑定失败';
+        ElMessage.error(message);
+    } finally {
+        otaBindSubmitting.value = false;
+    }
+};
+
+const handlePushOtaProduct = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            `确定要推送产品到 ${row.ota_platform?.name} 吗？`,
+            '确认推送',
+            {
+                type: 'warning',
+                confirmButtonText: '确定推送',
+                cancelButtonText: '取消'
+            }
+        );
+        
+        const response = await axios.post(`/ota-products/${row.id}/push`);
+        
+        if (response.data.success) {
             ElMessage.success('推送成功');
-            otaPushDialogVisible.value = false;
             fetchProduct();
         } else {
             ElMessage.error(response.data.message || '推送失败');
         }
     } catch (error) {
-        const message = error.response?.data?.message || '推送失败';
-        ElMessage.error(message);
-    } finally {
-        otaPushSubmitting.value = false;
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '推送失败';
+            ElMessage.error(message);
+        }
     }
 };
 
 const handleEditOtaProduct = async (row) => {
     try {
-        await ElMessageBox.prompt('请选择状态', '编辑OTA产品', {
-            confirmButtonText: '确定',
-            cancelButtonText: '取消',
-            inputType: 'select',
-            inputOptions: {
-                true: '启用',
-                false: '禁用',
-            },
-            inputValue: row.is_active ? 'true' : 'false',
-        }).then(async ({ value }) => {
-            const isActive = value === 'true';
-            await axios.post(`/ota-products/${row.id}/update-status`, {
-                is_active: isActive,
+        // 如果已推送，只能修改状态；如果未推送，可以修改平台和状态
+        const canChangePlatform = !row.pushed_at;
+        
+        if (canChangePlatform) {
+            // 未推送：可以修改平台和状态
+            await ElMessageBox.prompt(
+                '请选择OTA平台',
+                '编辑OTA产品',
+                {
+                    confirmButtonText: '确定',
+                    cancelButtonText: '取消',
+                    inputType: 'select',
+                    inputOptions: otaPlatforms.value.reduce((acc, platform) => {
+                        acc[platform.id] = platform.name;
+                        return acc;
+                    }, {}),
+                    inputValue: row.ota_platform_id?.toString(),
+                }
+            ).then(async ({ value }) => {
+                const platformId = parseInt(value);
+                await axios.put(`/ota-products/${row.id}`, {
+                    ota_platform_id: platformId,
+                    is_active: row.is_active,
+                });
+                ElMessage.success('更新成功');
+                fetchProduct();
             });
-            ElMessage.success('更新成功');
-            fetchProduct();
-        });
+        } else {
+            // 已推送：只能修改状态
+            await ElMessageBox.prompt('请选择状态', '编辑OTA产品', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'select',
+                inputOptions: {
+                    true: '启用',
+                    false: '禁用',
+                },
+                inputValue: row.is_active ? 'true' : 'false',
+            }).then(async ({ value }) => {
+                const isActive = value === 'true';
+                await axios.put(`/ota-products/${row.id}`, {
+                    is_active: isActive,
+                });
+                ElMessage.success('更新成功');
+                fetchProduct();
+            });
+        }
     } catch (error) {
         if (error !== 'cancel') {
             const message = error.response?.data?.message || '更新失败';

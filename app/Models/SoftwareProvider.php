@@ -14,6 +14,7 @@ class SoftwareProvider extends Model
         'name',
         'code',
         'description',
+        'api_type',
         'is_active',
     ];
 
@@ -29,6 +30,14 @@ class SoftwareProvider extends Model
      */
     public function scenicSpots(): HasMany
     {
-        return $this->hasMany(ScenicSpot::class);
+        return $this->hasMany(ScenicSpot::class, 'software_provider_id');
+    }
+
+    /**
+     * 系统配置列表（景区专用配置）
+     */
+    public function resourceConfigs(): HasMany
+    {
+        return $this->hasMany(ResourceConfig::class, 'software_provider_id');
     }
 }
