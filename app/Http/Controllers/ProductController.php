@@ -216,68 +216,107 @@ class ProductController extends Controller
         // 获取携程平台
         $ctripPlatform = \App\Models\OtaPlatform::where('code', OtaPlatform::CTRIP->value)->first();
         if (!$ctripPlatform) {
-            abort(404, '携程平台不存在');
+            return response()->json([
+                'message' => '携程平台不存在',
+            ], 404);
         }
 
-        // 检查产品是否已推送到携程
+        // 检查产品是否已绑定到携程（不要求已推送，只要绑定即可）
         $otaProduct = $product->otaProducts()
             ->where('ota_platform_id', $ctripPlatform->id)
-            ->where('is_active', true)
             ->first();
 
         if (!$otaProduct) {
-            abort(404, '该产品未推送到携程，无法导出');
+            return response()->json([
+                'message' => '该产品未绑定到携程平台，请先在产品详情页绑定OTA平台',
+            ], 400);
+        }
+
+        // 检查产品编码
+        if (empty($product->code)) {
+            return response()->json([
+                'message' => '产品编码为空，请先设置产品编码',
+            ], 400);
         }
 
         // 加载产品的关联数据
         $product->load(['prices.roomType.hotel']);
 
-        // 只导出该产品
-        $products = collect([$product]);
+        // 获取产品的所有"产品-酒店-房型"组合
+        $prices = $product->prices()->with(['roomType.hotel'])->get();
+        
+        if ($prices->isEmpty()) {
+            return response()->json([
+                'message' => '产品未关联价格数据，请先添加价格',
+            ], 400);
+        }
 
         // 构建导出数据
         $exportData = [];
-        foreach ($products as $product) {
-            // 获取产品的所有"产品-酒店-房型"组合
-            $prices = $product->prices()->with(['roomType.hotel'])->get();
-            $seen = [];
+        $seen = [];
+        $missingCodes = []; // 记录缺少编码的酒店和房型
 
-            foreach ($prices as $price) {
-                $roomType = $price->roomType;
-                if (!$roomType) {
-                    continue;
-                }
-
-                $hotel = $roomType->hotel;
-                if (!$hotel) {
-                    continue;
-                }
-
-                // 检查编码
-                if (empty($product->code) || empty($hotel->code) || empty($roomType->code)) {
-                    continue;
-                }
-
-                $key = "{$hotel->id}_{$roomType->id}";
-                if (!isset($seen[$key])) {
-                    // 生成携程PLU编号
-                    $ctripPlu = $ctripService->generateCtripProductCode(
-                        $product->code,
-                        $hotel->code,
-                        $roomType->code
-                    );
-
-                    $exportData[] = [
-                        'product_id' => $product->id,
-                        'product_name' => $product->name,
-                        'hotel_name' => $hotel->name,
-                        'room_type_name' => $roomType->name,
-                        'ctrip_plu' => $ctripPlu,
-                    ];
-
-                    $seen[$key] = true;
-                }
+        foreach ($prices as $price) {
+            $roomType = $price->roomType;
+            if (!$roomType) {
+                continue;
             }
+
+            $hotel = $roomType->hotel;
+            if (!$hotel) {
+                continue;
+            }
+
+            // 检查编码
+            $missingFields = [];
+            if (empty($product->code)) {
+                $missingFields[] = '产品编码';
+            }
+            if (empty($hotel->code)) {
+                $missingFields[] = "酒店编码（{$hotel->name}）";
+            }
+            if (empty($roomType->code)) {
+                $missingFields[] = "房型编码（{$roomType->name}）";
+            }
+
+            if (!empty($missingFields)) {
+                $missingCodes[] = "酒店：{$hotel->name}，房型：{$roomType->name}（缺少：" . implode('、', $missingFields) . "）";
+                continue;
+            }
+
+            $key = "{$hotel->id}_{$roomType->id}";
+            if (!isset($seen[$key])) {
+                // 生成携程PLU编号
+                $ctripPlu = $ctripService->generateCtripProductCode(
+                    $product->code,
+                    $hotel->code,
+                    $roomType->code
+                );
+
+                $exportData[] = [
+                    'product_id' => $product->id,
+                    'product_name' => $product->name,
+                    'hotel_name' => $hotel->name,
+                    'room_type_name' => $roomType->name,
+                    'ctrip_plu' => $ctripPlu,
+                ];
+
+                $seen[$key] = true;
+            }
+        }
+
+        // 如果没有可导出的数据
+        if (empty($exportData)) {
+            $errorMessage = '没有可导出的数据。';
+            if (!empty($missingCodes)) {
+                $errorMessage .= '原因：' . implode('；', array_unique($missingCodes));
+            } else {
+                $errorMessage .= '请确保产品已关联酒店和房型，并且产品、酒店、房型都有编码。';
+            }
+            
+            return response()->json([
+                'message' => $errorMessage,
+            ], 400);
         }
 
         // 生成CSV内容（可以重命名为.xlsx，Excel也能打开）

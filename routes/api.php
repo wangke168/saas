@@ -143,6 +143,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
         Route::get('/{order}', [\App\Http\Controllers\OrderController::class, 'show']);
         Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
+        // 订单操作
+        Route::post('/{order}/confirm', [\App\Http\Controllers\OrderController::class, 'confirmOrder']);
+        Route::post('/{order}/reject', [\App\Http\Controllers\OrderController::class, 'rejectOrder']);
+        Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);
+        Route::post('/{order}/approve-cancel', [\App\Http\Controllers\OrderController::class, 'approveCancel']);
+        Route::post('/{order}/reject-cancel', [\App\Http\Controllers\OrderController::class, 'rejectCancel']);
     });
 
     // 异常订单处理

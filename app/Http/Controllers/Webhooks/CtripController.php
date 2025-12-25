@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
+use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,7 +27,8 @@ class CtripController extends Controller
     public function __construct(
         protected OrderService $orderService,
         protected OrderProcessorService $orderProcessorService,
-        protected InventoryService $inventoryService
+        protected InventoryService $inventoryService,
+        protected OrderOperationService $orderOperationService
     ) {}
 
     /**
@@ -281,26 +283,103 @@ class CtripController extends Controller
                 return $this->errorResponse('1003', '数据参数不合法：使用日期(useStartDate/useDate)为空');
             }
 
+            // 解析 PLU 格式：酒店编码|房型编码|产品编码
+            // 如果 PLU 包含 | 分隔符，提取各部分；否则直接使用作为产品编码
+            $productCode = trim($supplierOptionId);
+            $hotelCode = null;
+            $roomTypeCode = null;
+            
+            if (strpos($supplierOptionId, '|') !== false) {
+                // PLU 格式：酒店编码|房型编码|产品编码
+                $parts = explode('|', $supplierOptionId);
+                if (count($parts) === 3) {
+                    $hotelCode = trim($parts[0]);
+                    $roomTypeCode = trim($parts[1]);
+                    $productCode = trim($parts[2]);
+                } else {
+                    // 如果格式不正确，尝试使用最后一部分作为产品编码
+                    $productCode = trim(end($parts));
+                    Log::warning('携程预下单：PLU格式异常', [
+                        'plu' => $supplierOptionId,
+                        'parts_count' => count($parts),
+                    ]);
+                }
+            }
+
             // 根据产品编码查找产品
-            $product = \App\Models\Product::where('code', trim($supplierOptionId))->first();
+            $product = \App\Models\Product::where('code', $productCode)->first();
             if (!$product) {
                 DB::rollBack();
+                Log::error('携程预下单：产品不存在', [
+                    'plu' => $supplierOptionId,
+                    'product_code' => $productCode,
+                ]);
                 return $this->errorResponse('1002', '供应商PLU不存在/错误');
             }
 
             // 查找产品关联的酒店和房型
-            $price = $product->prices()->where('date', $useStartDate)->first();
+            // 如果 PLU 中提供了酒店编码和房型编码，优先使用它们来查找
+            $price = null;
+            $roomType = null;
+            $hotel = null;
+
+            if ($hotelCode && $roomTypeCode) {
+                // 使用 PLU 中的酒店编码和房型编码查找
+                $hotel = \App\Models\Hotel::where('code', $hotelCode)->first();
+                if ($hotel) {
+                    $roomType = \App\Models\RoomType::where('hotel_id', $hotel->id)
+                        ->where('code', $roomTypeCode)
+                        ->first();
+                    if ($roomType) {
+                        $price = $product->prices()
+                            ->where('room_type_id', $roomType->id)
+                            ->where('date', $useStartDate)
+                            ->first();
+                    }
+                }
+            }
+
+            // 如果通过 PLU 编码找不到，则使用原来的方式（通过价格表查找）
+            if (!$price || !$roomType || !$hotel) {
+                $price = $product->prices()->where('date', $useStartDate)->first();
+                if ($price) {
+                    $roomType = $price->roomType;
+                    $hotel = $roomType->hotel ?? null;
+                }
+            }
+
             if (!$price) {
                 DB::rollBack();
+                Log::error('携程预下单：指定日期没有价格', [
+                    'product_id' => $product->id,
+                    'use_start_date' => $useStartDate,
+                    'hotel_code' => $hotelCode,
+                    'room_type_code' => $roomTypeCode,
+                ]);
                 return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格');
             }
 
-            $roomType = $price->roomType;
-            $hotel = $roomType->hotel ?? null;
-
             if (!$hotel || !$roomType) {
                 DB::rollBack();
+                Log::error('携程预下单：产品未关联酒店或房型', [
+                    'product_id' => $product->id,
+                    'hotel_code' => $hotelCode,
+                    'room_type_code' => $roomTypeCode,
+                ]);
                 return $this->errorResponse('1003', '数据参数不合法：产品未关联酒店或房型');
+            }
+
+            // 如果 PLU 中提供了酒店编码和房型编码，验证是否匹配
+            if ($hotelCode && $roomTypeCode) {
+                if ($hotel->code !== $hotelCode || $roomType->code !== $roomTypeCode) {
+                    Log::warning('携程预下单：PLU中的酒店/房型编码与数据库不匹配', [
+                        'plu_hotel_code' => $hotelCode,
+                        'plu_room_type_code' => $roomTypeCode,
+                        'db_hotel_code' => $hotel->code,
+                        'db_room_type_code' => $roomType->code,
+                    ]);
+                    // 不直接返回错误，记录警告日志，继续处理
+                }
             }
 
             // 检查库存（考虑入住天数）
@@ -452,20 +531,13 @@ class CtripController extends Controller
                 ]);
             }
 
-            // 模拟同步确认（为了通过沙箱测试）
-            // 在生产环境中，这里可能需要根据实际资源方响应速度决定是同步还是异步
-
-            // 1. 更新状态为已确认
-            $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程预下单支付成功（同步确认）');
-
-            // 2. 保存携程传递的 itemId（订单项编号）
-            // 从 PayPreOrder 请求的 items 中获取 itemId，用于后续 QueryOrder 接口返回
+            // 保存携程传递的 itemId（订单项编号）
             $ctripItemId = null;
             if (!empty($items) && isset($items[0]['itemId'])) {
                 $ctripItemId = $items[0]['itemId'];
             }
 
-            // 3. 补全支付时间和 itemId
+            // 补全支付时间和 itemId
             $updateData = ['paid_at' => now()];
             if ($ctripItemId && !$order->ctrip_item_id) {
                 $updateData['ctrip_item_id'] = $ctripItemId;
@@ -474,11 +546,30 @@ class CtripController extends Controller
                 $order->update($updateData);
             }
 
-            // 3. 触发后续流程（如发货、发凭证等），但这不影响给携程的同步响应
-            // \App\Jobs\ProcessOrderToResourceJob::dispatch($order);
+            // 检查是否系统直连
+            $scenicSpot = $order->hotel->scenicSpot ?? null;
+            $isSystemConnected = $scenicSpot && $scenicSpot->is_system_connected;
+
+            // 先响应携程（不等待景区方接口）
+            // 系统直连和非系统直连都返回 supplierConfirmType = 2（支付待确认）
+            $supplierConfirmType = 2;
+
+            // 异步处理景区方接口调用
+            if ($isSystemConnected) {
+                // 系统直连：异步调用景区方接口接单（设置 10 秒超时）
+                \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
+                    ->timeout(10);
+            } else {
+                // 非系统直连：只更新状态为确认中，等待人工接单
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CONFIRMING,
+                    '携程预下单支付成功，等待人工接单'
+                );
+            }
 
             return $this->successResponse([
-                'supplierConfirmType' => 1, // 1.支付已确认（同步返回）
+                'supplierConfirmType' => $supplierConfirmType, // 1=支付已确认（同步返回），2=支付待确认（需异步返回）
                 'otaOrderId' => $ctripOrderId, // 确保返回 otaOrderId
                 'supplierOrderId' => $order->order_no,
                 'voucherSender' => 1, // 1=携程发凭证, 2=供应商发。通常选1
@@ -666,28 +757,23 @@ class CtripController extends Controller
                 return $this->errorResponse('2004', '取消数量不正确');
             }
 
-            // 更新订单状态
-            if ($totalCancelQuantity === $order->room_count) {
-                // 全部取消
-                $this->orderService->updateOrderStatus(
-                    $order,
-                    OrderStatus::CANCEL_APPROVED,
-                    '携程申请取消订单，数量：' . $totalCancelQuantity
-                );
-                $order->update(['cancelled_at' => now()]);
-            } else {
-                // 部分取消
-                $this->orderService->updateOrderStatus(
-                    $order,
-                    OrderStatus::CANCEL_APPROVED,
-                    '携程申请部分取消订单，数量：' . $totalCancelQuantity
-                );
+            // 构建取消原因
+            $cancelReason = '携程申请取消订单';
+            if ($totalCancelQuantity < $order->room_count) {
+                $cancelReason = "携程申请部分取消订单，数量：{$totalCancelQuantity}";
             }
 
-            // 释放库存
-            // TODO: 实现库存释放逻辑
+            // 检查订单状态是否允许取消申请
+            if (!in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMED])) {
+                return $this->errorResponse('2005', '订单状态不允许取消申请');
+            }
 
-            // 根据文档，响应需要包含 supplierConfirmType 和 items
+            // 检查是否系统直连
+            $scenicSpot = $order->hotel->scenicSpot ?? null;
+            $isSystemConnected = $scenicSpot && $scenicSpot->is_system_connected;
+
+            // 先响应携程（不等待景区方接口）
+            // 系统直连和非系统直连都返回 supplierConfirmType = 2（取消待确认）
             $responseItems = [];
             foreach ($items as $item) {
                 $responseItems[] = [
@@ -696,8 +782,22 @@ class CtripController extends Controller
                 ];
             }
 
+            // 异步处理景区方接口调用
+            if ($isSystemConnected) {
+                // 系统直连：异步处理查询是否可以取消，然后决定是否调用取消接口
+                \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, $cancelReason)
+                    ->timeout(10);
+            } else {
+                // 非系统直连：直接更新状态为申请取消中，等待人工处理
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CANCEL_REQUESTED,
+                    $cancelReason
+                );
+            }
+
             return $this->successResponse([
-                'supplierConfirmType' => 1, // 1.取消已确认（同步返回确认结果）
+                'supplierConfirmType' => 2, // 2.取消待确认（需异步返回）
                 'items' => $responseItems,
             ]);
         } catch (\Exception $e) {
@@ -861,8 +961,19 @@ class CtripController extends Controller
                 return $this->errorResponse('1009', '日期错误：使用日期为空');
             }
 
+            // 解析 PLU 格式：酒店编码|房型编码|产品编码
+            $productCode = trim($supplierOptionId);
+            if (strpos($supplierOptionId, '|') !== false) {
+                $parts = explode('|', $supplierOptionId);
+                if (count($parts) === 3) {
+                    $productCode = trim($parts[2]); // 最后一部分是产品编码
+                } else {
+                    $productCode = trim(end($parts));
+                }
+            }
+
             // 根据产品编码查找产品
-            $product = \App\Models\Product::where('code', trim($supplierOptionId))->first();
+            $product = \App\Models\Product::where('code', $productCode)->first();
             if (!$product) {
                 return $this->errorResponse('1001', '产品PLU不存在/错误');
             }
@@ -1129,39 +1240,10 @@ class CtripController extends Controller
             $product = $order->product;
             $stayDays = $product->stay_days ?: 1;
 
-            $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
-            $roomTypeId = $order->room_type_id;
-            $quantity = $order->room_count;
-
-            // 使用 Redis 分布式锁
-            $lockKeys = [];
-            for ($i = 0; $i < $stayDays; $i++) {
-                $date = $checkInDate->copy()->addDays($i);
-                $lockKey = "inventory_lock:{$roomTypeId}:{$date->format('Y-m-d')}";
-                $lockKeys[] = $lockKey;
-            }
-
-            // 尝试获取所有日期的锁
-            $acquiredLocks = [];
-            foreach ($lockKeys as $lockKey) {
-                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
-                if (!$lock) {
-                    // 获取锁失败，释放已获取的锁
-                    foreach ($acquiredLocks as $acquiredLock) {
-                        Redis::del($acquiredLock);
-                    }
-                    return [
-                        'success' => false,
-                        'message' => '库存释放失败：并发冲突，请稍后重试',
-                    ];
-                }
-                $acquiredLocks[] = $lockKey;
-            }
-
             // 获取日期范围
             $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
 
-            // 使用统一的库存服务释放库存
+            // 使用统一的库存服务释放库存（自动支持 Redis 降级方案）
             $success = $this->inventoryService->releaseInventoryForDates(
                 $order->room_type_id,
                 $dates,
@@ -1176,7 +1258,7 @@ class CtripController extends Controller
             } else {
                 return [
                     'success' => false,
-                    'message' => '库存释放失败：并发冲突',
+                    'message' => '库存释放失败：系统异常',
                 ];
             }
         } catch (\Exception $e) {

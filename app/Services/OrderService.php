@@ -70,6 +70,7 @@ class OrderService
                 OrderStatus::CONFIRMING,
                 OrderStatus::REJECTED,
                 OrderStatus::CANCEL_APPROVED, // 允许预下单取消
+                OrderStatus::CANCEL_REQUESTED, // 允许取消申请
             ]),
             OrderStatus::CONFIRMING => in_array($to, [
                 OrderStatus::CONFIRMED,

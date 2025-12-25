@@ -85,44 +85,54 @@
                         {{ formatDate(row.created_at) }}
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="250" fixed="right">
+                <el-table-column label="系统直连" width="100">
+                    <template #default="{ row }">
+                        <el-tag 
+                            v-if="row.hotel?.scenic_spot?.is_system_connected" 
+                            type="success" 
+                            size="small"
+                        >
+                            系统直连
+                        </el-tag>
+                        <el-tag v-else type="info" size="small">人工操作</el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="300" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" @click="viewDetail(row)">详情</el-button>
+                        
+                        <!-- 接单按钮（待确认或确认中状态） -->
                         <el-button 
-                            v-if="row.status === 'paid_pending'" 
+                            v-if="['paid_pending', 'confirming'].includes(row.status)" 
+                            size="small" 
+                            type="success" 
+                            @click="handleConfirmOrder(row)"
+                            :loading="operating[row.id] === 'confirm'"
+                        >
+                            接单
+                        </el-button>
+                        
+                        <!-- 拒单按钮（待确认或确认中状态） -->
+                        <el-button 
+                            v-if="['paid_pending', 'confirming'].includes(row.status)" 
+                            size="small" 
+                            type="danger" 
+                            @click="handleRejectOrder(row)"
+                            :loading="operating[row.id] === 'reject'"
+                        >
+                            拒单
+                        </el-button>
+                        
+                        <!-- 核销按钮（已确认状态） -->
+                        <el-button 
+                            v-if="row.status === 'confirmed'" 
                             size="small" 
                             type="primary" 
-                            @click="handleUpdateStatus(row, 'confirming')"
+                            @click="handleVerifyOrder(row)"
+                            :loading="operating[row.id] === 'verify'"
                         >
-                            确认
+                            核销
                         </el-button>
-                        <el-dropdown v-else @command="(cmd) => handleUpdateStatus(row, cmd)">
-                            <el-button size="small">
-                                更新状态<el-icon class="el-icon--right"><arrow-down /></el-icon>
-                            </el-button>
-                            <template #dropdown>
-                                <el-dropdown-menu>
-                                    <el-dropdown-item 
-                                        v-if="row.status === 'confirming'"
-                                        command="confirmed"
-                                    >
-                                        标记为预订成功
-                                    </el-dropdown-item>
-                                    <el-dropdown-item 
-                                        v-if="['paid_pending', 'confirming'].includes(row.status)"
-                                        command="rejected"
-                                    >
-                                        拒单
-                                    </el-dropdown-item>
-                                    <el-dropdown-item 
-                                        v-if="row.status === 'confirmed'"
-                                        command="verified"
-                                    >
-                                        核销
-                                    </el-dropdown-item>
-                                </el-dropdown-menu>
-                            </template>
-                        </el-dropdown>
                     </template>
                 </el-table-column>
             </el-table>
@@ -152,6 +162,7 @@ const loading = ref(false);
 const currentPage = ref(1);
 const pageSize = ref(15);
 const total = ref(0);
+const operating = ref({}); // 记录正在操作中的订单 { orderId: 'confirm'|'reject'|'verify' }
 
 const filters = ref({
     status: null,
@@ -273,6 +284,123 @@ const viewDetail = (row) => {
             dangerouslyUseHTMLString: true,
         }
     );
+};
+
+const handleConfirmOrder = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要接单吗？系统将自动调用资源方接口确认订单。'
+                : '确定要接单吗？',
+            '接单确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'confirm';
+        const response = await axios.post(`/orders/${row.id}/confirm`, {
+            remark: '',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '接单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '接单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '接单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectOrder = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒单原因',
+            '拒单',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒单原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒单原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'reject';
+        const response = await axios.post(`/orders/${row.id}/reject`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleVerifyOrder = async (row) => {
+    try {
+        // 构建核销数据
+        const verifyData = {
+            use_start_date: row.check_in_date,
+            use_end_date: row.check_out_date,
+            use_quantity: row.room_count,
+            passengers: [],
+            vouchers: [],
+        };
+
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要核销订单吗？系统将自动调用资源方接口核销订单。'
+                : '确定要核销订单吗？',
+            '核销确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'verify';
+        const response = await axios.post(`/orders/${row.id}/verify`, verifyData);
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '核销成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '核销失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '核销失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
 };
 
 const handleUpdateStatus = async (row, status) => {

@@ -5,13 +5,15 @@ namespace App\Http\Controllers;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Services\OrderService;
+use App\Services\OrderOperationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
     public function __construct(
-        protected OrderService $orderService
+        protected OrderService $orderService,
+        protected OrderOperationService $orderOperationService
     ) {}
 
     /**
@@ -21,7 +23,12 @@ class OrderController extends Controller
     {
         $this->authorize('viewAny', Order::class);
 
-        $query = Order::with(['otaPlatform', 'product', 'hotel', 'roomType', 'hotel.scenicSpot.softwareProvider']);
+        $query = Order::with([
+            'otaPlatform', 
+            'product', 
+            'hotel.scenicSpot.softwareProvider', 
+            'roomType'
+        ]);
 
         // 权限过滤：非管理员只能查看自己景区下的订单
         if (!$request->user()->isAdmin()) {
@@ -108,5 +115,221 @@ class OrderController extends Controller
             'message' => '订单状态更新成功',
             'data' => $order,
         ]);
+    }
+
+    /**
+     * 接单（确认订单）
+     */
+    public function confirmOrder(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('updateStatus', $order);
+
+        // 检查订单状态是否允许接单
+        if (!in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMING])) {
+            return response()->json([
+                'success' => false,
+                'message' => '订单状态不允许接单，当前状态：' . $order->status->label(),
+            ], 400);
+        }
+
+        $validated = $request->validate([
+            'remark' => 'nullable|string|max:500',
+        ]);
+
+        $result = $this->orderOperationService->confirmOrder(
+            $order,
+            $validated['remark'] ?? null,
+            $request->user()->id
+        );
+
+        if ($result['success']) {
+            $order->refresh();
+            $order->load(['logs']);
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $order,
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'],
+        ], 400);
+    }
+
+    /**
+     * 拒单（拒绝订单）
+     */
+    public function rejectOrder(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('updateStatus', $order);
+
+        // 检查订单状态是否允许拒单
+        if (!in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMING])) {
+            return response()->json([
+                'success' => false,
+                'message' => '订单状态不允许拒单，当前状态：' . $order->status->label(),
+            ], 400);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|max:500',
+        ]);
+
+        $result = $this->orderOperationService->rejectOrder(
+            $order,
+            $validated['reason'],
+            $request->user()->id
+        );
+
+        if ($result['success']) {
+            $order->refresh();
+            $order->load(['logs']);
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $order,
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'],
+        ], 400);
+    }
+
+    /**
+     * 核销订单
+     */
+    public function verifyOrder(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('updateStatus', $order);
+
+        // 检查订单状态是否允许核销
+        if ($order->status !== OrderStatus::CONFIRMED) {
+            return response()->json([
+                'success' => false,
+                'message' => '订单状态不允许核销，当前状态：' . $order->status->label(),
+            ], 400);
+        }
+
+        $validated = $request->validate([
+            'use_start_date' => 'required|date',
+            'use_end_date' => 'required|date|after:use_start_date',
+            'use_quantity' => 'required|integer|min:1|max:' . $order->room_count,
+            'passengers' => 'nullable|array',
+            'vouchers' => 'nullable|array',
+        ]);
+
+        $result = $this->orderOperationService->verifyOrder(
+            $order,
+            $validated,
+            $request->user()->id
+        );
+
+        if ($result['success']) {
+            $order->refresh();
+            $order->load(['logs']);
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $order,
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'],
+        ], 400);
+    }
+
+    /**
+     * 同意取消订单
+     */
+    public function approveCancel(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('updateStatus', $order);
+
+        // 检查订单状态是否允许取消
+        if ($order->status !== OrderStatus::CANCEL_REQUESTED) {
+            return response()->json([
+                'success' => false,
+                'message' => '订单状态不允许同意取消，当前状态：' . $order->status->label(),
+            ], 400);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'nullable|string|max:500',
+        ]);
+
+        $result = $this->orderOperationService->cancelOrder(
+            $order,
+            $validated['reason'] ?? '人工同意取消',
+            $request->user()->id,
+            true // approve = true
+        );
+
+        if ($result['success']) {
+            $order->refresh();
+            $order->load(['logs']);
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $order,
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'],
+        ], 400);
+    }
+
+    /**
+     * 拒绝取消订单
+     */
+    public function rejectCancel(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('updateStatus', $order);
+
+        // 检查订单状态是否允许拒绝取消
+        if ($order->status !== OrderStatus::CANCEL_REQUESTED) {
+            return response()->json([
+                'success' => false,
+                'message' => '订单状态不允许拒绝取消，当前状态：' . $order->status->label(),
+            ], 400);
+        }
+
+        $validated = $request->validate([
+            'reason' => 'required|string|max:500',
+        ]);
+
+        $result = $this->orderOperationService->cancelOrder(
+            $order,
+            $validated['reason'],
+            $request->user()->id,
+            false // approve = false
+        );
+
+        if ($result['success']) {
+            $order->refresh();
+            $order->load(['logs']);
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $order,
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'],
+        ], 400);
     }
 }
