@@ -47,18 +47,18 @@
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="绑定景区" width="200">
+                <el-table-column label="绑定资源方" width="200">
                     <template #default="{ row }">
                         <el-tag
-                            v-for="spot in (row.scenic_spots || [])"
-                            :key="spot.id"
+                            v-for="rp in (row.resource_providers || [])"
+                            :key="rp.id"
                             size="small"
                             style="margin-right: 5px; margin-bottom: 5px;"
                         >
-                            {{ spot.name }}
+                            {{ rp.name }}
                         </el-tag>
-                        <span v-if="!row.scenic_spots || row.scenic_spots.length === 0" style="color: #909399;">
-                            {{ row.role === 'admin' ? '全部景区' : '未绑定' }}
+                        <span v-if="!row.resource_providers || row.resource_providers.length === 0" style="color: #909399;">
+                            {{ row.role === 'admin' ? '全部资源方' : '未绑定' }}
                         </span>
                     </template>
                 </el-table-column>
@@ -152,24 +152,24 @@
                 </el-form-item>
                 <el-form-item 
                     v-if="form.role === 'operator'"
-                    label="绑定景区" 
-                    prop="scenic_spot_ids"
+                    label="绑定资源方" 
+                    prop="resource_provider_ids"
                 >
                     <el-select
-                        v-model="form.scenic_spot_ids"
-                        placeholder="请选择绑定的景区（可多选）"
+                        v-model="form.resource_provider_ids"
+                        placeholder="请选择绑定的资源方（可多选）"
                         multiple
                         style="width: 100%"
                     >
                         <el-option
-                            v-for="spot in scenicSpots"
-                            :key="spot.id"
-                            :label="spot.name"
-                            :value="spot.id"
+                            v-for="rp in resourceProviders"
+                            :key="rp.id"
+                            :label="rp.name"
+                            :value="rp.id"
                         />
                     </el-select>
                     <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        运营用户必须绑定至少一个景区
+                        运营用户必须绑定至少一个资源方
                     </span>
                 </el-form-item>
                 <el-form-item label="状态" prop="is_active">
@@ -191,7 +191,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { Search } from '@element-plus/icons-vue';
 
 const users = ref([]);
-const scenicSpots = ref([]);
+const resourceProviders = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
 const dialogVisible = ref(false);
@@ -213,7 +213,7 @@ const form = ref({
     email: '',
     password: '',
     role: 'operator',
-    scenic_spot_ids: [],
+    resource_provider_ids: [],
     is_active: true,
 });
 
@@ -233,11 +233,11 @@ const rules = {
     role: [
         { required: true, message: '请选择角色', trigger: 'change' }
     ],
-    scenic_spot_ids: [
+    resource_provider_ids: [
         {
             validator: (rule, value, callback) => {
                 if (form.value.role === 'operator' && (!value || value.length === 0)) {
-                    callback(new Error('运营用户必须绑定至少一个景区'));
+                    callback(new Error('运营用户必须绑定至少一个资源方'));
                 } else {
                     callback();
                 }
@@ -268,8 +268,16 @@ const fetchUsers = async () => {
         }
         
         const response = await axios.get('/users', { params });
+        // Laravel 分页器返回的数据结构：{ data: [...], total: ..., per_page: ..., current_page: ... }
         users.value = response.data.data || [];
         total.value = response.data.total || 0;
+        
+        // 调试日志：检查资源方数据（开发环境）
+        // 注释掉环境变量检查，避免在浏览器中出错
+        // if (users.value.length > 0) {
+        //     console.log('用户列表数据示例:', users.value[0]);
+        //     console.log('用户资源方数据:', users.value[0]?.resource_providers);
+        // }
     } catch (error) {
         ElMessage.error('获取用户列表失败');
         console.error(error);
@@ -278,12 +286,20 @@ const fetchUsers = async () => {
     }
 };
 
-const fetchScenicSpots = async () => {
+const fetchResourceProviders = async () => {
     try {
-        const response = await axios.get('/scenic-spots');
-        scenicSpots.value = response.data.data || [];
+        // 获取所有资源方（不分页），用于下拉选择
+        const response = await axios.get('/resource-providers', {
+            params: {
+                per_page: 1000, // 获取所有资源方
+                is_active: true, // 只获取启用的资源方
+            }
+        });
+        // Laravel 分页器返回的数据结构：{ data: [...], total: ..., per_page: ..., current_page: ... }
+        resourceProviders.value = response.data.data || [];
     } catch (error) {
-        console.error('获取景区列表失败', error);
+        console.error('获取资源方列表失败', error);
+        ElMessage.error('获取资源方列表失败');
     }
 };
 
@@ -311,7 +327,7 @@ const handleEdit = (row) => {
         email: row.email,
         password: '',
         role: row.role,
-        scenic_spot_ids: row.scenic_spots?.map(s => s.id) || [],
+        resource_provider_ids: row.resource_providers?.map(rp => rp.id) || [],
         is_active: row.is_active,
     };
     dialogVisible.value = true;
@@ -333,10 +349,18 @@ const handleSubmit = async () => {
                     delete data.password;
                 }
                 
-                // 超级管理员不需要绑定景区
+                // 超级管理员不需要绑定资源方
                 if (data.role === 'admin') {
-                    data.scenic_spot_ids = [];
+                    data.resource_provider_ids = [];
+                } else {
+                    // 确保运营用户传递 resource_provider_ids（即使是空数组也要传递）
+                    if (!data.resource_provider_ids) {
+                        data.resource_provider_ids = [];
+                    }
                 }
+                
+                // 调试日志
+                console.log('提交用户数据:', data);
                 
                 if (isEdit.value) {
                     await axios.put(`/users/${editingId.value}`, data);
@@ -399,7 +423,7 @@ const resetForm = () => {
         email: '',
         password: '',
         role: 'operator',
-        scenic_spot_ids: [],
+        resource_provider_ids: [], // 改为 resource_provider_ids
         is_active: true,
     };
     formRef.value?.clearValidate();
@@ -418,7 +442,7 @@ const formatDate = (date) => {
 
 onMounted(() => {
     fetchUsers();
-    fetchScenicSpots();
+    fetchResourceProviders();
 });
 </script>
 

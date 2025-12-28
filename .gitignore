@@ -25,3 +25,4 @@ Thumbs.db
 .cursorrules
 *.md
 /database/migrations
+sail_image.tar

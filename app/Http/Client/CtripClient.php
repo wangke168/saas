@@ -230,19 +230,9 @@ class CtripClient
         // 优先使用环境变量中的价格API URL
         $url = env('CTRIP_PRICE_API_URL');
         
-        // 如果环境变量不存在，使用配置中的URL
+        // 如果环境变量不存在，使用默认URL
         if (!$url) {
-            // 如果配置了完整URL，使用配置的；否则根据环境判断
-            if ($this->config->api_url && str_contains($this->config->api_url, 'ttdopen.ctrip.com')) {
-                // 沙箱环境使用简化的接口路径
-                $url = rtrim($this->config->api_url, '/') . '/product/price.do';
-            } else {
-                // 生产环境使用完整路径
-                $url = $this->config->api_url ?: 'https://ttdopen.ctrip.com/api/product/DatePriceModify.do';
-                if (!str_ends_with($url, '.do')) {
-                    $url = rtrim($url, '/') . '/product/DatePriceModify.do';
-                }
-            }
+            $url = 'https://ttdopen.ctrip.com/api/product/DatePriceModify.do';
         }
 
         $accountId = $this->config->account;
@@ -297,19 +287,9 @@ class CtripClient
         // 优先使用环境变量中的库存API URL
         $url = env('CTRIP_STOCK_API_URL');
         
-        // 如果环境变量不存在，使用配置中的URL
+        // 如果环境变量不存在，使用默认URL
         if (!$url) {
-            // 如果配置了完整URL，使用配置的；否则根据环境判断
-            if ($this->config->api_url && str_contains($this->config->api_url, 'ttdopen.ctrip.com')) {
-                // 沙箱环境使用简化的接口路径
-                $url = rtrim($this->config->api_url, '/') . '/product/stock.do';
-            } else {
-                // 生产环境使用完整路径
-                $url = $this->config->api_url ?: 'https://ttdopen.ctrip.com/api/product/DateInventoryModify.do';
-                if (!str_ends_with($url, '.do')) {
-                    $url = rtrim($url, '/') . '/product/DateInventoryModify.do';
-                }
-            }
+            $url = 'https://ttdopen.ctrip.com/api/product/DateInventoryModify.do';
         }
 
         $accountId = $this->config->account;
@@ -357,20 +337,75 @@ class CtripClient
 
     /**
      * 确认订单（按照携程文档格式）
+     * 
+     * @param string $otaOrderId 携程订单号
+     * @param string $supplierOrderId 供应商订单号
+     * @param string $confirmResultCode 确认结果码，0000表示成功
+     * @param string $confirmResultMessage 确认描述信息
+     * @param int $voucherSender 凭证发送方：1=携程发送；2=供应商发送
+     * @param array $items 订单项数组，格式：[['itemId' => 'xxx', 'isCredentialVouchers' => 0], ...]
+     * @param array $vouchers 凭证数组（可选）
+     * @return array
      */
-    public function confirmOrder(string $orderId, string $confirmNo): array
-    {
-        $url = $this->config->api_url ?: 'https://ttdopen.ctrip.com/api/order/confirm.do';
+    public function confirmOrder(
+        string $otaOrderId,
+        string $supplierOrderId,
+        string $confirmResultCode = '0000',
+        string $confirmResultMessage = '确认成功',
+        int $voucherSender = 1,
+        array $items = [],
+        array $vouchers = []
+    ): array {
+        // 直接使用环境变量中的订单API URL（完整URL）
+        $url = env('CTRIP_ORDER_API_URL');
+        
+        // 如果环境变量不存在，使用默认URL
+        if (!$url) {
+            $url = 'https://ttdentry.ctrip.com/ttd-connect-orderentryapi/supplier/order/notice.do';
+        }
+        
+        Log::info('携程订单确认接口调用', [
+            'url' => $url,
+            'ota_order_id' => $otaOrderId,
+            'supplier_order_id' => $supplierOrderId,
+            'confirm_result_code' => $confirmResultCode,
+        ]);
 
         $accountId = $this->config->account;
-        $serviceName = 'OrderConfirm';
+        $serviceName = 'CreateOrderConfirm';
         $requestTime = date('Y-m-d H:i:s');
         $version = '1.0';
 
+        // 生成 sequenceId：格式为处理日期（yyyyMMdd）+32位去分隔符的Guid
+        $sequenceId = date('Ymd') . str_replace('-', '', \Illuminate\Support\Str::uuid()->toString());
+
+        // 构建 bodyData（按照携程文档格式）
         $bodyData = [
-            'orderId' => $orderId,
-            'confirmNo' => $confirmNo,
+            'sequenceId' => $sequenceId,
+            'otaOrderId' => $otaOrderId,
+            'supplierOrderId' => $supplierOrderId,
+            'confirmResultCode' => $confirmResultCode,
+            'confirmResultMessage' => $confirmResultMessage,
+            'voucherSender' => $voucherSender,
         ];
+
+        // 可选字段：vouchers
+        if (!empty($vouchers)) {
+            $bodyData['vouchers'] = $vouchers;
+        }
+
+        // 必填字段：items（如果没有传入，构建默认的）
+        if (empty($items)) {
+            // 默认构建一个 item（使用 supplierOrderId 作为 itemId）
+            $bodyData['items'] = [
+                [
+                    'itemId' => $supplierOrderId,
+                    'isCredentialVouchers' => 0,
+                ]
+            ];
+        } else {
+            $bodyData['items'] = $items;
+        }
 
         // 1. 将业务数据转成JSON字符串
         $jsonBody = json_encode($bodyData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -395,6 +430,12 @@ class CtripClient
             ],
             'body' => $encryptedBody,
         ];
+
+        Log::info('携程订单确认请求数据', [
+            'header' => $requestData['header'],
+            'body_length' => strlen($encryptedBody),
+            'body_data' => $bodyData, // 记录加密前的数据，便于调试
+        ]);
 
         return $this->request($url, $requestData);
     }
@@ -433,6 +474,101 @@ class CtripClient
     }
 
     /**
+     * 订单取消确认（按照携程文档格式）
+     * 当订单在取消提交后供应商需异步确认进行操作（接受、拒绝），可通过此接口回传供应商的最终确认结果给到携程
+     * 
+     * @param string $otaOrderId 携程订单号
+     * @param string $supplierOrderId 供应商订单号
+     * @param string $confirmResultCode 确认结果返回码，0000表示成功
+     * @param string $confirmResultMessage 确认结果信息：确认成功/确认失败+具体原因
+     * @param array $items 订单项数组，格式：[['itemId' => 'xxx', 'vouchers' => [['voucherId' => 'xxx']]]]
+     * @return array
+     */
+    public function confirmCancelOrder(
+        string $otaOrderId,
+        string $supplierOrderId,
+        string $confirmResultCode = '0000',
+        string $confirmResultMessage = '确认成功',
+        array $items = []
+    ): array {
+        // 直接使用环境变量中的订单API URL（完整URL）
+        $url = env('CTRIP_ORDER_API_URL');
+        
+        // 如果环境变量不存在，使用默认URL
+        if (!$url) {
+            $url = 'https://ttdentry.ctrip.com/ttd-connect-orderentryapi/supplier/order/notice.do';
+        }
+        
+        Log::info('携程订单取消确认接口调用', [
+            'url' => $url,
+            'ota_order_id' => $otaOrderId,
+            'supplier_order_id' => $supplierOrderId,
+            'confirm_result_code' => $confirmResultCode,
+        ]);
+
+        $accountId = $this->config->account;
+        $serviceName = 'CancelOrderConfirm';
+        $requestTime = date('Y-m-d H:i:s');
+        $version = '1.0';
+
+        // 生成 sequenceId：格式为处理日期（yyyyMMdd）+32位去分隔符的Guid
+        $sequenceId = date('Ymd') . str_replace('-', '', \Illuminate\Support\Str::uuid()->toString());
+
+        // 构建 bodyData（按照携程文档格式）
+        $bodyData = [
+            'sequenceId' => $sequenceId,
+            'otaOrderId' => $otaOrderId,
+            'supplierOrderId' => $supplierOrderId,
+            'confirmResultCode' => $confirmResultCode,
+            'confirmResultMessage' => $confirmResultMessage,
+        ];
+
+        // 必填字段：items（如果没有传入，构建默认的）
+        if (empty($items)) {
+            // 默认构建一个 item（使用 supplierOrderId 作为 itemId）
+            $bodyData['items'] = [
+                [
+                    'itemId' => $supplierOrderId,
+                ]
+            ];
+        } else {
+            $bodyData['items'] = $items;
+        }
+
+        // 1. 将业务数据转成JSON字符串
+        $jsonBody = json_encode($bodyData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($jsonBody === false) {
+            throw new \Exception('JSON编码失败: ' . json_last_error_msg());
+        }
+
+        // 2. 加密 (得到 a-p 编码的字符串)
+        $encryptedBody = $this->encrypt($jsonBody);
+
+        // 3. 签名 (使用加密后的字符串)
+        $sign = $this->generateSign($accountId, $serviceName, $requestTime, $encryptedBody, $version);
+
+        // 构建请求数据
+        $requestData = [
+            'header' => [
+                'accountId' => $accountId,
+                'serviceName' => $serviceName,
+                'requestTime' => $requestTime,
+                'version' => $version,
+                'sign' => $sign,
+            ],
+            'body' => $encryptedBody,
+        ];
+
+        Log::info('携程订单取消确认请求数据', [
+            'header' => $requestData['header'],
+            'body_length' => strlen($encryptedBody),
+            'body_data' => $bodyData, // 记录加密前的数据，便于调试
+        ]);
+
+        return $this->request($url, $requestData);
+    }
+
+    /**
      * 订单核销通知（按照携程文档格式）
      * 供应商消费后，主动通知携程
      * 
@@ -459,35 +595,15 @@ class CtripClient
         array $vouchers = []
     ): array {
         // 构建 API URL（订单核销通知接口）
-        // 接口URL：https://ttdopen.ctrip.com/api/order/notice.do
+        // 接口路径：/OrderConsumedNotice.do（根据携程文档）
         // 接口名称：OrderConsumedNotice
         
-        // 优先使用环境变量中的订单API URL
+        // 直接使用环境变量中的订单API URL（完整URL）
         $url = env('CTRIP_ORDER_API_URL');
         
-        // 如果环境变量不存在，使用配置中的URL
+        // 如果环境变量不存在，使用默认URL
         if (!$url) {
-            if ($this->config->api_url && str_contains($this->config->api_url, 'ttdopen.ctrip.com')) {
-                // 沙箱环境：使用 /api/order/notice.do
-                $baseUrl = rtrim($this->config->api_url, '/');
-                // 如果 baseUrl 以 /api 结尾，直接拼接；否则添加 /api
-                if (str_ends_with($baseUrl, '/api')) {
-                    $url = $baseUrl . '/order/notice.do';
-                } else {
-                    $url = $baseUrl . '/api/order/notice.do';
-                }
-            } else {
-                // 生产环境：使用 /api/order/notice.do
-                $url = $this->config->api_url ?: 'https://ttdopen.ctrip.com/api/order/notice.do';
-                if (!str_ends_with($url, '.do')) {
-                    // 如果URL不以 .do 结尾，检查是否以 /order/notice 结尾
-                    if (str_ends_with($url, '/order/notice')) {
-                        $url = $url . '.do';
-                    } else {
-                        $url = rtrim($url, '/') . '/api/order/notice.do';
-                    }
-                }
-            }
+            $url = 'https://ttdopen.ctrip.com/api/OrderConsumedNotice.do';
         }
         
         Log::info('携程核销通知请求', [

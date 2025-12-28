@@ -115,6 +115,12 @@
                 <el-form-item label="酒店编码" prop="code">
                     <el-input v-model="form.code" placeholder="请输入酒店编码" :disabled="isEdit" />
                 </el-form-item>
+                <el-form-item label="外部酒店编号" prop="external_code">
+                    <el-input v-model="form.external_code" placeholder="用于资源方系统对接的酒店编号（可选）" />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        如果配置了外部编号，系统将优先使用外部编号与资源方系统对接；如果为空，则使用酒店编码
+                    </div>
+                </el-form-item>
                 <el-form-item label="地址" prop="address">
                     <el-input v-model="form.address" placeholder="请输入酒店地址" />
                 </el-form-item>
@@ -191,6 +197,12 @@
                     </el-form-item>
                     <el-form-item label="房型编码" prop="code">
                         <el-input v-model="roomTypeForm.code" placeholder="请输入房型编码" :disabled="isEditRoomType" />
+                    </el-form-item>
+                    <el-form-item label="外部房型标识" prop="external_code">
+                        <el-input v-model="roomTypeForm.external_code" placeholder="用于资源方系统对接的房型标识（可选）" />
+                        <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                            如果配置了外部标识，系统将优先使用外部标识与资源方系统对接；如果为空，则使用房型名称。注意：必须与资源方系统中的房型名称完全一致
+                        </div>
                     </el-form-item>
                     <el-form-item label="最大入住人数" prop="max_occupancy">
                         <el-input-number v-model="roomTypeForm.max_occupancy" :min="1" :max="10" />
@@ -419,6 +431,7 @@ const form = ref({
     scenic_spot_id: null,
     name: '',
     code: '',
+    external_code: '',
     address: '',
     contact_phone: '',
     is_connected: false,
@@ -428,6 +441,7 @@ const form = ref({
 const roomTypeForm = ref({
     name: '',
     code: '',
+    external_code: '',
     max_occupancy: 2,
     description: '',
     is_active: true,
@@ -568,6 +582,7 @@ const handleEdit = (row) => {
         scenic_spot_id: row.scenic_spot_id,
         name: row.name,
         code: row.code,
+        external_code: row.external_code || '',
         address: row.address || '',
         contact_phone: row.contact_phone || '',
         is_connected: row.is_connected || false,
@@ -630,6 +645,7 @@ const resetForm = () => {
         scenic_spot_id: null,
         name: '',
         code: '',
+        external_code: '',
         address: '',
         contact_phone: '',
         is_connected: false,
@@ -669,6 +685,7 @@ const handleEditRoomType = (row) => {
     roomTypeForm.value = {
         name: row.name,
         code: row.code,
+        external_code: row.external_code || '',
         max_occupancy: row.max_occupancy || 2,
         description: row.description || '',
         is_active: row.is_active,
@@ -734,6 +751,7 @@ const resetRoomTypeForm = () => {
     roomTypeForm.value = {
         name: '',
         code: '',
+        external_code: '',
         max_occupancy: 2,
         description: '',
         is_active: true,

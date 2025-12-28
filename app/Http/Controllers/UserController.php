@@ -38,8 +38,11 @@ class UserController extends Controller
         // 排序
         $query->orderBy('created_at', 'desc');
 
-        $users = $query->with('scenicSpots')
+        $users = $query->with('resourceProviders') // 改为 resourceProviders
             ->paginate($request->get('per_page', 15));
+
+        // Laravel 会自动序列化关联关系，with('resourceProviders') 会序列化为 resource_providers
+        // 不需要额外的转换，Laravel 会自动处理
 
         return response()->json($users);
     }
@@ -49,7 +52,7 @@ class UserController extends Controller
      */
     public function show(User $user): JsonResponse
     {
-        $user->load('scenicSpots');
+        $user->load('resourceProviders');
         
         return response()->json([
             'data' => $user,
@@ -66,12 +69,12 @@ class UserController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|min:8',
             'role' => ['required', Rule::enum(UserRole::class)],
-            'scenic_spot_ids' => 'nullable|array',
-            'scenic_spot_ids.*' => 'exists:scenic_spots,id',
+            'resource_provider_ids' => 'nullable|array', // 改为 resource_provider_ids
+            'resource_provider_ids.*' => 'exists:resource_providers,id',
         ]);
 
-        // 验证运营用户必须绑定至少一个景区
-        $this->validateOperatorScenicSpots($validated['role'], $validated['scenic_spot_ids'] ?? null);
+        // 验证运营用户必须绑定至少一个资源方
+        $this->validateOperatorResourceProviders($validated['role'], $validated['resource_provider_ids'] ?? null);
 
         $user = User::create([
             'name' => $validated['name'],
@@ -81,11 +84,11 @@ class UserController extends Controller
             'is_active' => $validated['is_active'] ?? true,
         ]);
 
-        if (isset($validated['scenic_spot_ids']) && !empty($validated['scenic_spot_ids'])) {
-            $user->scenicSpots()->attach($validated['scenic_spot_ids']);
+        if (isset($validated['resource_provider_ids']) && !empty($validated['resource_provider_ids'])) {
+            $user->resourceProviders()->attach($validated['resource_provider_ids']);
         }
 
-        $user->load('scenicSpots');
+        $user->load('resourceProviders');
 
         return response()->json([
             'message' => '用户创建成功',
@@ -104,8 +107,8 @@ class UserController extends Controller
             'password' => 'sometimes|min:8',
             'role' => ['sometimes', Rule::enum(UserRole::class)],
             'is_active' => 'sometimes|boolean',
-            'scenic_spot_ids' => 'nullable|array',
-            'scenic_spot_ids.*' => 'exists:scenic_spots,id',
+            'resource_provider_ids' => 'nullable|array', // 改为 resource_provider_ids
+            'resource_provider_ids.*' => 'exists:resource_providers,id',
         ]);
 
         // 安全保护：禁止禁用超级管理员（包括自己）
@@ -125,8 +128,8 @@ class UserController extends Controller
         // 确定最终的角色（如果修改了角色，使用新角色；否则使用原角色）
         $finalRole = $validated['role'] ?? $user->role->value;
 
-        // 验证运营用户必须绑定至少一个景区
-        $this->validateOperatorScenicSpots($finalRole, $validated['scenic_spot_ids'] ?? null, $user);
+        // 验证运营用户必须绑定至少一个资源方
+        $this->validateOperatorResourceProviders($finalRole, $validated['resource_provider_ids'] ?? null, $user);
 
         if (isset($validated['password'])) {
             $validated['password'] = Hash::make($validated['password']);
@@ -134,17 +137,31 @@ class UserController extends Controller
 
         $user->update($validated);
 
-        // 同步景区绑定
-        if (isset($validated['scenic_spot_ids'])) {
+        // 同步资源方绑定
+        // 使用 array_key_exists 而不是 isset，这样即使传递空数组也会处理
+        if (array_key_exists('resource_provider_ids', $validated)) {
+            \Illuminate\Support\Facades\Log::info('用户更新：同步资源方绑定', [
+                'user_id' => $user->id,
+                'role' => $finalRole,
+                'resource_provider_ids' => $validated['resource_provider_ids'],
+            ]);
+            
             if ($finalRole === UserRole::ADMIN->value) {
-                // 超级管理员不需要绑定景区，清空绑定
-                $user->scenicSpots()->detach();
+                // 超级管理员不需要绑定资源方，清空绑定
+                $user->resourceProviders()->detach();
             } else {
-                $user->scenicSpots()->sync($validated['scenic_spot_ids']);
+                // 运营用户：同步资源方绑定（空数组会清空所有绑定）
+                $user->resourceProviders()->sync($validated['resource_provider_ids'] ?? []);
             }
+        } else {
+            // 如果没有提供 resource_provider_ids，且是运营用户，保持现有绑定不变
+            \Illuminate\Support\Facades\Log::info('用户更新：未提供 resource_provider_ids，保持现有绑定', [
+                'user_id' => $user->id,
+                'role' => $finalRole,
+            ]);
         }
 
-        $user->load('scenicSpots');
+        $user->load('resourceProviders');
 
         return response()->json([
             'message' => '用户更新成功',
@@ -183,41 +200,41 @@ class UserController extends Controller
     }
 
     /**
-     * 验证运营用户必须绑定至少一个景区
+     * 验证运营用户必须绑定至少一个资源方
      *
      * @param string $role 用户角色
-     * @param array|null $scenicSpotIds 景区ID数组（可为null，表示使用现有绑定）
+     * @param array|null $resourceProviderIds 资源方ID数组（可为null，表示使用现有绑定）
      * @param User|null $user 用户对象（更新时使用，创建时为null）
      * @return void
      * @throws \Illuminate\Http\Exceptions\HttpResponseException
      */
-    private function validateOperatorScenicSpots(string $role, ?array $scenicSpotIds, ?User $user = null): void
+    private function validateOperatorResourceProviders(string $role, ?array $resourceProviderIds, ?User $user = null): void
     {
         if ($role !== UserRole::OPERATOR->value) {
             return;
         }
 
-        // 如果提供了景区ID，直接验证
-        if ($scenicSpotIds !== null) {
-            if (empty($scenicSpotIds) || count($scenicSpotIds) === 0) {
+        // 如果提供了资源方ID，直接验证
+        if ($resourceProviderIds !== null) {
+            if (empty($resourceProviderIds) || count($resourceProviderIds) === 0) {
                 abort(response()->json([
-                    'message' => '运营用户必须绑定至少一个景区',
+                    'message' => '运营用户必须绑定至少一个资源方',
                     'errors' => [
-                        'scenic_spot_ids' => ['运营用户必须绑定至少一个景区'],
+                        'resource_provider_ids' => ['运营用户必须绑定至少一个资源方'],
                     ],
                 ], 422));
             }
             return;
         }
 
-        // 更新时，如果没有提供景区ID，检查现有绑定
+        // 更新时，如果没有提供资源方ID，检查现有绑定
         if ($user !== null) {
-            $existingSpotIds = $user->scenicSpots->pluck('id')->toArray();
-            if (empty($existingSpotIds) || count($existingSpotIds) === 0) {
+            $existingProviderIds = $user->resourceProviders->pluck('id')->toArray();
+            if (empty($existingProviderIds) || count($existingProviderIds) === 0) {
                 abort(response()->json([
-                    'message' => '运营用户必须绑定至少一个景区',
+                    'message' => '运营用户必须绑定至少一个资源方',
                     'errors' => [
-                        'scenic_spot_ids' => ['运营用户必须绑定至少一个景区'],
+                        'resource_provider_ids' => ['运营用户必须绑定至少一个资源方'],
                     ],
                 ], 422));
             }

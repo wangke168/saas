@@ -43,7 +43,7 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
     public function handle(
         InventoryService $inventoryService
     ): void {
-        $resourceService = ResourceServiceFactory::getService($this->order);
+        $resourceService = ResourceServiceFactory::getService($this->order, 'order');
 
         if (!$resourceService) {
             Log::warning('ProcessResourceCancelOrderJob: 无法获取资源方服务', [
@@ -115,8 +115,11 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
                     'order_id' => $this->order->id,
                 ]);
 
-                // 通知携程取消成功
-                \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order);
+                // 刷新订单对象，确保状态是最新的
+                $this->order->refresh();
+
+                // 根据OTA平台类型通知取消成功
+                $this->notifyOtaOrderCancelled($this->order);
             } else {
                 // 取消失败（虽然查询说可以取消，但实际取消时失败）
                 // 创建异常订单
@@ -178,6 +181,25 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
             ],
             'status' => ExceptionOrderStatus::PENDING,
         ]);
+    }
+
+    /**
+     * 通知OTA平台订单取消
+     */
+    protected function notifyOtaOrderCancelled(Order $order): void
+    {
+        $platform = $order->otaPlatform;
+        if (!$platform) {
+            return;
+        }
+
+        if ($platform->code->value === \App\Enums\OtaPlatform::CTRIP->value) {
+            // 携程：使用NotifyOtaOrderStatusJob
+            \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
+        } elseif ($platform->code->value === \App\Enums\OtaPlatform::MEITUAN->value) {
+            // 美团：使用NotifyMeituanOrderRefundJob
+            \App\Jobs\NotifyMeituanOrderRefundJob::dispatch($order, '资源方取消成功');
+        }
     }
 }
 

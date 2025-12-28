@@ -32,9 +32,13 @@ class InventoryController extends Controller
             $query->where('source', $request->source);
         }
 
-        // 权限控制：运营只能查看自己绑定的景区下的酒店的房型的库存
+        // 权限控制：运营只能查看所属资源方下的所有景区下的酒店的房型的库存
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             $query->whereHas('roomType.hotel', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
             });
@@ -58,10 +62,14 @@ class InventoryController extends Controller
             'inventories.*.available_quantity' => 'required|integer|min:0',
         ]);
 
-        // 权限控制：运营只能在自己绑定的景区下的酒店的房型中创建库存
+        // 权限控制：运营只能在自己所属资源方下的景区下的酒店的房型中创建库存
         if ($request->user()->isOperator()) {
             $roomType = \App\Models\RoomType::with('hotel')->findOrFail($validated['room_type_id']);
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($roomType->hotel->scenic_spot_id)) {
                 return response()->json([
                     'message' => '无权在该房型下创建库存',

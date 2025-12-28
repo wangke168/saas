@@ -14,7 +14,7 @@ class ExceptionOrderController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = ExceptionOrder::with(['order.product', 'order.hotel', 'handler']);
+        $query = ExceptionOrder::with(['order.product', 'order.hotel', 'order.otaPlatform', 'handler']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -44,6 +44,7 @@ class ExceptionOrderController extends Controller
             'order.product',
             'order.hotel',
             'order.roomType',
+            'order.otaPlatform',
             'order.items',
             'handler',
         ]);

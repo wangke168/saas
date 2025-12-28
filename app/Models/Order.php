@@ -30,6 +30,8 @@ class Order extends Model
         'contact_email',
         'card_no',
         'guest_info',
+        'real_name_type',
+        'credential_list',
         'total_amount',
         'settlement_amount',
         'resource_order_no',
@@ -37,6 +39,7 @@ class Order extends Model
         'paid_at',
         'confirmed_at',
         'cancelled_at',
+        'refund_serial_no',
     ];
 
     protected function casts(): array
@@ -46,6 +49,8 @@ class Order extends Model
             'check_in_date' => 'date',
             'check_out_date' => 'date',
             'guest_info' => 'array',
+            'real_name_type' => 'integer',
+            'credential_list' => 'array',
             'total_amount' => 'decimal:2',
             'settlement_amount' => 'decimal:2',
             'paid_at' => 'datetime',

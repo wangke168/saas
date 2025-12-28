@@ -9,6 +9,21 @@ Route::prefix('webhooks')->group(function () {
     Route::post('/ctrip', [\App\Http\Controllers\Webhooks\CtripController::class, 'handleOrder']);
     Route::post('/fliggy/product-change', [\App\Http\Controllers\Webhooks\FliggyController::class, 'productChange']);
     Route::post('/fliggy/order-status', [\App\Http\Controllers\Webhooks\FliggyController::class, 'orderStatus']);
+    
+    // 美团Webhook路由
+    Route::post('/meituan/order/create/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/pay', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/query', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/refund', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/refunded', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/close', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    
+    // 美团产品相关路由（拉取价格日历等）
+    Route::post('/meituan/product/price/calendar', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductPriceCalendar']);
+    Route::post('/meituan/product/level/price/calendar/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductLevelPriceCalendarV2']);
+    
+    // 资源方Webhook路由
+    Route::post('/resource/hengdian/inventory', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);
 });
 
 // 认证相关路由（无需认证）
@@ -36,6 +51,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{user}/enable', [UserController::class, 'enable']);
     });
 
+    // 资源方管理（仅超级管理员）
+    Route::prefix('resource-providers')->middleware('role:admin')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ResourceProviderController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\ResourceProviderController::class, 'store']);
+        Route::get('/{resourceProvider}', [\App\Http\Controllers\ResourceProviderController::class, 'show']);
+        Route::put('/{resourceProvider}', [\App\Http\Controllers\ResourceProviderController::class, 'update']);
+        Route::delete('/{resourceProvider}', [\App\Http\Controllers\ResourceProviderController::class, 'destroy']);
+        Route::post('/{resourceProvider}/attach-scenic-spots', [\App\Http\Controllers\ResourceProviderController::class, 'attachScenicSpots']);
+    });
+
     // 景区管理（仅超级管理员）
     Route::prefix('scenic-spots')->middleware('role:admin')->group(function () {
         Route::get('/', [\App\Http\Controllers\ScenicSpotController::class, 'index']);
@@ -43,6 +68,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'show']);
         Route::put('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'update']);
         Route::delete('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'destroy']);
+        
+        // 资源配置
+        Route::get('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'show']);
+        Route::post('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'store']);
     });
 
     // 软件商管理（仅超级管理员）
@@ -160,9 +189,29 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // OTA平台管理（只读）
+    // OTA平台公开接口（用于产品绑定时的下拉选择）
     Route::prefix('ota-platforms')->group(function () {
         Route::get('/', [\App\Http\Controllers\OtaPlatformController::class, 'index']);
         Route::get('/{otaPlatform}', [\App\Http\Controllers\OtaPlatformController::class, 'show']);
+    });
+
+    // OTA平台管理接口（仅超级管理员）
+    Route::prefix('admin/ota-platforms')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'store']);
+        
+        // OTA配置管理（必须在/{otaPlatform}之前，避免路由冲突）
+        Route::get('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'show']);
+        Route::post('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'store']);
+        
+        // OTA平台CRUD
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'show']);
+        Route::put('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'update']);
+        Route::delete('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'destroy']);
+        
+        // OTA配置更新和删除（使用config ID）
+        Route::put('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'update']);
+        Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);
     });
 });
 

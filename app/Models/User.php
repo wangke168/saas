@@ -54,11 +54,36 @@ class User extends Authenticatable
     }
 
     /**
-     * 用户绑定的景区
+     * 用户绑定的景区（保留用于兼容，但不再使用）
+     * @deprecated 使用 resourceProviders 和 accessibleScenicSpots 替代
      */
     public function scenicSpots(): BelongsToMany
     {
         return $this->belongsToMany(ScenicSpot::class, 'user_scenic_spots');
+    }
+
+    /**
+     * 用户关联的资源方
+     */
+    public function resourceProviders(): BelongsToMany
+    {
+        return $this->belongsToMany(ResourceProvider::class, 'user_resource_providers');
+    }
+
+    /**
+     * 获取用户可访问的所有景区（通过资源方）
+     */
+    public function accessibleScenicSpots()
+    {
+        if ($this->isAdmin()) {
+            return ScenicSpot::query();
+        }
+        
+        // 运营人员：获取所属资源方下的所有景区
+        $resourceProviderIds = $this->resourceProviders->pluck('id');
+        return ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+            $query->whereIn('resource_providers.id', $resourceProviderIds);
+        });
     }
 
     /**

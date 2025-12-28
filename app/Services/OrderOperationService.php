@@ -44,11 +44,11 @@ class OrderOperationService
             ->where('exception_data->operation', 'confirm')
             ->first();
 
-        $resourceService = ResourceServiceFactory::getService($order);
+        $resourceService = ResourceServiceFactory::getService($order, 'order');
 
-        if ($exceptionOrder && $resourceService) {
-            // 异常订单处理：调用资源方接口接单
-            return $this->confirmOrderWithResource($order, $resourceService, $remark, $operatorId, $exceptionOrder);
+        if ($exceptionOrder) {
+            // 异常订单处理：直接走人工流程，不再调用资源方接口，直接对接OTA平台
+            return $this->confirmOrderManually($order, $remark ?? '异常订单人工处理：接单', $operatorId, $exceptionOrder);
         } else if ($resourceService) {
             // 正常流程：系统直连时，不应该走到这里（已在 PayPreOrder 中异步处理）
             // 这里保留作为兜底逻辑，但记录警告日志
@@ -148,8 +148,13 @@ class OrderOperationService
 
     /**
      * 人工操作：接单
+     * 
+     * @param Order $order 订单
+     * @param string|null $remark 备注
+     * @param int|null $operatorId 操作人ID
+     * @param ExceptionOrder|null $exceptionOrder 异常订单（如果存在）
      */
-    protected function confirmOrderManually(Order $order, ?string $remark, ?int $operatorId): array
+    protected function confirmOrderManually(Order $order, ?string $remark, ?int $operatorId, ?ExceptionOrder $exceptionOrder = null): array
     {
         try {
             DB::beginTransaction();
@@ -162,15 +167,35 @@ class OrderOperationService
                 $operatorId
             );
 
+            // 2. 标记异常订单为已处理（如果存在）
+            if ($exceptionOrder) {
+                $exceptionOrder->update([
+                    'status' => ExceptionOrderStatus::RESOLVED,
+                    'handler_id' => $operatorId,
+                    'resolved_at' => now(),
+                ]);
+            }
+
             DB::commit();
 
-            // 2. 通知携程平台（异步）
+            // 3. 通知OTA平台（异步）
             try {
+                Log::info('准备派发 NotifyOtaOrderStatusJob', [
+                    'order_id' => $order->id,
+                    'order_status' => $order->status->value,
+                    'queue_connection' => config('queue.default'),
+                ]);
+                
                 \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
+                
+                Log::info('NotifyOtaOrderStatusJob 派发成功', [
+                    'order_id' => $order->id,
+                ]);
             } catch (\Exception $e) {
-                Log::warning('通知携程订单确认失败', [
+                Log::error('通知OTA订单确认失败', [
                     'order_id' => $order->id,
                     'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
                 ]);
             }
 
@@ -206,7 +231,7 @@ class OrderOperationService
      */
     public function rejectOrder(Order $order, string $reason, ?int $operatorId = null): array
     {
-        $resourceService = ResourceServiceFactory::getService($order);
+        $resourceService = ResourceServiceFactory::getService($order, 'order');
 
         if ($resourceService) {
             // 系统直连：调用资源方接口
@@ -338,7 +363,7 @@ class OrderOperationService
      */
     public function verifyOrder(Order $order, array $data, ?int $operatorId = null): array
     {
-        $resourceService = ResourceServiceFactory::getService($order);
+        $resourceService = ResourceServiceFactory::getService($order, 'order');
 
         if ($resourceService) {
             // 系统直连：调用资源方接口
@@ -378,11 +403,11 @@ class OrderOperationService
 
             DB::commit();
 
-            // 3. 通知携程平台（调用核销通知接口）
+            // 3. 通知OTA平台（调用核销通知接口）
             try {
-                $this->notifyCtripOrderConsumed($order, $data);
+                $this->notifyOtaOrderConsumed($order, $data);
             } catch (\Exception $e) {
-                Log::warning('通知携程订单核销失败', [
+                Log::warning('通知OTA订单核销失败', [
                     'order_id' => $order->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -428,11 +453,11 @@ class OrderOperationService
 
             DB::commit();
 
-            // 2. 通知携程平台（调用核销通知接口）
+            // 2. 通知OTA平台（调用核销通知接口）
             try {
-                $this->notifyCtripOrderConsumed($order, $data);
+                $this->notifyOtaOrderConsumed($order, $data);
             } catch (\Exception $e) {
-                Log::warning('通知携程订单核销失败', [
+                Log::warning('通知OTA订单核销失败', [
                     'order_id' => $order->id,
                     'error' => $e->getMessage(),
                 ]);
@@ -482,14 +507,15 @@ class OrderOperationService
             ->where('exception_data->operation', 'cancel')
             ->first();
 
-        $resourceService = ResourceServiceFactory::getService($order);
+        $resourceService = ResourceServiceFactory::getService($order, 'order');
 
-        if ($exceptionOrder && $resourceService && $approve) {
-            // 异常订单处理：调用资源方接口同意取消
-            return $this->cancelOrderWithResource($order, $resourceService, $reason, $operatorId, $exceptionOrder);
-        } else if ($exceptionOrder && !$approve) {
-            // 异常订单处理：拒绝取消（不调用资源方接口）
-            return $this->rejectCancelManually($order, $reason, $operatorId, $exceptionOrder);
+        if ($exceptionOrder) {
+            // 异常订单处理：直接走人工流程，不再调用资源方接口，直接对接OTA平台
+            if ($approve) {
+                return $this->cancelOrderManually($order, $reason, $operatorId, $exceptionOrder);
+            } else {
+                return $this->rejectCancelManually($order, $reason, $operatorId, $exceptionOrder);
+            }
         } else if ($resourceService) {
             // 正常流程：系统直连时，不应该走到这里（已在 CancelOrder 中异步处理）
             // 这里保留作为兜底逻辑，但记录警告日志
@@ -606,8 +632,13 @@ class OrderOperationService
 
     /**
      * 人工操作：同意取消订单
+     * 
+     * @param Order $order 订单
+     * @param string $reason 取消原因
+     * @param int|null $operatorId 操作人ID
+     * @param ExceptionOrder|null $exceptionOrder 异常订单（如果存在）
      */
-    protected function cancelOrderManually(Order $order, string $reason, ?int $operatorId = null): array
+    protected function cancelOrderManually(Order $order, string $reason, ?int $operatorId = null, ?ExceptionOrder $exceptionOrder = null): array
     {
         try {
             DB::beginTransaction();
@@ -639,15 +670,35 @@ class OrderOperationService
                 ]);
             }
 
+            // 3. 标记异常订单为已处理（如果存在）
+            if ($exceptionOrder) {
+                $exceptionOrder->update([
+                    'status' => ExceptionOrderStatus::RESOLVED,
+                    'handler_id' => $operatorId,
+                    'resolved_at' => now(),
+                ]);
+            }
+
             DB::commit();
 
-            // 3. 通知携程平台（异步）
+            // 4. 通知OTA平台（异步）
             try {
+                Log::info('准备派发 NotifyOtaOrderStatusJob（取消订单）', [
+                    'order_id' => $order->id,
+                    'order_status' => $order->status->value,
+                    'queue_connection' => config('queue.default'),
+                ]);
+                
                 \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
+                
+                Log::info('NotifyOtaOrderStatusJob 派发成功（取消订单）', [
+                    'order_id' => $order->id,
+                ]);
             } catch (\Exception $e) {
-                Log::warning('通知携程订单取消失败', [
+                Log::error('通知OTA订单取消失败', [
                     'order_id' => $order->id,
                     'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
                 ]);
             }
 
@@ -738,15 +789,29 @@ class OrderOperationService
     }
 
     /**
+     * 通知OTA平台订单核销
+     */
+    protected function notifyOtaOrderConsumed(Order $order, array $data): void
+    {
+        $platform = $order->otaPlatform;
+        if (!$platform) {
+            return;
+        }
+
+        if ($platform->code->value === \App\Enums\OtaPlatform::CTRIP->value) {
+            // 携程订单
+            $this->notifyCtripOrderConsumed($order, $data);
+        } elseif ($platform->code->value === \App\Enums\OtaPlatform::MEITUAN->value) {
+            // 美团订单
+            $this->notifyMeituanOrderConsumed($order, $data);
+        }
+    }
+
+    /**
      * 通知携程订单核销
      */
     protected function notifyCtripOrderConsumed(Order $order, array $data): void
     {
-        // 只处理携程订单
-        if ($order->otaPlatform->code->value !== 'ctrip') {
-            return;
-        }
-
         $useStartDate = $data['use_start_date'] ?? $order->check_in_date->format('Y-m-d');
         $useEndDate = $data['use_end_date'] ?? $order->check_out_date->format('Y-m-d');
         $useQuantity = $data['use_quantity'] ?? $order->room_count;
@@ -766,6 +831,68 @@ class OrderOperationService
             $passengers,
             $vouchers
         );
+    }
+
+    /**
+     * 通知美团订单消费（核销）
+     */
+    protected function notifyMeituanOrderConsumed(Order $order, array $data): void
+    {
+        try {
+            $platform = $order->otaPlatform;
+            if (!$platform || !$platform->config) {
+                Log::error('NotifyMeituanOrderConsumed: 美团配置不存在');
+                return;
+            }
+
+            $client = new \App\Http\Client\MeituanClient($platform->config);
+
+            $useStartDate = $data['use_start_date'] ?? $order->check_in_date->format('Y-m-d');
+            $useEndDate = $data['use_end_date'] ?? $order->check_out_date->format('Y-m-d');
+            $useQuantity = $data['use_quantity'] ?? $order->room_count;
+
+            $requestData = [
+                'partnerId' => intval($platform->config->account),
+                'body' => [
+                    'orderId' => intval($order->ota_order_no),
+                    'partnerOrderId' => $order->order_no,
+                    'useStartDate' => $useStartDate,
+                    'useEndDate' => $useEndDate,
+                    'quantity' => $order->room_count,
+                    'usedQuantity' => $useQuantity,
+                ],
+            ];
+
+            // 如果是实名制订单，传credentialList
+            if ($order->real_name_type === 1 && !empty($order->credential_list)) {
+                $requestData['body']['credentialList'] = [];
+                foreach ($order->credential_list as $credential) {
+                    $requestData['body']['credentialList'][] = [
+                        'credentialType' => $credential['credentialType'] ?? 0,
+                        'credentialNo' => $credential['credentialNo'] ?? '',
+                        'voucher' => $credential['voucher'] ?? '',
+                    ];
+                }
+            }
+
+            $result = $client->notifyOrderConsume($requestData);
+
+            if (isset($result['code']) && $result['code'] == 200) {
+                Log::info('通知美团订单消费成功', [
+                    'order_id' => $order->id,
+                ]);
+            } else {
+                Log::error('通知美团订单消费失败', [
+                    'order_id' => $order->id,
+                    'result' => $result,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('通知美团订单消费异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
 

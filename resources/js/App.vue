@@ -4,7 +4,7 @@
             <div class="header-content">
                 <h1>OTA酒景套餐分销系统</h1>
                 <div class="user-info">
-                    <span>{{ user?.name }}</span>
+                    <span>{{ user?.display_name || user?.name }}</span>
                     <el-button type="text" @click="handleLogout">退出</el-button>
                 </div>
             </div>
@@ -32,6 +32,10 @@
                         <el-icon><House /></el-icon>
                         <span>酒店管理</span>
                     </el-menu-item>
+                    <el-menu-item v-if="isAdmin" index="/resource-providers">
+                        <el-icon><Connection /></el-icon>
+                        <span>资源方管理</span>
+                    </el-menu-item>
                     <el-menu-item v-if="isAdmin" index="/scenic-spots">
                         <el-icon><Location /></el-icon>
                         <span>景区管理</span>
@@ -43,6 +47,10 @@
                     <el-menu-item v-if="isAdmin" index="/software-providers">
                         <el-icon><Connection /></el-icon>
                         <span>软件服务商</span>
+                    </el-menu-item>
+                    <el-menu-item v-if="isAdmin" index="/ota-platforms">
+                        <el-icon><DataLine /></el-icon>
+                        <span>OTA平台管理</span>
                     </el-menu-item>
                     <el-menu-item index="/profile">
                         <el-icon><Setting /></el-icon>
@@ -64,7 +72,7 @@
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
-import { Document, Warning, Box, House, Location, User, Setting, Connection } from '@element-plus/icons-vue';
+import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine } from '@element-plus/icons-vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -85,7 +93,8 @@ const user = computed(() => authStore.user);
 const isAdmin = computed(() => {
     const role = user.value?.role;
     // 兼容不同的 role 格式：可能是字符串 'admin'，也可能是对象 { value: 'admin' }
-    return role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
+    const result = role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
+    return result;
 });
 const activeMenu = computed(() => router.currentRoute.value.path);
 

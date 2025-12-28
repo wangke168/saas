@@ -43,6 +43,12 @@ const routes = [
         meta: { requiresAuth: true }
     },
     {
+        path: '/resource-providers',
+        name: 'ResourceProviders',
+        component: () => import('../views/ResourceProviders/Index.vue'),
+        meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
         path: '/scenic-spots',
         name: 'ScenicSpots',
         component: () => import('../views/ScenicSpots/Index.vue'),
@@ -58,6 +64,12 @@ const routes = [
         path: '/software-providers',
         name: 'SoftwareProviders',
         component: () => import('../views/SoftwareProviders/Index.vue'),
+        meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+        path: '/ota-platforms',
+        name: 'OtaPlatforms',
+        component: () => import('../views/OtaPlatforms/Index.vue'),
         meta: { requiresAuth: true, requiresAdmin: true }
     },
     {

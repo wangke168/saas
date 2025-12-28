@@ -15,9 +15,13 @@ class HotelController extends Controller
     {
         $query = Hotel::with(['scenicSpot', 'scenicSpot.softwareProvider']);
 
-        // 权限控制：运营只能查看自己绑定的景区下的酒店
+        // 权限控制：运营只能查看所属资源方下的所有景区下的酒店
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             $query->whereIn('scenic_spot_id', $scenicSpotIds);
         }
 
@@ -63,9 +67,13 @@ class HotelController extends Controller
             'is_active' => 'boolean',
         ]);
 
-        // 权限控制：运营只能在自己绑定的景区下创建酒店
+        // 权限控制：运营只能在自己所属资源方下的景区下创建酒店
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($validated['scenic_spot_id'])) {
                 return response()->json([
                     'message' => '无权在该景区下创建酒店',
@@ -89,9 +97,13 @@ class HotelController extends Controller
     {
         $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider', 'roomTypes']);
         
-        // 权限控制：运营只能查看自己绑定的景区下的酒店
+        // 权限控制：运营只能查看所属资源方下的所有景区下的酒店
         if (request()->user()->isOperator()) {
-            $scenicSpotIds = request()->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($hotel->scenic_spot_id)) {
                 return response()->json([
                     'message' => '无权查看该酒店',
@@ -109,9 +121,13 @@ class HotelController extends Controller
      */
     public function update(Request $request, Hotel $hotel): JsonResponse
     {
-        // 权限控制：运营只能更新自己绑定的景区下的酒店
+        // 权限控制：运营只能更新所属资源方下的所有景区下的酒店
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($hotel->scenic_spot_id)) {
                 return response()->json([
                     'message' => '无权更新该酒店',
@@ -125,14 +141,19 @@ class HotelController extends Controller
             'code' => 'sometimes|required|string|max:255',
             'address' => 'nullable|string|max:255',
             'contact_phone' => 'nullable|string|max:20',
+            'external_id' => 'nullable|string|max:255',
+            'external_code' => 'nullable|string|max:255',
             'is_connected' => 'sometimes|boolean',
-            'resource_provider_id' => 'nullable|exists:resource_providers,id',
             'is_active' => 'sometimes|boolean',
         ]);
 
         // 如果修改了景区，需要检查权限
         if (isset($validated['scenic_spot_id']) && $request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($validated['scenic_spot_id'])) {
                 return response()->json([
                     'message' => '无权将该酒店移动到该景区',
@@ -154,9 +175,13 @@ class HotelController extends Controller
      */
     public function destroy(Hotel $hotel): JsonResponse
     {
-        // 权限控制：运营只能删除自己绑定的景区下的酒店
+        // 权限控制：运营只能删除所属资源方下的所有景区下的酒店
         if (request()->user()->isOperator()) {
-            $scenicSpotIds = request()->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($hotel->scenic_spot_id)) {
                 return response()->json([
                     'message' => '无权删除该酒店',

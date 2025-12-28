@@ -122,16 +122,35 @@ class AuthController extends Controller
     public function user(Request $request)
     {
         $user = $request->user();
-        $user->load('scenicSpots');
+        $user->load(['resourceProviders.scenicSpots']); // 加载资源方及其景区
+        
+        // 构建显示名称
+        $displayName = $user->name;
+        if ($user->isOperator() && $user->resourceProviders->isNotEmpty()) {
+            $resourceProviderNames = $user->resourceProviders->pluck('name')->join('、');
+            $displayName = "{$resourceProviderNames}-{$user->name}";
+        }
         
         return response()->json([
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
+                'display_name' => $displayName, // 新增显示名称
                 'email' => $user->email,
                 'role' => $user->role?->value ?? 'admin',
                 'role_label' => $user->role?->label() ?? '超级管理员',
                 'is_active' => $user->is_active,
+                'resource_providers' => $user->resourceProviders->map(fn($rp) => [
+                    'id' => $rp->id,
+                    'name' => $rp->name,
+                    'code' => $rp->code,
+                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
+                        'id' => $spot->id,
+                        'name' => $spot->name,
+                        'code' => $spot->code,
+                    ]),
+                ]),
+                // 保留scenic_spots用于兼容（但不再使用）
                 'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
                     'id' => $spot->id,
                     'name' => $spot->name,

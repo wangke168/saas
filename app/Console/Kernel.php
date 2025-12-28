@@ -21,6 +21,9 @@ class Kernel extends ConsoleKernel
         // 每半小时同步OTA价格和库存
         $schedule->command('ota:sync-price-stock')->everyThirtyMinutes();
         
+        // 每半小时同步美团价格和库存
+        $schedule->command('meituan:sync-price-stock')->everyThirtyMinutes();
+        
         // 每天清理过期订单（30天前）
         $schedule->call(function () {
             \App\Models\Order::where('created_at', '<', now()->subDays(30))

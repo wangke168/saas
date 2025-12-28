@@ -44,6 +44,7 @@
             <el-table :data="products" v-loading="loading" border>
                 <el-table-column prop="name" label="产品名称" width="200" />
                 <el-table-column prop="code" label="产品编码" width="150" />
+                <el-table-column prop="external_code" label="外部产品编码" width="150" />
                 <el-table-column label="所属景区" width="150">
                     <template #default="{ row }">
                         {{ row.scenic_spot?.name || '-' }}
@@ -125,8 +126,17 @@
                 <el-form-item label="产品名称" prop="name">
                     <el-input v-model="form.name" placeholder="请输入产品名称" />
                 </el-form-item>
-                <el-form-item label="产品编码" prop="code">
-                    <el-input v-model="form.code" placeholder="请输入产品编码（唯一）" :disabled="isEdit" />
+                <el-form-item label="产品编码" prop="code" v-if="isEdit">
+                    <el-input v-model="form.code" placeholder="系统自动生成" disabled />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        产品编码由系统自动生成，不可修改
+                    </span>
+                </el-form-item>
+                <el-form-item label="外部产品编码" prop="external_code">
+                    <el-input v-model="form.external_code" placeholder="请输入外部产品编码（可选，用于和景区系统对接，如横店）" />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        用于和景区系统（如横店）对接的产品编码，如果产品不需要对接外部系统，可留空
+                    </span>
                 </el-form-item>
                 <el-form-item label="描述" prop="description">
                     <el-input
@@ -149,16 +159,16 @@
                         选择接口推送后，价格将通过资源方接口自动更新
                     </span>
                 </el-form-item>
-                <el-form-item label="入住天数" prop="stay_days">
+                <el-form-item label="入住天数" prop="stay_days" required>
                     <el-input-number
                         v-model="form.stay_days"
                         :min="1"
                         :max="30"
-                        placeholder="请输入入住天数（可为空）"
+                        placeholder="请输入入住天数（必填）"
                         style="width: 100%"
                     />
                     <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        产品需要连续入住的天数，为空或1表示单晚产品
+                        产品需要连续入住的天数，至少为1
                     </span>
                 </el-form-item>
                 <el-form-item label="销售开始日期" prop="sale_start_date">
@@ -236,7 +246,7 @@ const form = ref({
     code: '',
     description: '',
     price_source: 'manual',
-    stay_days: null,
+    stay_days: 1, // 默认值为1，必填
     sale_start_date: null,
     sale_end_date: null,
     is_active: true,
@@ -260,12 +270,16 @@ const rules = {
         { required: true, message: '请输入产品名称', trigger: 'blur' },
         { max: 255, message: '产品名称不能超过255个字符', trigger: 'blur' }
     ],
-    code: [
-        { required: true, message: '请输入产品编码', trigger: 'blur' },
-        { pattern: /^[a-zA-Z0-9_-]+$/, message: '产品编码只能包含字母、数字、下划线和连字符', trigger: 'blur' }
+    // code 由系统自动生成，不需要验证
+    external_code: [
+        { max: 255, message: '外部产品编码不能超过255个字符', trigger: 'blur' }
     ],
     price_source: [
         { required: true, message: '请选择价格来源', trigger: 'change' }
+    ],
+    stay_days: [
+        { required: true, message: '请输入入住天数', trigger: 'blur' },
+        { type: 'number', min: 1, max: 30, message: '入住天数必须在1-30之间', trigger: 'blur' }
     ],
     sale_start_date: [
         { required: true, message: '请选择销售开始日期', trigger: 'change' }
@@ -384,10 +398,11 @@ const handleEdit = (row) => {
     form.value = {
         scenic_spot_id: row.scenic_spot_id,
         name: row.name,
-        code: row.code,
+        code: row.code, // 只读显示，不可修改
+        external_code: row.external_code || '',
         description: row.description || '',
         price_source: row.price_source || 'manual',
-        stay_days: row.stay_days || null,
+        stay_days: row.stay_days || 1, // 默认值为1，必填
         sale_start_date: row.sale_start_date || null,
         sale_end_date: row.sale_end_date || null,
         is_active: row.is_active,
@@ -402,13 +417,21 @@ const handleSubmit = async () => {
         if (valid) {
             submitting.value = true;
             try {
-                // 准备提交数据，确保空值转换为 null
+                // 准备提交数据，确保空值转换为 null（stay_days 现在是必填，不需要转换）
                 const submitData = {
                     ...form.value,
-                    stay_days: form.value.stay_days || null,
+                    stay_days: form.value.stay_days || 1, // 必填，默认值为1
                     sale_start_date: form.value.sale_start_date || null,
                     sale_end_date: form.value.sale_end_date || null,
                 };
+                
+                // code 由系统自动生成，创建和更新时都不需要发送
+                delete submitData.code;
+                
+                // external_code 如果为空字符串，转换为 null
+                if (submitData.external_code === '') {
+                    submitData.external_code = null;
+                }
                 
                 if (isEdit.value) {
                     await axios.put(`/products/${editingId.value}`, submitData);
@@ -457,18 +480,22 @@ const handleDelete = async (row) => {
 };
 
 const resetForm = () => {
+    editingId.value = null;
     form.value = {
         scenic_spot_id: null,
         name: '',
-        code: '',
+        code: '', // 创建时为空，系统自动生成
+        external_code: '',
         description: '',
         price_source: 'manual',
-        stay_days: null,
+        stay_days: 1, // 默认值为1，必填
         sale_start_date: null,
         sale_end_date: null,
         is_active: true,
     };
-    formRef.value?.clearValidate();
+    if (formRef.value) {
+        formRef.value.clearValidate();
+    }
 };
 
 const formatDate = (date) => {

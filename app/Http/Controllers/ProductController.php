@@ -25,9 +25,13 @@ class ProductController extends Controller
     {
         $query = Product::with(['scenicSpot']);
 
-        // 权限控制：运营只能查看自己绑定的景区下的产品
+        // 权限控制：运营只能查看所属资源方下的所有景区下的产品
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             $query->whereIn('scenic_spot_id', $scenicSpotIds);
         }
 
@@ -36,7 +40,8 @@ class ProductController extends Controller
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('code', 'like', "%{$search}%");
+                  ->orWhere('code', 'like', "%{$search}%")
+                  ->orWhere('external_code', 'like', "%{$search}%");
             });
         }
 
@@ -110,10 +115,11 @@ class ProductController extends Controller
         $validated = $request->validate([
             'scenic_spot_id' => 'required|exists:scenic_spots,id',
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:255|unique:products,code',
+            'code' => 'nullable|string|max:255|unique:products,code', // 改为可空，自动生成
+            'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
             'description' => 'nullable|string',
             'price_source' => 'sometimes|in:manual,api',
-            'stay_days' => 'nullable|integer|min:1|max:30',
+            'stay_days' => 'required|integer|min:1|max:30', // 改为必填
             'sale_start_date' => 'required|date',
             'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
             'is_active' => 'boolean',
@@ -125,10 +131,7 @@ class ProductController extends Controller
             abort(403, '无权在该景区下创建产品');
         }
 
-        // 确保 stay_days 为空时转换为 null
-        if (isset($validated['stay_days']) && ($validated['stay_days'] === '' || $validated['stay_days'] === 0)) {
-            $validated['stay_days'] = null;
-        }
+        // stay_days 现在是必填，不需要空值处理
 
         // 确保销售日期为空字符串时转换为 null
         if (isset($validated['sale_start_date']) && $validated['sale_start_date'] === '') {
@@ -154,10 +157,11 @@ class ProductController extends Controller
         $validated = $request->validate([
             'scenic_spot_id' => 'sometimes|required|exists:scenic_spots,id',
             'name' => 'sometimes|required|string|max:255',
-            'code' => ['sometimes', 'required', 'string', 'max:255', 'unique:products,code,' . $product->id],
+            'code' => ['sometimes', 'nullable', 'string', 'max:255', 'unique:products,code,' . $product->id], // code 不可修改，但允许为空（自动生成）
+            'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
             'description' => 'nullable|string',
             'price_source' => 'sometimes|in:manual,api',
-            'stay_days' => 'nullable|integer|min:1|max:30',
+            'stay_days' => 'required|integer|min:1|max:30', // 改为必填
             'sale_start_date' => 'required|date',
             'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
             'is_active' => 'sometimes|boolean',
@@ -170,10 +174,12 @@ class ProductController extends Controller
             abort(403, '无权更新该产品');
         }
 
-        // 确保 stay_days 为空时转换为 null
-        if (isset($validated['stay_days']) && ($validated['stay_days'] === '' || $validated['stay_days'] === 0)) {
-            $validated['stay_days'] = null;
+        // code 不可修改（自动生成），如果传入了 code，移除它
+        if (isset($validated['code'])) {
+            unset($validated['code']);
         }
+
+        // stay_days 现在是必填，不需要空值处理
 
         // 确保销售日期为空字符串时转换为 null
         if (isset($validated['sale_start_date']) && $validated['sale_start_date'] === '') {

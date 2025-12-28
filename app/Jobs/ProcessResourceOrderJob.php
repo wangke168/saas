@@ -44,22 +44,48 @@ class ProcessResourceOrderJob implements ShouldQueue
         ResourceServiceFactory $factory,
         InventoryService $inventoryService
     ): void {
-        $resourceService = $factory->getService($this->order);
+        Log::info('ProcessResourceOrderJob 开始执行', [
+            'order_id' => $this->order->id,
+            'operation' => $this->operation,
+            'order_status' => $this->order->status->value,
+            'ota_order_no' => $this->order->ota_order_no,
+        ]);
+        
+        $resourceService = $factory->getService($this->order, 'order');
 
         if (!$resourceService) {
             Log::warning('ProcessResourceOrderJob: 无法获取资源方服务', [
                 'order_id' => $this->order->id,
                 'operation' => $this->operation,
             ]);
+            
+            // 创建异常订单，等待人工处理
+            $this->createExceptionOrder([
+                'success' => false,
+                'message' => '无法获取资源方服务，请检查景区配置（资源配置、软件服务商、同步模式）',
+            ]);
+            
             return;
         }
 
         try {
             if ($this->operation === 'confirm') {
+                Log::info('ProcessResourceOrderJob: 准备调用资源方接单接口', [
+                    'order_id' => $this->order->id,
+                    'resource_service_class' => get_class($resourceService),
+                ]);
+                
                 $result = $resourceService->confirmOrder($this->order);
+                
+                Log::info('ProcessResourceOrderJob: 资源方接单接口返回', [
+                    'order_id' => $this->order->id,
+                    'result_success' => $result['success'] ?? false,
+                    'result_message' => $result['message'] ?? '',
+                ]);
+                
                 $this->handleConfirmResult($result, $inventoryService);
             } else {
-                $reason = '携程申请取消订单';
+                $reason = 'OTA平台申请取消订单';
                 $result = $resourceService->cancelOrder($this->order, $reason);
                 $this->handleCancelResult($result, $inventoryService);
             }
@@ -86,20 +112,56 @@ class ProcessResourceOrderJob implements ShouldQueue
     protected function handleConfirmResult(array $result, InventoryService $inventoryService): void
     {
         if ($result['success'] ?? false) {
+            // 提取资源方订单号
+            // HengdianService::confirmOrder() 返回的数据结构：
+            // - 如果已有 resource_order_no: data['resource_order_no']
+            // - 如果是新接单: data 是 XML 对象，需要从 data->OrderId 提取
+            // 注意：HengdianService::confirmOrder() 在成功时可能已经更新了订单的 resource_order_no
+            $resourceOrderNo = null;
+            if (isset($result['data']['resource_order_no'])) {
+                $resourceOrderNo = $result['data']['resource_order_no'];
+            } elseif (isset($result['data']->OrderId)) {
+                $resourceOrderNo = (string)$result['data']->OrderId;
+            }
+            
+            // 重新加载订单，获取最新的 resource_order_no（HengdianService 可能已经保存）
+            $this->order->refresh();
+            if (!$resourceOrderNo && $this->order->resource_order_no) {
+                $resourceOrderNo = $this->order->resource_order_no;
+            }
+            
             // 景区方成功
-            $this->order->update([
+            $updateData = [
                 'status' => OrderStatus::CONFIRMED,
-                'resource_order_no' => $result['data']['resource_order_no'] ?? null,
                 'confirmed_at' => now(),
-            ]);
+            ];
+            
+            // 只有在 resource_order_no 存在且与当前值不同时才更新
+            if ($resourceOrderNo && $this->order->resource_order_no !== $resourceOrderNo) {
+                $updateData['resource_order_no'] = $resourceOrderNo;
+            }
+            
+            $this->order->update($updateData);
 
             Log::info('ProcessResourceOrderJob: 景区方接单成功', [
                 'order_id' => $this->order->id,
-                'resource_order_no' => $result['data']['resource_order_no'] ?? null,
+                'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
+                'result_data_type' => gettype($result['data'] ?? null),
             ]);
 
-            // 通知携程订单确认
-            \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order);
+            // 通知OTA平台订单确认（异步）
+            try {
+                \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order);
+                
+                Log::info('ProcessResourceOrderJob: 已派发 NotifyOtaOrderStatusJob', [
+                    'order_id' => $this->order->id,
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('ProcessResourceOrderJob: 派发 NotifyOtaOrderStatusJob 失败', [
+                    'order_id' => $this->order->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         } else {
             // 景区方失败 → 创建异常订单
             Log::warning('ProcessResourceOrderJob: 景区方接单失败', [

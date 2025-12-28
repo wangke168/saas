@@ -20,17 +20,11 @@ class CtripService
     protected function getClient(): CtripClient
     {
         if ($this->client === null) {
-            // 优先使用环境变量配置（如果存在）
+            // 只从环境变量读取配置
             $config = $this->createConfigFromEnv();
-            
-            // 如果环境变量配置不存在，尝试从数据库读取
-            if (!$config) {
-                $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
-                $config = $platform?->config;
-            }
 
             if (!$config) {
-                throw new \Exception('携程配置不存在，请检查数据库配置或环境变量');
+                throw new \Exception('携程配置不存在，请检查 .env 文件中的环境变量配置');
             }
 
             $this->client = new CtripClient($config);
@@ -44,7 +38,7 @@ class CtripService
      */
     protected function createConfigFromEnv(): ?OtaConfig
     {
-        // 检查环境变量是否存在
+        // 检查必需的环境变量是否存在
         if (!env('CTRIP_ACCOUNT_ID') || !env('CTRIP_SECRET_KEY')) {
             return null;
         }
@@ -56,13 +50,9 @@ class CtripService
         $config->aes_key = env('CTRIP_ENCRYPT_KEY', '');
         $config->aes_iv = env('CTRIP_ENCRYPT_IV', '');
         
-        // API URL 配置
-        $priceApiUrl = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
-        $stockApiUrl = env('CTRIP_STOCK_API_URL', 'https://ttdopen.ctrip.com/api/product/stock.do');
-        $orderApiUrl = env('CTRIP_ORDER_API_URL', 'https://ttdopen.ctrip.com/api/order/notice.do');
-        
+        // API URL 配置（从环境变量读取，CtripClient 会根据接口类型使用对应的 URL）
         // 使用价格API URL作为基础URL（CtripClient会根据接口类型选择正确的URL）
-        $config->api_url = $priceApiUrl;
+        $config->api_url = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
         $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
         $config->environment = 'production';
         $config->is_active = true;
@@ -385,10 +375,71 @@ class CtripService
 
     /**
      * 确认订单
+     * 
+     * @param \App\Models\Order $order 订单对象
+     * @return array
      */
-    public function confirmOrder(string $orderId, string $confirmNo): array
+    public function confirmOrder(\App\Models\Order $order): array
     {
-        return $this->getClient()->confirmOrder($orderId, $confirmNo);
+        $client = $this->getClient();
+        
+        // 构建 items 数组
+        $items = [];
+        // itemId 优先使用 ctrip_item_id，如果没有则使用订单ID
+        $itemId = $order->ctrip_item_id ?: (string)$order->id;
+        
+        $items[] = [
+            'itemId' => $itemId,
+            'isCredentialVouchers' => 0, // 固定为0（非凭证类）
+        ];
+        
+        return $client->confirmOrder(
+            $order->ota_order_no,      // otaOrderId
+            $order->order_no,          // supplierOrderId
+            '0000',                    // confirmResultCode（成功）
+            '确认成功',                 // confirmResultMessage
+            1,                         // voucherSender（携程发送）
+            $items,                    // items
+            []                         // vouchers（可选）
+        );
+    }
+
+    /**
+     * 订单取消确认
+     * 当订单在取消提交后供应商需异步确认进行操作（接受、拒绝），可通过此接口回传供应商的最终确认结果给到携程
+     * 
+     * @param \App\Models\Order $order 订单对象
+     * @return array
+     */
+    public function confirmCancelOrder(\App\Models\Order $order): array
+    {
+        $client = $this->getClient();
+        
+        // 构建 items 数组
+        $items = [];
+        // itemId 优先使用 ctrip_item_id，如果没有则使用订单ID
+        $itemId = $order->ctrip_item_id ?: (string)$order->id;
+        
+        $item = [
+            'itemId' => $itemId,
+        ];
+        
+        // 如果有凭证需要取消，可以在这里添加 vouchers
+        // 目前暂时不处理凭证，因为订单模型中可能没有存储凭证信息
+        // 如果需要，可以从订单的凭证信息中提取
+        // if (!empty($order->vouchers)) {
+        //     $item['vouchers'] = $order->vouchers;
+        // }
+        
+        $items[] = $item;
+        
+        return $client->confirmCancelOrder(
+            $order->ota_order_no,      // otaOrderId
+            $order->order_no,          // supplierOrderId
+            '0000',                    // confirmResultCode（成功）
+            '确认成功',                 // confirmResultMessage
+            $items                     // items
+        );
     }
 
     /**

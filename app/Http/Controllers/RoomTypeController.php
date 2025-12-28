@@ -23,9 +23,13 @@ class RoomTypeController extends Controller
             $query->where('is_active', $request->boolean('is_active'));
         }
 
-        // 权限控制：运营只能查看自己绑定的景区下的酒店的房型
+        // 权限控制：运营只能查看所属资源方下的所有景区下的酒店的房型
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             $query->whereHas('hotel', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
             });
@@ -56,13 +60,19 @@ class RoomTypeController extends Controller
             'code' => 'required|string|max:255',
             'max_occupancy' => 'required|integer|min:1',
             'description' => 'nullable|string',
+            'external_id' => 'nullable|string|max:255',
+            'external_code' => 'nullable|string|max:255',
             'is_active' => 'boolean',
         ]);
 
-        // 权限控制：运营只能在自己绑定的景区下的酒店中创建房型
+        // 权限控制：运营只能在自己所属资源方下的景区下的酒店中创建房型
         if ($request->user()->isOperator()) {
             $hotel = \App\Models\Hotel::findOrFail($validated['hotel_id']);
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($hotel->scenic_spot_id)) {
                 return response()->json([
                     'message' => '无权在该酒店下创建房型',
@@ -84,9 +94,13 @@ class RoomTypeController extends Controller
      */
     public function update(Request $request, RoomType $roomType): JsonResponse
     {
-        // 权限控制：运营只能更新自己绑定的景区下的酒店的房型
+        // 权限控制：运营只能更新所属资源方下的所有景区下的酒店的房型
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($roomType->hotel->scenic_spot_id)) {
                 return response()->json([
                     'message' => '无权更新该房型',
@@ -99,6 +113,8 @@ class RoomTypeController extends Controller
             'code' => 'sometimes|required|string|max:255',
             'max_occupancy' => 'sometimes|required|integer|min:1',
             'description' => 'nullable|string',
+            'external_id' => 'nullable|string|max:255',
+            'external_code' => 'nullable|string|max:255',
             'is_active' => 'sometimes|boolean',
         ]);
 
@@ -116,9 +132,13 @@ class RoomTypeController extends Controller
      */
     public function destroy(RoomType $roomType): JsonResponse
     {
-        // 权限控制：运营只能删除自己绑定的景区下的酒店的房型
+        // 权限控制：运营只能删除所属资源方下的所有景区下的酒店的房型
         if (request()->user()->isOperator()) {
-            $scenicSpotIds = request()->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             if (! $scenicSpotIds->contains($roomType->hotel->scenic_spot_id)) {
                 return response()->json([
                     'message' => '无权删除该房型',

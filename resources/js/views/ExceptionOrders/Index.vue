@@ -8,6 +8,14 @@
             <el-table :data="exceptions" v-loading="loading" border>
                 <el-table-column prop="order.order_no" label="订单号" width="180" />
                 <el-table-column prop="order.ota_order_no" label="OTA订单号" width="180" />
+                <el-table-column label="OTA平台" width="120">
+                    <template #default="{ row }">
+                        <el-tag v-if="row.order?.ota_platform" type="info" size="small">
+                            {{ row.order.ota_platform.name || row.order.ota_platform.code }}
+                        </el-tag>
+                        <span v-else style="color: #999;">-</span>
+                    </template>
+                </el-table-column>
                 <el-table-column prop="exception_type" label="异常类型" width="150">
                     <template #default="{ row }">
                         <el-tag type="danger">{{ getExceptionTypeLabel(row.exception_type) }}</el-tag>
@@ -197,7 +205,7 @@ const formatDate = (date) => {
 const handleConfirmOrder = async (row) => {
     try {
         await ElMessageBox.confirm(
-            '确定要接单吗？系统将调用景区方接口确认订单。',
+            '确定要接单吗？系统将直接通知OTA平台确认订单（不再调用景区方接口）。',
             '接单确认',
             {
                 type: 'info',
@@ -272,7 +280,7 @@ const handleRejectOrder = async (row) => {
 const handleApproveCancel = async (row) => {
     try {
         await ElMessageBox.confirm(
-            '确定要同意取消订单吗？系统将调用景区方接口取消订单。',
+            '确定要同意取消订单吗？系统将直接通知OTA平台取消订单（不再调用景区方接口）。',
             '同意取消确认',
             {
                 type: 'info',

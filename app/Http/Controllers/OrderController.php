@@ -30,9 +30,13 @@ class OrderController extends Controller
             'roomType'
         ]);
 
-        // 权限过滤：非管理员只能查看自己景区下的订单
+        // 权限过滤：非管理员只能查看所属资源方下的所有景区下的订单
         if (!$request->user()->isAdmin()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             $query->whereHas('product', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
             });

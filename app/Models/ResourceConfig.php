@@ -58,6 +58,7 @@ class ResourceConfig extends Model
         return [
             'inventory' => $extraConfig['sync_mode']['inventory'] ?? 'manual',
             'price' => $extraConfig['sync_mode']['price'] ?? 'manual',
+            'order' => $extraConfig['sync_mode']['order'] ?? 'manual',
         ];
     }
 
@@ -70,10 +71,18 @@ class ResourceConfig extends Model
     }
 
     /**
-     * 价格是否抓取
+     * 价格是否推送
      */
-    public function isPricePull(): bool
+    public function isPricePush(): bool
     {
-        return $this->sync_mode['price'] === 'pull';
+        return $this->sync_mode['price'] === 'push';
+    }
+
+    /**
+     * 订单是否系统直连
+     */
+    public function isOrderAuto(): bool
+    {
+        return $this->sync_mode['order'] === 'auto';
     }
 }

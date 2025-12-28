@@ -26,9 +26,13 @@ class ProductPolicy
             return true;
         }
 
-        // 运营只能查看自己绑定的景区下的产品
+        // 运营只能查看所属资源方下的所有景区下的产品
         if ($user->isOperator()) {
-            $scenicSpotIds = $user->scenicSpots->pluck('id');
+            $resourceProviderIds = $user->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             return $scenicSpotIds->contains($product->scenic_spot_id);
         }
 
@@ -48,9 +52,13 @@ class ProductPolicy
             return true;
         }
 
-        // 运营只能在自己绑定的景区下创建产品
+        // 运营只能在自己所属资源方下的景区下创建产品
         if ($user->isOperator() && $scenicSpotId !== null) {
-            $scenicSpotIds = $user->scenicSpots->pluck('id');
+            $resourceProviderIds = $user->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             return $scenicSpotIds->contains($scenicSpotId);
         }
 
@@ -71,9 +79,12 @@ class ProductPolicy
             return true;
         }
 
-        // 运营只能更新自己绑定的景区下的产品
+        // 运营只能更新所属资源方下的所有景区下的产品
         if ($user->isOperator()) {
-            $scenicSpotIds = $user->scenicSpots->pluck('id');
+            $resourceProviderIds = $user->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
             
             // 检查当前产品的景区权限
             if (! $scenicSpotIds->contains($product->scenic_spot_id)) {
@@ -101,9 +112,13 @@ class ProductPolicy
             return true;
         }
 
-        // 运营只能删除自己绑定的景区下的产品
+        // 运营只能删除所属资源方下的所有景区下的产品
         if ($user->isOperator()) {
-            $scenicSpotIds = $user->scenicSpots->pluck('id');
+            $resourceProviderIds = $user->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             return $scenicSpotIds->contains($product->scenic_spot_id);
         }
 

@@ -14,6 +14,7 @@ use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\OrderOperationService;
 use App\Services\InventoryService;
+use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -428,6 +429,21 @@ class CtripController extends Controller
                 $cardNo = $firstPassenger['cardNo'] ?? $firstPassenger['card_no'] ?? null;
             }
 
+            // 计算离店日期
+            // 如果携程没有提供useEndDate，或者useEndDate等于useStartDate，则根据产品入住天数计算
+            $stayDays = $product->stay_days ?: 1;
+            if (empty($useEndDate) || $useEndDate === $useStartDate) {
+                $checkOutDate = \Carbon\Carbon::parse($useStartDate)->addDays($stayDays)->format('Y-m-d');
+                Log::info('携程预下单：根据产品入住天数计算离店日期', [
+                    'use_start_date' => $useStartDate,
+                    'use_end_date' => $useEndDate,
+                    'stay_days' => $stayDays,
+                    'calculated_check_out_date' => $checkOutDate,
+                ]);
+            } else {
+                $checkOutDate = $useEndDate;
+            }
+
             // 创建订单
             // 注意：预下单创建时，订单状态为 PAID_PENDING（待支付），但此时还没有支付
             // paid_at 应该为 null，只有在 PayPreOrder（预下单支付）时才设置 paid_at
@@ -440,7 +456,7 @@ class CtripController extends Controller
                 'room_type_id' => $roomType->id,
                 'status' => OrderStatus::PAID_PENDING,
                 'check_in_date' => $useStartDate,
-                'check_out_date' => $useEndDate ?: $useStartDate,
+                'check_out_date' => $checkOutDate,
                 'room_count' => $quantity,
                 'guest_count' => count($passengers) ?: 1,
                 'contact_name' => $contactInfo['name'] ?? '',
@@ -546,27 +562,148 @@ class CtripController extends Controller
                 $order->update($updateData);
             }
 
-            // 检查是否系统直连
-            $scenicSpot = $order->hotel->scenicSpot ?? null;
-            $isSystemConnected = $scenicSpot && $scenicSpot->is_system_connected;
+            // 检查是否系统直连（使用统一的判断逻辑）
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
 
             // 先响应携程（不等待景区方接口）
             // 系统直连和非系统直连都返回 supplierConfirmType = 2（支付待确认）
             $supplierConfirmType = 2;
 
-            // 异步处理景区方接口调用
+            // 先更新状态为确认中（无论是否系统直连，都先更新状态，让后台可以立即看到）
+            $this->orderService->updateOrderStatus(
+                $order,
+                OrderStatus::CONFIRMING,
+                '携程预下单支付成功'
+            );
+
+            // 如果是系统直连，同步调用资源方接口（带超时保护）
             if ($isSystemConnected) {
-                // 系统直连：异步调用景区方接口接单（设置 10 秒超时）
-                \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                    ->timeout(10);
-            } else {
-                // 非系统直连：只更新状态为确认中，等待人工接单
-                $this->orderService->updateOrderStatus(
-                    $order,
-                    OrderStatus::CONFIRMING,
-                    '携程预下单支付成功，等待人工接单'
-                );
+                Log::info('携程预下单支付：开始同步调用资源方接口', [
+                    'order_id' => $order->id,
+                    'ota_order_no' => $order->ota_order_no,
+                ]);
+
+                try {
+                    // 获取资源方服务
+                    $resourceService = ResourceServiceFactory::getService($order, 'order');
+                    
+                    if (!$resourceService) {
+                        Log::warning('携程预下单支付：无法获取资源方服务，降级到队列处理', [
+                            'order_id' => $order->id,
+                        ]);
+                        // 降级到队列异步处理
+                        \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
+                    } else {
+                        Log::info('携程预下单支付：准备调用资源方接单接口', [
+                            'order_id' => $order->id,
+                            'resource_service_class' => get_class($resourceService),
+                        ]);
+
+                        // 同步调用资源方接口（设置10秒超时）
+                        $timeout = 10; // 10秒超时
+                        $startTime = microtime(true);
+                        
+                        $result = $resourceService->confirmOrder($order);
+                        
+                        $elapsedTime = microtime(true) - $startTime;
+                        
+                        Log::info('携程预下单支付：资源方接单接口返回', [
+                            'order_id' => $order->id,
+                            'result_success' => $result['success'] ?? false,
+                            'result_message' => $result['message'] ?? '',
+                            'elapsed_time' => round($elapsedTime, 2) . 's',
+                        ]);
+
+                        // 处理接单结果
+                        if ($result['success'] ?? false) {
+                            // 提取资源方订单号
+                            $resourceOrderNo = null;
+                            if (isset($result['data']['resource_order_no'])) {
+                                $resourceOrderNo = $result['data']['resource_order_no'];
+                            } elseif (isset($result['data']->OrderId)) {
+                                $resourceOrderNo = (string)$result['data']->OrderId;
+                            }
+                            
+                            // 重新加载订单，获取最新的 resource_order_no
+                            $order->refresh();
+                            if (!$resourceOrderNo && $order->resource_order_no) {
+                                $resourceOrderNo = $order->resource_order_no;
+                            }
+                            
+                            // 更新订单状态为已确认
+                            $updateData = [
+                                'status' => OrderStatus::CONFIRMED,
+                                'confirmed_at' => now(),
+                            ];
+                            
+                            if ($resourceOrderNo && $order->resource_order_no !== $resourceOrderNo) {
+                                $updateData['resource_order_no'] = $resourceOrderNo;
+                            }
+                            
+                            $order->update($updateData);
+                            
+                            Log::info('携程预下单支付：资源方接单成功，订单已更新为已确认', [
+                                'order_id' => $order->id,
+                                'resource_order_no' => $resourceOrderNo ?: $order->resource_order_no,
+                            ]);
+
+                            // 通知OTA平台订单确认（异步）
+                            try {
+                                \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
+                                
+                                Log::info('携程预下单支付：已派发 NotifyOtaOrderStatusJob', [
+                                    'order_id' => $order->id,
+                                ]);
+                            } catch (\Exception $e) {
+                                Log::warning('携程预下单支付：派发 NotifyOtaOrderStatusJob 失败', [
+                                    'order_id' => $order->id,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        } else {
+                            // 资源方接单失败，创建异常订单
+                            $errorMessage = $result['message'] ?? '未知错误';
+                            
+                            Log::warning('携程预下单支付：资源方接单失败', [
+                                'order_id' => $order->id,
+                                'error' => $errorMessage,
+                            ]);
+
+                            // 创建异常订单
+                            \App\Models\ExceptionOrder::create([
+                                'order_id' => $order->id,
+                                'exception_type' => \App\Enums\ExceptionOrderType::API_ERROR,
+                                'exception_message' => '资源方接口调用失败（BookRQ）：' . $errorMessage,
+                                'exception_data' => [
+                                    'operation' => 'confirm',
+                                    'resource_response' => $result,
+                                ],
+                                'status' => \App\Enums\ExceptionOrderStatus::PENDING,
+                            ]);
+                            
+                            // 保持 CONFIRMING 状态，等待人工处理
+                        }
+                    }
+                } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                    // 连接超时或网络错误，降级到队列异步处理
+                    Log::warning('携程预下单支付：资源方接口调用超时或网络错误，降级到队列处理', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    
+                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
+                } catch (\Exception $e) {
+                    // 其他异常，降级到队列异步处理
+                    Log::error('携程预下单支付：资源方接口调用异常，降级到队列处理', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    
+                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
+                }
             }
+            // 非系统直连：已经更新为CONFIRMING，等待人工接单
 
             return $this->successResponse([
                 'supplierConfirmType' => $supplierConfirmType, // 1=支付已确认（同步返回），2=支付待确认（需异步返回）
@@ -768,9 +905,8 @@ class CtripController extends Controller
                 return $this->errorResponse('2005', '订单状态不允许取消申请');
             }
 
-            // 检查是否系统直连
-            $scenicSpot = $order->hotel->scenicSpot ?? null;
-            $isSystemConnected = $scenicSpot && $scenicSpot->is_system_connected;
+            // 检查是否系统直连（使用统一的判断逻辑）
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
 
             // 先响应携程（不等待景区方接口）
             // 系统直连和非系统直连都返回 supplierConfirmType = 2（取消待确认）
@@ -782,19 +918,22 @@ class CtripController extends Controller
                 ];
             }
 
-            // 异步处理景区方接口调用
+            // 先更新状态为申请取消中（无论是否系统直连，都先更新状态，让后台可以立即看到）
+            $this->orderService->updateOrderStatus(
+                $order,
+                OrderStatus::CANCEL_REQUESTED,
+                $cancelReason
+            );
+
+            // 如果是系统直连，异步处理资源方接口调用
             if ($isSystemConnected) {
                 // 系统直连：异步处理查询是否可以取消，然后决定是否调用取消接口
-                \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, $cancelReason)
-                    ->timeout(10);
-            } else {
-                // 非系统直连：直接更新状态为申请取消中，等待人工处理
-                $this->orderService->updateOrderStatus(
-                    $order,
-                    OrderStatus::CANCEL_REQUESTED,
-                    $cancelReason
-                );
+                // 如果资源方返回可以取消，异步任务会更新为 CANCEL_APPROVED
+                // 如果资源方返回不可以取消，保持 CANCEL_REQUESTED 状态，创建异常订单
+                // 超时时间已在 ProcessResourceCancelOrderJob 类中设置为 10 秒
+                \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, $cancelReason);
             }
+            // 非系统直连：已经更新为CANCEL_REQUESTED，等待人工处理
 
             return $this->successResponse([
                 'supplierConfirmType' => 2, // 2.取消待确认（需异步返回）

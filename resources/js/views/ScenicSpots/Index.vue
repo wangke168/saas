@@ -34,9 +34,10 @@
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="200" fixed="right">
+                <el-table-column label="操作" width="280" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" @click="handleEdit(row)">编辑</el-button>
+                        <el-button size="small" type="info" @click="handleConfigResource(row)">配置资源方</el-button>
                         <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
                     </template>
                 </el-table-column>
@@ -111,6 +112,125 @@
                 <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
             </template>
         </el-dialog>
+
+        <!-- 资源配置对话框 -->
+        <el-dialog
+            v-model="resourceConfigDialogVisible"
+            title="资源配置"
+            width="800px"
+            @close="resetResourceConfigForm"
+        >
+            <el-alert
+                title="重要提示"
+                type="warning"
+                description="不同OTA平台的订单需要使用不同的用户名和密码。请为每个OTA平台配置对应的认证信息。"
+                :closable="false"
+                style="margin-bottom: 20px;"
+            />
+            <el-form
+                ref="resourceConfigFormRef"
+                :model="resourceConfigForm"
+                :rules="resourceConfigRules"
+                label-width="140px"
+            >
+                <el-form-item label="接口地址" prop="api_url">
+                    <el-input v-model="resourceConfigForm.api_url" placeholder="例如：https://e.hengdianworld.com/Interface/hotel_order.aspx" />
+                </el-form-item>
+                <el-form-item label="默认用户名" prop="username">
+                    <el-input v-model="resourceConfigForm.username" placeholder="用于库存推送订阅等非订单场景" />
+                </el-form-item>
+                <el-form-item label="默认密码" prop="password">
+                    <el-input v-model="resourceConfigForm.password" type="password" show-password placeholder="用于库存推送订阅等非订单场景" />
+                </el-form-item>
+                <el-form-item label="环境" prop="environment">
+                    <el-select v-model="resourceConfigForm.environment" style="width: 100%">
+                        <el-option label="生产环境" value="production" />
+                    </el-select>
+                </el-form-item>
+
+                <el-divider>同步方式配置</el-divider>
+
+                <el-form-item label="库存同步方式" prop="sync_mode.inventory">
+                    <el-select v-model="resourceConfigForm.sync_mode.inventory" style="width: 100%">
+                        <el-option label="资源方推送" value="push" />
+                        <el-option label="手工维护" value="manual" />
+                    </el-select>
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        选择"资源方推送"后，系统将自动接收资源方推送的库存信息
+                    </div>
+                </el-form-item>
+
+                <el-form-item label="价格同步方式" prop="sync_mode.price">
+                    <el-select v-model="resourceConfigForm.sync_mode.price" style="width: 100%">
+                        <el-option label="资源方推送" value="push" />
+                        <el-option label="手工维护" value="manual" />
+                    </el-select>
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        选择"资源方推送"后，系统将自动接收资源方推送的价格信息
+                    </div>
+                </el-form-item>
+
+                <el-form-item label="订单处理方式" prop="sync_mode.order">
+                    <el-select v-model="resourceConfigForm.sync_mode.order" style="width: 100%">
+                        <el-option label="系统直连" value="auto" />
+                        <el-option label="手工操作" value="manual" />
+                        <el-option label="其他系统" value="other" />
+                    </el-select>
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        选择"系统直连"后，订单将自动调用资源方接口；选择"其他系统"需要指定系统服务商
+                    </div>
+                </el-form-item>
+
+                <el-form-item 
+                    label="订单系统服务商" 
+                    prop="order_provider"
+                    v-if="resourceConfigForm.sync_mode.order === 'other'"
+                >
+                    <el-select v-model="resourceConfigForm.order_provider" placeholder="请选择系统服务商" style="width: 100%">
+                        <el-option 
+                            v-for="provider in softwareProviders" 
+                            :key="provider.id" 
+                            :label="provider.name" 
+                            :value="provider.id" 
+                        />
+                    </el-select>
+                </el-form-item>
+
+                <el-divider>OTA平台认证信息</el-divider>
+
+                <el-form-item 
+                    v-for="otaPlatform in otaPlatforms" 
+                    :key="otaPlatform.id"
+                    :label="`${otaPlatform.name}认证信息`"
+                >
+                    <div style="display: flex; gap: 10px; width: 100%;">
+                        <el-input
+                            v-model="resourceConfigForm.credentials[otaPlatform.code].username"
+                            placeholder="用户名"
+                            style="flex: 1;"
+                        />
+                        <el-input
+                            v-model="resourceConfigForm.credentials[otaPlatform.code].password"
+                            type="password"
+                            placeholder="密码"
+                            style="flex: 1;"
+                            show-password
+                        />
+                    </div>
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        该平台订单将使用此认证信息调用资源方接口
+                    </div>
+                </el-form-item>
+
+                <el-form-item label="状态" prop="is_active">
+                    <el-switch v-model="resourceConfigForm.is_active" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="resourceConfigDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="handleSubmitResourceConfig" :loading="resourceConfigSubmitting">保存</el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
@@ -122,6 +242,7 @@ import { Search } from '@element-plus/icons-vue';
 
 const scenicSpots = ref([]);
 const softwareProviders = ref([]);
+const otaPlatforms = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
 const dialogVisible = ref(false);
@@ -131,6 +252,30 @@ const currentPage = ref(1);
 const pageSize = ref(15);
 const total = ref(0);
 const editingId = ref(null);
+
+// 资源配置相关
+const resourceConfigDialogVisible = ref(false);
+const resourceConfigFormRef = ref(null);
+const resourceConfigSubmitting = ref(false);
+const currentScenicSpotId = ref(null);
+const resourceConfigForm = ref({
+    api_url: '',
+    username: '',
+    password: '',
+    environment: 'production',
+    sync_mode: {
+        inventory: 'manual',
+        price: 'manual',
+        order: 'manual',
+    },
+    order_provider: null,
+    credentials: {
+        ctrip: { username: '', password: '' },
+        meituan: { username: '', password: '' },
+        fliggy: { username: '', password: '' },
+    },
+    is_active: true,
+});
 
 const isEdit = computed(() => editingId.value !== null);
 const dialogTitle = computed(() => isEdit.value ? '编辑景区' : '创建景区');
@@ -156,6 +301,32 @@ const rules = {
     ],
     contact_phone: [
         { pattern: /^1[3-9]\d{9}$|^0\d{2,3}-?\d{7,8}$/, message: '请输入正确的电话号码', trigger: 'blur' }
+    ],
+};
+
+const resourceConfigRules = {
+    api_url: [
+        { required: true, message: '请输入接口地址', trigger: 'blur' },
+        { type: 'url', message: '请输入有效的URL', trigger: ['blur', 'change'] }
+    ],
+    username: [
+        { required: true, message: '请输入默认用户名', trigger: 'blur' }
+    ],
+    password: [
+        // 密码可以为空（编辑时如果不修改密码，可以不填）
+        { min: 0, max: 255, message: '密码长度不能超过255个字符', trigger: 'blur' }
+    ],
+    environment: [
+        { required: true, message: '请选择环境', trigger: 'change' }
+    ],
+    'sync_mode.inventory': [
+        { required: true, message: '请选择库存同步方式', trigger: 'change' }
+    ],
+    'sync_mode.price': [
+        { required: true, message: '请选择价格同步方式', trigger: 'change' }
+    ],
+    'sync_mode.order': [
+        { required: true, message: '请选择订单处理方式', trigger: 'change' }
     ],
 };
 
@@ -189,6 +360,15 @@ const fetchSoftwareProviders = async () => {
         softwareProviders.value = response.data.data || [];
     } catch (error) {
         console.error('获取软件服务商列表失败', error);
+    }
+};
+
+const fetchOtaPlatforms = async () => {
+    try {
+        const response = await axios.get('/ota-platforms');
+        otaPlatforms.value = response.data.data || [];
+    } catch (error) {
+        console.error('获取OTA平台列表失败', error);
     }
 };
 
@@ -279,9 +459,109 @@ const resetForm = () => {
     formRef.value?.clearValidate();
 };
 
+const handleConfigResource = async (row) => {
+    currentScenicSpotId.value = row.id;
+    resourceConfigDialogVisible.value = true;
+    
+    try {
+        // 获取现有配置
+        const response = await axios.get(`/scenic-spots/${row.id}/resource-config`);
+        if (response.data.success && response.data.data) {
+            const config = response.data.data;
+            resourceConfigForm.value = {
+                api_url: config.api_url || '',
+                username: config.username || '',
+                password: '', // 密码不返回，需要重新输入
+                environment: config.environment || 'production',
+                sync_mode: config.extra_config?.sync_mode || {
+                    inventory: 'manual',
+                    price: 'manual',
+                    order: 'manual',
+                },
+                order_provider: config.extra_config?.order_provider || null,
+                credentials: config.extra_config?.credentials || {
+                    ctrip: { username: '', password: '' },
+                    meituan: { username: '', password: '' },
+                    fliggy: { username: '', password: '' },
+                },
+                is_active: config.is_active ?? true,
+            };
+        } else {
+            // 没有配置，使用默认值
+            resetResourceConfigForm();
+        }
+    } catch (error) {
+        // 404表示没有配置，使用默认值
+        if (error.response?.status !== 404) {
+            ElMessage.error('获取资源配置失败');
+            console.error(error);
+        }
+        resetResourceConfigForm();
+    }
+};
+
+const handleSubmitResourceConfig = async () => {
+    if (!resourceConfigFormRef.value) return;
+    
+    await resourceConfigFormRef.value.validate(async (valid) => {
+        if (valid) {
+            resourceConfigSubmitting.value = true;
+            try {
+                // 确保 credentials 对象正确格式化
+                const submitData = {
+                    ...resourceConfigForm.value,
+                    credentials: resourceConfigForm.value.credentials || {},
+                };
+                
+                await axios.post(`/scenic-spots/${currentScenicSpotId.value}/resource-config`, submitData);
+                ElMessage.success('资源配置保存成功');
+                resourceConfigDialogVisible.value = false;
+                fetchScenicSpots();
+            } catch (error) {
+                // 显示更详细的错误信息
+                let message = '保存失败';
+                if (error.response?.data?.message) {
+                    message = error.response.data.message;
+                } else if (error.response?.data?.errors) {
+                    const errors = error.response.data.errors;
+                    const firstError = Object.values(errors)[0];
+                    message = Array.isArray(firstError) ? firstError[0] : firstError;
+                }
+                ElMessage.error(message);
+                console.error('保存资源配置失败:', error);
+            } finally {
+                resourceConfigSubmitting.value = false;
+            }
+        }
+    });
+};
+
+const resetResourceConfigForm = () => {
+    resourceConfigForm.value = {
+        api_url: '',
+        username: '',
+        password: '',
+        environment: 'production',
+        sync_mode: {
+            inventory: 'manual',
+            price: 'manual',
+            order: 'manual',
+        },
+        order_provider: null,
+        credentials: {
+            ctrip: { username: '', password: '' },
+            meituan: { username: '', password: '' },
+            fliggy: { username: '', password: '' },
+        },
+        is_active: true,
+    };
+    resourceConfigFormRef.value?.clearValidate();
+};
+
 onMounted(() => {
     fetchScenicSpots();
     fetchSoftwareProviders();
+    fetchOtaPlatforms();
 });
 </script>
 

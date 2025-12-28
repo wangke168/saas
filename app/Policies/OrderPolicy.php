@@ -26,11 +26,15 @@ class OrderPolicy
             return true;
         }
 
-        // 运营只能查看自己绑定的景区下的订单
+        // 运营只能查看所属资源方下的所有景区下的订单
         if ($user->isOperator()) {
             // 通过订单的产品关联找到景区
             if ($order->product && $order->product->scenic_spot_id) {
-                $scenicSpotIds = $user->scenicSpots->pluck('id');
+                $resourceProviderIds = $user->resourceProviders->pluck('id');
+                $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                    $query->whereIn('resource_providers.id', $resourceProviderIds);
+                })->pluck('id');
+                
                 return $scenicSpotIds->contains($order->product->scenic_spot_id);
             }
         }

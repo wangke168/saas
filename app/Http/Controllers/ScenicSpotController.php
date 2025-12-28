@@ -13,7 +13,7 @@ class ScenicSpotController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = ScenicSpot::with(['softwareProvider']);
+        $query = ScenicSpot::with(['softwareProvider', 'resourceProviders']);
 
         // 搜索功能
         if ($request->has('search') && $request->search) {
@@ -43,16 +43,17 @@ class ScenicSpotController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'code' => 'required|string|unique:scenic_spots,code',
+            'code' => 'nullable|string|unique:scenic_spots,code', // 改为可空，自动生成
             'description' => 'nullable|string',
             'address' => 'nullable|string',
             'contact_phone' => 'nullable|string',
             'software_provider_id' => 'nullable|exists:software_providers,id',
+            'resource_provider_id' => 'nullable|exists:resource_providers,id',
             'is_active' => 'boolean',
         ]);
 
         $scenicSpot = ScenicSpot::create($validated);
-        $scenicSpot->load('softwareProvider');
+        $scenicSpot->load(['softwareProvider', 'resourceProviders']);
 
         return response()->json([
             'message' => '景区创建成功',
@@ -65,7 +66,7 @@ class ScenicSpotController extends Controller
      */
     public function show(ScenicSpot $scenicSpot): JsonResponse
     {
-        $scenicSpot->load(['softwareProvider', 'hotels', 'products']);
+        $scenicSpot->load(['softwareProvider', 'resourceProviders', 'hotels', 'products']);
         
         return response()->json([
             'data' => $scenicSpot,
@@ -79,16 +80,17 @@ class ScenicSpotController extends Controller
     {
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
-            'code' => ['sometimes', 'required', 'string', 'unique:scenic_spots,code,' . $scenicSpot->id],
+            'code' => ['sometimes', 'nullable', 'string', 'unique:scenic_spots,code,' . $scenicSpot->id], // 改为可空
             'description' => 'nullable|string',
             'address' => 'nullable|string|max:255',
             'contact_phone' => 'nullable|string|max:20',
             'software_provider_id' => 'nullable|exists:software_providers,id',
+            'resource_provider_id' => 'nullable|exists:resource_providers,id',
             'is_active' => 'sometimes|boolean',
         ]);
 
         $scenicSpot->update($validated);
-        $scenicSpot->load('softwareProvider');
+        $scenicSpot->load(['softwareProvider', 'resourceProviders']);
 
         return response()->json([
             'message' => '景区更新成功',

@@ -13,10 +13,39 @@ class Product extends Model
 {
     use HasFactory, SoftDeletes;
 
+    /**
+     * 模型启动方法
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function ($product) {
+            // 如果 code 为空，自动生成唯一编码
+            if (empty($product->code)) {
+                $product->code = static::generateUniqueCode();
+            }
+        });
+    }
+
+    /**
+     * 生成唯一的产品编码
+     * 格式：PRD + YYYYMMDD + 6位随机字符串（大写字母和数字）
+     */
+    public static function generateUniqueCode(): string
+    {
+        do {
+            $code = 'PRD' . date('Ymd') . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6));
+        } while (static::where('code', $code)->exists());
+
+        return $code;
+    }
+
     protected $fillable = [
         'scenic_spot_id',
         'name',
         'code',
+        'external_code',
         'description',
         'price_source',
         'is_active',

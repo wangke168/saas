@@ -12,6 +12,32 @@ class ScenicSpot extends Model
 {
     use HasFactory;
 
+    /**
+     * 模型启动方法
+     */
+    protected static function boot()
+    {
+        parent::boot();
+        
+        static::creating(function ($scenicSpot) {
+            if (empty($scenicSpot->code)) {
+                $scenicSpot->code = static::generateUniqueCode();
+            }
+        });
+    }
+
+    /**
+     * 生成唯一的景区编码
+     */
+    protected static function generateUniqueCode(): string
+    {
+        do {
+            $code = 'SS' . date('Ymd') . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6));
+        } while (static::where('code', $code)->exists());
+        
+        return $code;
+    }
+
     protected $fillable = [
         'name',
         'code',
@@ -19,6 +45,7 @@ class ScenicSpot extends Model
         'address',
         'contact_phone',
         'software_provider_id',
+        'resource_provider_id',
         'resource_config_id',
         'is_system_connected',
         'is_active',
@@ -41,6 +68,22 @@ class ScenicSpot extends Model
     }
 
     /**
+     * 资源方（直接关联，用于快速查询）
+     */
+    public function resourceProvider(): BelongsTo
+    {
+        return $this->belongsTo(ResourceProvider::class);
+    }
+
+    /**
+     * 资源方（多对多关联，一个景区可以属于多个资源方）
+     */
+    public function resourceProviders(): BelongsToMany
+    {
+        return $this->belongsToMany(ResourceProvider::class, 'resource_provider_scenic_spots');
+    }
+
+    /**
      * 系统配置（该景区在系统中的配置）
      */
     public function resourceConfig(): BelongsTo
@@ -49,7 +92,8 @@ class ScenicSpot extends Model
     }
 
     /**
-     * 绑定的用户
+     * 绑定的用户（保留用于兼容，但不再使用）
+     * @deprecated 使用 resourceProviders 关联替代
      */
     public function users(): BelongsToMany
     {
