@@ -24,6 +24,11 @@ Route::prefix('webhooks')->group(function () {
     
     // 资源方Webhook路由
     Route::post('/resource/hengdian/inventory', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);
+    
+    // 测试接口（仅开发环境使用）
+    if (app()->environment(['local', 'testing'])) {
+        Route::post('/test/resource-inventory-push', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);
+    }
 });
 
 // 认证相关路由（无需认证）

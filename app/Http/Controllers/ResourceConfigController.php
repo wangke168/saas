@@ -58,12 +58,19 @@ class ResourceConfigController extends Controller
 
         // 隐藏敏感信息（密码）
         $configData = $config->toArray();
-        unset($configData['password']);
+        if (!empty($config->password)) {
+            // 如果密码存在，返回一个特殊标记，表示密码已设置（但不返回实际密码）
+            $configData['password'] = '***EXISTS***';
+        } else {
+            unset($configData['password']);
+        }
         
         // 如果 credentials 中有密码，也隐藏
         if (isset($configData['extra_config']['credentials'])) {
             foreach ($configData['extra_config']['credentials'] as $platform => $cred) {
-                if (isset($cred['password'])) {
+                if (isset($cred['password']) && !empty($cred['password'])) {
+                    $configData['extra_config']['credentials'][$platform]['password'] = '***EXISTS***';
+                } else {
                     $configData['extra_config']['credentials'][$platform]['password'] = '';
                 }
             }
@@ -82,7 +89,7 @@ class ResourceConfigController extends Controller
     {
         $validated = $request->validate([
             'username' => 'sometimes|string|max:255',
-            'password' => 'sometimes|string|max:255',
+            'password' => 'nullable|string|max:255', // 改为 nullable，允许不发送或发送 null
             'api_url' => 'sometimes|url|max:255',
             'environment' => 'sometimes|string|in:production',
             'is_active' => 'sometimes|boolean',
@@ -103,8 +110,9 @@ class ResourceConfigController extends Controller
         if (empty($validated['username'])) {
             $validated['username'] = env('HENGDIAN_USERNAME', '');
         }
-        if (empty($validated['password'])) {
-            // 如果密码为空，尝试从现有配置中获取，或者从.env读取
+        // 密码处理：如果未提供或为空，从现有配置中获取
+        if (!isset($validated['password']) || empty($validated['password'])) {
+            // 如果密码未提供或为空，从现有配置中获取，或者从.env读取
             $existingConfig = $scenicSpot->resourceConfig;
             if ($existingConfig && $existingConfig->password) {
                 $validated['password'] = $existingConfig->password; // 保持原密码
@@ -165,17 +173,25 @@ class ResourceConfigController extends Controller
                     if (!isset($existingCredentials[$platform])) {
                         $existingCredentials[$platform] = [];
                     }
-                    if (isset($cred['username']) && $cred['username'] !== '') {
+                    // 如果新值中有用户名，更新用户名
+                    if (isset($cred['username'])) {
                         $existingCredentials[$platform]['username'] = $cred['username'];
                     }
-                    if (isset($cred['password']) && $cred['password'] !== '') {
-                        $existingCredentials[$platform]['password'] = $cred['password'];
+                    // 如果新值中有密码且不为空，更新密码；如果为空，保留现有密码
+                    if (isset($cred['password'])) {
+                        if ($cred['password'] !== '' && $cred['password'] !== '***EXISTS***') {
+                            $existingCredentials[$platform]['password'] = $cred['password'];
+                        }
+                        // 如果密码为空字符串或 '***EXISTS***'，不更新（保留现有密码）
                     }
                 }
                 
                 $config->update([
                     'username' => $validated['username'] ?? $config->username,
-                    'password' => $validated['password'] ?? $config->password,
+                    // 如果密码未提供或为空，保留现有密码
+                    'password' => (!empty($validated['password']) && $validated['password'] !== '***EXISTS***') 
+                        ? $validated['password'] 
+                        : $config->password,
                     'api_url' => $validated['api_url'] ?? $config->api_url,
                     'environment' => $validated['environment'] ?? $config->environment,
                     'is_active' => $validated['is_active'] ?? $config->is_active,

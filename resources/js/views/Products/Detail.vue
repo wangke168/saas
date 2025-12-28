@@ -492,10 +492,37 @@
                                     </el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="推送状态" width="120">
+                            <el-table-column label="推送状态" width="150">
                                 <template #default="{ row }">
-                                    <el-tag :type="row.pushed_at ? 'success' : 'info'">
-                                        {{ row.pushed_at ? '已推送' : '未推送' }}
+                                    <el-tag 
+                                        v-if="row.push_status === 'processing'"
+                                        type="warning"
+                                    >
+                                        推送中...
+                                    </el-tag>
+                                    <el-tag 
+                                        v-else-if="row.push_status === 'success'"
+                                        type="success"
+                                    >
+                                        推送成功
+                                    </el-tag>
+                                    <el-tag 
+                                        v-else-if="row.push_status === 'failed'"
+                                        type="danger"
+                                    >
+                                        推送失败
+                                    </el-tag>
+                                    <el-tag 
+                                        v-else-if="row.pushed_at"
+                                        type="success"
+                                    >
+                                        已推送
+                                    </el-tag>
+                                    <el-tag 
+                                        v-else
+                                        type="info"
+                                    >
+                                        未推送
                                     </el-tag>
                                 </template>
                             </el-table-column>
@@ -512,9 +539,10 @@
                                         size="small" 
                                         type="primary" 
                                         @click="handlePushOtaProduct(row)"
-                                        :disabled="!row.is_active"
+                                        :disabled="!row.is_active || row.push_status === 'processing'"
+                                        :loading="row.push_status === 'processing'"
                                     >
-                                        {{ row.pushed_at ? '重新推送' : '推送' }}
+                                        {{ row.push_status === 'processing' ? '推送中...' : (row.pushed_at ? '重新推送' : '推送') }}
                                     </el-button>
                                 </template>
                             </el-table-column>
@@ -1337,8 +1365,26 @@ const handlePushOtaProduct = async (row) => {
         const response = await axios.post(`/ota-products/${row.id}/push`);
         
         if (response.data.success) {
-            ElMessage.success('推送成功');
+            // 如果是异步推送，提示用户
+            if (response.data.message && response.data.message.includes('后台处理')) {
+                ElMessage.success('推送任务已提交，正在后台处理中，请稍后刷新查看结果');
+            } else {
+                ElMessage.success('推送成功');
+            }
             fetchProduct();
+            
+            // 如果是异步推送，定期刷新状态
+            if (response.data.data?.push_status === 'processing') {
+                // 每3秒刷新一次，最多刷新20次（1分钟）
+                let refreshCount = 0;
+                const refreshInterval = setInterval(() => {
+                    refreshCount++;
+                    fetchProduct();
+                    if (refreshCount >= 20) {
+                        clearInterval(refreshInterval);
+                    }
+                }, 3000);
+            }
         } else {
             ElMessage.error(response.data.message || '推送失败');
         }

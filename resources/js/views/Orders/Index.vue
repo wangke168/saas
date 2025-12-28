@@ -97,7 +97,7 @@
                         <el-tag v-else type="info" size="small">人工操作</el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="300" fixed="right">
+                <el-table-column label="操作" width="400" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" @click="viewDetail(row)">详情</el-button>
                         
@@ -132,6 +132,28 @@
                             :loading="operating[row.id] === 'verify'"
                         >
                             核销
+                        </el-button>
+                        
+                        <!-- 同意取消按钮（申请取消中状态） -->
+                        <el-button 
+                            v-if="row.status === 'cancel_requested' || row.status?.value === 'cancel_requested'" 
+                            size="small" 
+                            type="success" 
+                            @click="handleApproveCancel(row)"
+                            :loading="operating[row.id] === 'approveCancel'"
+                        >
+                            同意取消
+                        </el-button>
+                        
+                        <!-- 拒绝取消按钮（申请取消中状态） -->
+                        <el-button 
+                            v-if="row.status === 'cancel_requested' || row.status?.value === 'cancel_requested'" 
+                            size="small" 
+                            type="danger" 
+                            @click="handleRejectCancel(row)"
+                            :loading="operating[row.id] === 'rejectCancel'"
+                        >
+                            拒绝取消
                         </el-button>
                     </template>
                 </el-table-column>
@@ -196,6 +218,11 @@ const fetchOrders = async () => {
         const response = await axios.get('/orders', { params });
         orders.value = response.data.data;
         total.value = response.data.total;
+        
+        // 调试：检查订单状态格式（开发环境）
+        if (orders.value.length > 0 && orders.value.some(o => o.status === 'cancel_requested')) {
+            console.log('找到申请取消中的订单:', orders.value.filter(o => o.status === 'cancel_requested'));
+        }
     } catch (error) {
         ElMessage.error('获取订单列表失败');
     } finally {
@@ -396,6 +423,79 @@ const handleVerifyOrder = async (row) => {
     } catch (error) {
         if (error !== 'cancel') {
             const message = error.response?.data?.message || '核销失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleApproveCancel = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            '确定要同意取消订单吗？同意后将释放库存并通知OTA平台。',
+            '同意取消确认',
+            {
+                type: 'warning',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'approveCancel';
+        const response = await axios.post(`/orders/${row.id}/approve-cancel`, {
+            reason: '人工同意取消',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '同意取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '同意取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '同意取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectCancel = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒绝取消的原因',
+            '拒绝取消',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒绝取消的原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒绝取消的原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'rejectCancel';
+        const response = await axios.post(`/orders/${row.id}/reject-cancel`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒绝取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒绝取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒绝取消失败';
             ElMessage.error(message);
         }
     } finally {

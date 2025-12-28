@@ -471,7 +471,9 @@ const handleConfigResource = async (row) => {
             resourceConfigForm.value = {
                 api_url: config.api_url || '',
                 username: config.username || '',
-                password: '', // 密码不返回，需要重新输入
+                // 如果后端返回 '***EXISTS***'，表示密码已存在，保持为空（用户不修改则不更新）
+                // 如果为空字符串，表示没有密码
+                password: config.password === '***EXISTS***' ? '' : (config.password || ''),
                 environment: config.environment || 'production',
                 sync_mode: config.extra_config?.sync_mode || {
                     inventory: 'manual',
@@ -479,10 +481,26 @@ const handleConfigResource = async (row) => {
                     order: 'manual',
                 },
                 order_provider: config.extra_config?.order_provider || null,
-                credentials: config.extra_config?.credentials || {
-                    ctrip: { username: '', password: '' },
-                    meituan: { username: '', password: '' },
-                    fliggy: { username: '', password: '' },
+                // 确保 credentials 正确初始化，保留现有的用户名（即使密码被隐藏）
+                credentials: {
+                    ctrip: {
+                        username: config.extra_config?.credentials?.ctrip?.username || '',
+                        password: config.extra_config?.credentials?.ctrip?.password === '***EXISTS***' 
+                            ? '' 
+                            : (config.extra_config?.credentials?.ctrip?.password || ''),
+                    },
+                    meituan: {
+                        username: config.extra_config?.credentials?.meituan?.username || '',
+                        password: config.extra_config?.credentials?.meituan?.password === '***EXISTS***' 
+                            ? '' 
+                            : (config.extra_config?.credentials?.meituan?.password || ''),
+                    },
+                    fliggy: {
+                        username: config.extra_config?.credentials?.fliggy?.username || '',
+                        password: config.extra_config?.credentials?.fliggy?.password === '***EXISTS***' 
+                            ? '' 
+                            : (config.extra_config?.credentials?.fliggy?.password || ''),
+                    },
                 },
                 is_active: config.is_active ?? true,
             };
@@ -508,9 +526,35 @@ const handleSubmitResourceConfig = async () => {
             resourceConfigSubmitting.value = true;
             try {
                 // 确保 credentials 对象正确格式化
+                // 重要：即使密码为空，如果用户名存在，也要发送（后端会保留现有密码）
+                const credentials = {};
+                for (const [platform, cred] of Object.entries(resourceConfigForm.value.credentials || {})) {
+                    if (cred) {
+                        // 如果用户名或密码有值，就发送（即使密码为空，也要发送，让后端知道要保留现有密码）
+                        if (cred.username || cred.password) {
+                            credentials[platform] = {
+                                username: cred.username || '',
+                                // 如果密码为空字符串，后端会保留现有密码
+                                password: cred.password || '',
+                            };
+                        }
+                    }
+                }
+                
                 const submitData = {
-                    ...resourceConfigForm.value,
-                    credentials: resourceConfigForm.value.credentials || {},
+                    api_url: resourceConfigForm.value.api_url,
+                    username: resourceConfigForm.value.username,
+                    // 如果密码是 '***EXISTS***' 或空，不发送 password 字段，让后端从现有配置中获取
+                    // 否则确保是字符串类型
+                    ...(resourceConfigForm.value.password && resourceConfigForm.value.password !== '***EXISTS***' 
+                        ? { password: String(resourceConfigForm.value.password) } 
+                        : {}),
+                    environment: resourceConfigForm.value.environment,
+                    is_active: resourceConfigForm.value.is_active,
+                    sync_mode: resourceConfigForm.value.sync_mode,
+                    order_provider: resourceConfigForm.value.order_provider || null,
+                    // 即使 credentials 为空对象，也要发送，确保后端知道要保留现有值
+                    credentials: Object.keys(credentials).length > 0 ? credentials : {},
                 };
                 
                 await axios.post(`/scenic-spots/${currentScenicSpotId.value}/resource-config`, submitData);

@@ -8,7 +8,6 @@ use App\Helpers\CtripErrorCodeHelper;
 use App\Models\OtaProduct;
 use App\Models\Product;
 use App\Services\OTA\CtripService;
-use App\Services\OTA\CtripResultHelper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -76,14 +75,50 @@ class OtaProductController extends Controller
 
     /**
      * 推送产品到OTA平台
+     * 
+     * 注意：通过环境变量 ENABLE_PRODUCT_PUSH_ASYNC 控制是否使用异步处理
+     * - true: 使用异步队列处理（推荐，适合大数据量）
+     * - false: 使用同步处理（默认，保持向后兼容）
      */
     public function push(OtaProduct $otaProduct): JsonResponse
     {
         try {
+            // 检查是否启用异步处理
+            $useAsync = env('ENABLE_PRODUCT_PUSH_ASYNC', false);
+
+            if ($useAsync) {
+                // 使用异步处理方式
+                return $this->pushAsync($otaProduct);
+            }
+
+            // 使用原有的同步处理方式（保持向后兼容）
+            return $this->pushSync($otaProduct);
+
+        } catch (\Exception $e) {
+            Log::error('推送产品到OTA失败', [
+                'ota_product_id' => $otaProduct->id,
+                'product_id' => $otaProduct->product_id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '推送失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * 异步推送方式（新功能）
+     * 立即返回，后台异步处理
+     */
+    protected function pushAsync(OtaProduct $otaProduct): JsonResponse
+    {
+        try {
             // 检查是否已推送
             if ($otaProduct->pushed_at) {
-                // 已推送，执行重新推送
-                Log::info('重新推送产品到OTA', [
+                Log::info('重新推送产品到OTA（异步）', [
                     'ota_product_id' => $otaProduct->id,
                     'product_id' => $otaProduct->product_id,
                 ]);
@@ -99,52 +134,100 @@ class OtaProductController extends Controller
                 ], 422);
             }
 
-            // 调用对应的OTA服务推送产品
-            $pushResult = $this->pushProductToPlatform($product, $otaPlatform);
+            // 更新推送状态为处理中
+            $otaProduct->update([
+                'push_status' => 'processing',
+                'push_started_at' => now(),
+            ]);
 
-            if ($pushResult['success']) {
-                // 更新推送信息
-                $otaProduct->update([
-                    'ota_product_id' => $pushResult['ota_product_id'] ?? $otaProduct->ota_product_id,
-                    'is_active' => true,
-                    'pushed_at' => now(),
-                ]);
+            // 将推送任务放入队列
+            \App\Jobs\PushProductToOtaJob::dispatch($otaProduct->id)
+                ->onQueue('ota-push');
 
-                return response()->json([
-                    'success' => true,
-                    'message' => '推送成功',
-                    'data' => [
-                        'ota_product_id' => $otaProduct->ota_product_id,
-                        'pushed_at' => $otaProduct->pushed_at,
-                    ],
-                ]);
-            } else {
-                // 推送失败，但保留绑定关系
-                $errorMessage = $pushResult['message'] ?? '推送失败';
-                
-                // 如果是网络错误，提供更详细的提示
-                if (str_contains($errorMessage, 'DNS解析失败') || str_contains($errorMessage, 'Could not resolve host')) {
-                    $errorMessage .= '。提示：命令行可以成功但Web请求失败，可能是PHP-FPM的网络配置问题，请检查服务器DNS配置或网络策略。';
-                }
-                
-                return response()->json([
-                    'success' => false,
-                    'message' => $errorMessage,
-                    'errors' => $pushResult['errors'] ?? [],
-                ], 422);
-            }
-        } catch (\Exception $e) {
-            Log::error('推送产品到OTA失败', [
+            Log::info('产品推送任务已放入队列', [
                 'ota_product_id' => $otaProduct->id,
-                'product_id' => $otaProduct->product_id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'product_id' => $product->id,
+                'platform' => $otaPlatform->code->value,
             ]);
 
             return response()->json([
+                'success' => true,
+                'message' => '推送任务已提交，正在后台处理中',
+                'data' => [
+                    'ota_product_id' => $otaProduct->ota_product_id,
+                    'pushed_at' => $otaProduct->pushed_at,
+                    'push_status' => 'processing',
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('异步推送任务提交失败', [
+                'ota_product_id' => $otaProduct->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            // 降级到同步处理
+            return $this->pushSync($otaProduct);
+        }
+    }
+
+    /**
+     * 同步推送方式（原有逻辑，保持向后兼容）
+     */
+    protected function pushSync(OtaProduct $otaProduct): JsonResponse
+    {
+        // 检查是否已推送
+        if ($otaProduct->pushed_at) {
+            // 已推送，执行重新推送
+            Log::info('重新推送产品到OTA', [
+                'ota_product_id' => $otaProduct->id,
+                'product_id' => $otaProduct->product_id,
+            ]);
+        }
+
+        $product = $otaProduct->product;
+        $otaPlatform = $otaProduct->otaPlatform;
+
+        if (!$otaPlatform) {
+            return response()->json([
                 'success' => false,
-                'message' => '推送失败：' . $e->getMessage(),
-            ], 500);
+                'message' => 'OTA平台不存在',
+            ], 422);
+        }
+
+        // 调用对应的OTA服务推送产品
+        $pushResult = $this->pushProductToPlatform($product, $otaPlatform);
+
+        if ($pushResult['success']) {
+            // 更新推送信息
+            $otaProduct->update([
+                'ota_product_id' => $pushResult['ota_product_id'] ?? $otaProduct->ota_product_id,
+                'is_active' => true,
+                'pushed_at' => now(),
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => '推送成功',
+                'data' => [
+                    'ota_product_id' => $otaProduct->ota_product_id,
+                    'pushed_at' => $otaProduct->pushed_at,
+                ],
+            ]);
+        } else {
+            // 推送失败，但保留绑定关系
+            $errorMessage = $pushResult['message'] ?? '推送失败';
+            
+            // 如果是网络错误，提供更详细的提示
+            if (str_contains($errorMessage, 'DNS解析失败') || str_contains($errorMessage, 'Could not resolve host')) {
+                $errorMessage .= '。提示：命令行可以成功但Web请求失败，可能是PHP-FPM的网络配置问题，请检查服务器DNS配置或网络策略。';
+            }
+            
+            return response()->json([
+                'success' => false,
+                'message' => $errorMessage,
+                'errors' => $pushResult['errors'] ?? [],
+            ], 422);
         }
     }
 
@@ -269,8 +352,11 @@ class OtaProductController extends Controller
                 );
 
                 // 根据携程返回的 resultCode 判断成功（0000 表示成功）
-                $priceSuccess = CtripResultHelper::isSuccess($priceResult);
-                $stockSuccess = CtripResultHelper::isSuccess($stockResult);
+                $priceResultCode = $priceResult['header']['resultCode'] ?? null;
+                $stockResultCode = $stockResult['header']['resultCode'] ?? null;
+
+                $priceSuccess = CtripErrorCodeHelper::isSuccess($priceResultCode);
+                $stockSuccess = CtripErrorCodeHelper::isSuccess($stockResultCode);
 
                 if ($priceSuccess && $stockSuccess) {
                     $successCount++;
@@ -278,10 +364,16 @@ class OtaProductController extends Controller
                     $failCount++;
                     $priceError = $priceSuccess 
                         ? '价格推送成功' 
-                        : CtripResultHelper::getErrorMessage($priceResult);
+                        : CtripErrorCodeHelper::getErrorMessage(
+                            $priceResultCode, 
+                            $priceResult['header']['resultMessage'] ?? null
+                        );
                     $stockError = $stockSuccess 
                         ? '库存推送成功' 
-                        : CtripResultHelper::getErrorMessage($stockResult);
+                        : CtripErrorCodeHelper::getErrorMessage(
+                            $stockResultCode, 
+                            $stockResult['header']['resultMessage'] ?? null
+                        );
                     $errors[] = "酒店 {$hotel->name} 房型 {$roomType->name}: {$priceError}; {$stockError}";
                 }
             }

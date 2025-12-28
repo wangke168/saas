@@ -23,6 +23,10 @@ class ResourceController extends Controller
      * <RoomStatus>
      *     <RoomQuotaMap>[{"hotelNo":"001","roomType":"标准间","roomQuota":[{"date":"2021-10-21","quota":100},{"date":"2021-10-22","quota":0}]}]</RoomQuotaMap>
      * </RoomStatus>
+     * 
+     * 注意：通过环境变量 ENABLE_INVENTORY_PUSH_ASYNC 控制是否使用异步处理
+     * - true: 使用新的异步处理（Redis过滤 + 增量推送）
+     * - false: 使用原有同步处理（默认，保持向后兼容）
      */
     public function handleHengdianInventory(Request $request): JsonResponse
     {
@@ -33,24 +37,78 @@ class ResourceController extends Controller
                 'body' => $rawBody,
             ]);
 
-            // 解析XML请求
-            $xmlObj = new SimpleXMLElement($rawBody);
-            $roomQuotaMapJson = (string)$xmlObj->RoomQuotaMap;
-
-            if (empty($roomQuotaMapJson)) {
-                Log::warning('资源方库存推送：RoomQuotaMap为空');
-                return $this->xmlResponse('0', '成功');
+            // 检查是否启用异步处理（新功能）
+            $useAsync = env('ENABLE_INVENTORY_PUSH_ASYNC', false);
+            
+            if ($useAsync) {
+                // 使用新的异步处理方式
+                return $this->handleHengdianInventoryAsync($rawBody);
             }
 
-            // 解析JSON字符串
-            $roomQuotaMap = json_decode($roomQuotaMapJson, true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                Log::error('资源方库存推送：JSON解析失败', [
-                    'json' => $roomQuotaMapJson,
-                    'error' => json_last_error_msg(),
-                ]);
-                return $this->xmlResponse('-1', 'JSON解析失败');
-            }
+            // 使用原有的同步处理方式（保持向后兼容）
+            return $this->handleHengdianInventorySync($rawBody);
+
+        } catch (\Exception $e) {
+            Log::error('资源方库存推送：处理异常', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'body' => $request->getContent(),
+            ]);
+
+            return $this->xmlResponse('-1', '处理异常：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 异步处理方式（新功能）
+     * 立即返回响应，后台异步处理，使用 Redis 快速过滤
+     */
+    protected function handleHengdianInventoryAsync(string $rawBody): JsonResponse
+    {
+        try {
+            // 将数据放入队列，立即返回响应给景区方
+            \App\Jobs\ProcessResourceInventoryPushJob::dispatch($rawBody)
+                ->onQueue('resource-push'); // 使用专门的队列
+            
+            Log::info('资源方库存推送：已接收并放入队列（异步处理）', [
+                'body_length' => strlen($rawBody),
+            ]);
+            
+            // 立即返回，不等待处理完成
+            return $this->xmlResponse('0', '已接收');
+            
+        } catch (\Exception $e) {
+            Log::error('资源方库存推送：异步处理失败', [
+                'error' => $e->getMessage(),
+            ]);
+            // 降级到同步处理
+            return $this->handleHengdianInventorySync($rawBody);
+        }
+    }
+
+    /**
+     * 同步处理方式（原有逻辑，保持向后兼容）
+     */
+    protected function handleHengdianInventorySync(string $rawBody): JsonResponse
+    {
+        // 解析XML请求
+        $xmlObj = new SimpleXMLElement($rawBody);
+        $roomQuotaMapJson = (string)$xmlObj->RoomQuotaMap;
+
+        if (empty($roomQuotaMapJson)) {
+            Log::warning('资源方库存推送：RoomQuotaMap为空');
+            return $this->xmlResponse('0', '成功');
+        }
+
+        // 解析JSON字符串
+        $roomQuotaMap = json_decode($roomQuotaMapJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::error('资源方库存推送：JSON解析失败', [
+                'json' => $roomQuotaMapJson,
+                'error' => json_last_error_msg(),
+            ]);
+            return $this->xmlResponse('-1', 'JSON解析失败');
+        }
 
             // 处理每个酒店的库存信息
             $successCount = 0;
@@ -174,12 +232,10 @@ class ResourceController extends Controller
             return $this->xmlResponse('0', '成功');
 
         } catch (\Exception $e) {
-            Log::error('资源方库存推送：处理异常', [
+            Log::error('资源方库存推送：同步处理异常', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'body' => $request->getContent(),
             ]);
-
             return $this->xmlResponse('-1', '处理异常：' . $e->getMessage());
         }
     }

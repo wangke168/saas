@@ -16,6 +16,10 @@ class OtaProduct extends Model
         'ota_product_id',
         'is_active',
         'pushed_at',
+        'push_status',
+        'push_started_at',
+        'push_completed_at',
+        'push_message',
     ];
 
     protected function casts(): array
@@ -23,6 +27,8 @@ class OtaProduct extends Model
         return [
             'is_active' => 'boolean',
             'pushed_at' => 'datetime',
+            'push_started_at' => 'datetime',
+            'push_completed_at' => 'datetime',
         ];
     }
 
