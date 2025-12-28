@@ -583,7 +583,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -644,6 +644,9 @@ const otaBindSubmitting = ref(false);
 const otaBindForm = ref({
     ota_platform_id: null,
 });
+
+// 轮询相关
+const pollingIntervals = ref({}); // 存储每个 ota_product_id 的轮询定时器
 
 // 表单验证规则
 const priceFormRules = {
@@ -1367,23 +1370,23 @@ const handlePushOtaProduct = async (row) => {
         if (response.data.success) {
             // 如果是异步推送，提示用户
             if (response.data.message && response.data.message.includes('后台处理')) {
-                ElMessage.success('推送任务已提交，正在后台处理中，请稍后刷新查看结果');
+                ElMessage.success('推送任务已提交，正在后台处理中');
             } else {
                 ElMessage.success('推送成功');
             }
-            fetchProduct();
             
-            // 如果是异步推送，定期刷新状态
+            // 更新本地数据中的推送状态
+            if (response.data.data) {
+                row.push_status = response.data.data.push_status;
+                row.push_started_at = response.data.data.push_started_at;
+            }
+            
+            // 如果是异步推送，开始轮询状态
             if (response.data.data?.push_status === 'processing') {
-                // 每3秒刷新一次，最多刷新20次（1分钟）
-                let refreshCount = 0;
-                const refreshInterval = setInterval(() => {
-                    refreshCount++;
-                    fetchProduct();
-                    if (refreshCount >= 20) {
-                        clearInterval(refreshInterval);
-                    }
-                }, 3000);
+                startPollingPushStatus(row.id);
+            } else {
+                // 同步推送成功，刷新完整数据
+                fetchProduct();
             }
         } else {
             ElMessage.error(response.data.message || '推送失败');
@@ -1469,6 +1472,61 @@ const handleDeleteOtaProduct = async (row) => {
     }
 };
 
+// 开始轮询推送状态
+const startPollingPushStatus = (otaProductId) => {
+    // 清除旧的定时器（如果存在）
+    if (pollingIntervals.value[otaProductId]) {
+        clearInterval(pollingIntervals.value[otaProductId]);
+    }
+
+    pollingIntervals.value[otaProductId] = setInterval(async () => {
+        try {
+            const response = await axios.get(`/products/${route.params.id}`);
+            const updatedOtaProduct = response.data.data?.ota_products?.find(op => op.id === otaProductId);
+
+            if (updatedOtaProduct) {
+                // 更新本地数据中的推送状态
+                const localOtaProduct = otaProducts.value.find(op => op.id === otaProductId);
+                if (localOtaProduct) {
+                    localOtaProduct.push_status = updatedOtaProduct.push_status;
+                    localOtaProduct.push_message = updatedOtaProduct.push_message;
+                    localOtaProduct.push_completed_at = updatedOtaProduct.push_completed_at;
+                }
+
+                // 如果状态不再是处理中，停止轮询
+                if (updatedOtaProduct.push_status !== 'processing') {
+                    clearInterval(pollingIntervals.value[otaProductId]);
+                    delete pollingIntervals.value[otaProductId];
+                    
+                    // 显示完成消息
+                    if (updatedOtaProduct.push_status === 'success') {
+                        ElMessage.success(`产品 ${updatedOtaProduct.ota_platform?.name} 推送成功`);
+                    } else if (updatedOtaProduct.push_status === 'failed') {
+                        ElMessage.error(`产品 ${updatedOtaProduct.ota_platform?.name} 推送失败：${updatedOtaProduct.push_message || '未知错误'}`);
+                    }
+                }
+            } else {
+                // 如果找不到该 otaProduct，可能已被删除，停止轮询
+                clearInterval(pollingIntervals.value[otaProductId]);
+                delete pollingIntervals.value[otaProductId];
+            }
+        } catch (error) {
+            console.error('轮询推送状态失败', error);
+            // 出错时也停止轮询，避免无限重试
+            clearInterval(pollingIntervals.value[otaProductId]);
+            delete pollingIntervals.value[otaProductId];
+        }
+    }, 3000); // 每3秒轮询一次
+};
+
+// 清理所有轮询
+const clearAllPolling = () => {
+    Object.values(pollingIntervals.value).forEach(interval => {
+        clearInterval(interval);
+    });
+    pollingIntervals.value = {};
+};
+
 onMounted(async () => {
     await fetchProduct();
     await fetchOtaPlatforms();
@@ -1476,6 +1534,11 @@ onMounted(async () => {
         await fetchHotels();
         await fetchRoomTypes();
     }
+});
+
+onUnmounted(() => {
+    // 组件卸载时清理所有轮询
+    clearAllPolling();
 });
 </script>
 
