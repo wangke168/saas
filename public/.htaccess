@@ -13,6 +13,12 @@
     RewriteCond %{HTTP:x-xsrf-token} .
     RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
 
+    # 优先处理静态资源（Vite 构建的文件）
+    # 如果请求的是 /manage/assets/ 或 /manage/build/ 下的文件，直接返回文件
+    RewriteCond %{REQUEST_URI} ^/manage/(assets|build)/
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+
     # Redirect Trailing Slashes If Not A Folder...
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_URI} (.+)/$
