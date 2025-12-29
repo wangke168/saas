@@ -166,59 +166,59 @@ return [
 
     'environments' => [
         'production' => [
-            'supervisor-ota-push' => [
-                'connection' => 'redis',
-                'queue' => ['ota-push'],
-                'balance' => 'simple',
-                'processes' => 3,
-                'tries' => 3,
-                'timeout' => 600,  // 10分钟超时（推送大量数据）
-                'nice' => 0,
-                'maxTime' => 0,
-                'maxJobs' => 0,
-                'maxMemory' => 512,
-                'force' => false,
-                'rest' => 0,
-            ],
-            'supervisor-resource-push' => [
+            // 策略组1：高优先级 - 资源方推送（快速响应）
+            'supervisor-high-priority' => [
                 'connection' => 'redis',
                 'queue' => ['resource-push'],
-                'balance' => 'simple',
-                'processes' => 5,  // 资源方推送需要更多worker（高并发）
+                'balance' => 'auto',
+                'minProcesses' => 1,
+                'maxProcesses' => 7,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 2,
                 'tries' => 3,
                 'timeout' => 300,  // 5分钟超时
                 'nice' => 0,
                 'maxTime' => 0,
                 'maxJobs' => 0,
-                'maxMemory' => 512,
+                'maxMemory' => 128,
                 'force' => false,
                 'rest' => 0,
             ],
-            'supervisor-ota-sync' => [
+            
+            // 策略组2：中优先级 - OTA推送和默认队列
+            'supervisor-medium-priority' => [
+                'connection' => 'redis',
+                'queue' => ['ota-push', 'default'],
+                'balance' => 'auto',
+                'minProcesses' => 1,
+                'maxProcesses' => 5,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+                'tries' => 3,
+                'timeout' => 600,  // 10分钟超时（OTA推送需要）
+                'nice' => 0,
+                'maxTime' => 0,
+                'maxJobs' => 0,
+                'maxMemory' => 124,
+                'force' => false,
+                'rest' => 0,
+            ],
+            
+            // 策略组3：低优先级 - 同步任务（可延迟）
+            'supervisor-low-priority' => [
                 'connection' => 'redis',
                 'queue' => ['ota-sync'],
-                'balance' => 'simple',
-                'processes' => 2,  // 同步任务不需要太多worker
+                'balance' => 'auto',
+                'minProcesses' => 1,
+                'maxProcesses' => 3,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 5,
                 'tries' => 3,
                 'timeout' => 300,
                 'nice' => 0,
                 'maxTime' => 0,
                 'maxJobs' => 0,
-                'maxMemory' => 512,
-                'force' => false,
-                'rest' => 0,
-            ],
-            'supervisor-default' => [
-                'connection' => 'redis',
-                'queue' => ['default'],
-                'balance' => 'simple',
-                'processes' => 3,  // 默认队列处理各种任务
-                'tries' => 3,
-                'timeout' => 300,
-                'nice' => 0,
-                'maxTime' => 0,
-                'maxJobs' => 0,
-                'maxMemory' => 512,
+                'maxMemory' => 128,
                 'force' => false,
                 'rest' => 0,
             ],
