@@ -535,3 +535,686 @@ onMounted(() => {
 });
 </script>
 
+
+            dangerouslyUseHTMLString: true,
+        }
+    );
+};
+
+const handleConfirmOrder = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要接单吗？系统将自动调用资源方接口确认订单。'
+                : '确定要接单吗？',
+            '接单确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'confirm';
+        const response = await axios.post(`/orders/${row.id}/confirm`, {
+            remark: '',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '接单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '接单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '接单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectOrder = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒单原因',
+            '拒单',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒单原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒单原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'reject';
+        const response = await axios.post(`/orders/${row.id}/reject`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleVerifyOrder = async (row) => {
+    try {
+        // 构建核销数据
+        const verifyData = {
+            use_start_date: row.check_in_date,
+            use_end_date: row.check_out_date,
+            use_quantity: row.room_count,
+            passengers: [],
+            vouchers: [],
+        };
+
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要核销订单吗？系统将自动调用资源方接口核销订单。'
+                : '确定要核销订单吗？',
+            '核销确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'verify';
+        const response = await axios.post(`/orders/${row.id}/verify`, verifyData);
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '核销成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '核销失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '核销失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleApproveCancel = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            '确定要同意取消订单吗？同意后将释放库存并通知OTA平台。',
+            '同意取消确认',
+            {
+                type: 'warning',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'approveCancel';
+        const response = await axios.post(`/orders/${row.id}/approve-cancel`, {
+            reason: '人工同意取消',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '同意取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '同意取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '同意取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectCancel = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒绝取消的原因',
+            '拒绝取消',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒绝取消的原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒绝取消的原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'rejectCancel';
+        const response = await axios.post(`/orders/${row.id}/reject-cancel`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒绝取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒绝取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒绝取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleUpdateStatus = async (row, status) => {
+    try {
+        let remark = '';
+        
+        if (status === 'rejected') {
+            const { value } = await ElMessageBox.prompt('请输入拒单原因', '拒单', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+            });
+            remark = value;
+        }
+        
+        await axios.post(`/orders/${row.id}/update-status`, {
+            status,
+            remark,
+        });
+        ElMessage.success('订单状态更新成功');
+        fetchOrders();
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '更新订单状态失败';
+            ElMessage.error(message);
+        }
+    }
+};
+
+onMounted(() => {
+    fetchOrders();
+});
+</script>
+
+
+            dangerouslyUseHTMLString: true,
+        }
+    );
+};
+
+const handleConfirmOrder = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要接单吗？系统将自动调用资源方接口确认订单。'
+                : '确定要接单吗？',
+            '接单确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'confirm';
+        const response = await axios.post(`/orders/${row.id}/confirm`, {
+            remark: '',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '接单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '接单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '接单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectOrder = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒单原因',
+            '拒单',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒单原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒单原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'reject';
+        const response = await axios.post(`/orders/${row.id}/reject`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleVerifyOrder = async (row) => {
+    try {
+        // 构建核销数据
+        const verifyData = {
+            use_start_date: row.check_in_date,
+            use_end_date: row.check_out_date,
+            use_quantity: row.room_count,
+            passengers: [],
+            vouchers: [],
+        };
+
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要核销订单吗？系统将自动调用资源方接口核销订单。'
+                : '确定要核销订单吗？',
+            '核销确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'verify';
+        const response = await axios.post(`/orders/${row.id}/verify`, verifyData);
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '核销成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '核销失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '核销失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleApproveCancel = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            '确定要同意取消订单吗？同意后将释放库存并通知OTA平台。',
+            '同意取消确认',
+            {
+                type: 'warning',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'approveCancel';
+        const response = await axios.post(`/orders/${row.id}/approve-cancel`, {
+            reason: '人工同意取消',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '同意取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '同意取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '同意取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectCancel = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒绝取消的原因',
+            '拒绝取消',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒绝取消的原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒绝取消的原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'rejectCancel';
+        const response = await axios.post(`/orders/${row.id}/reject-cancel`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒绝取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒绝取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒绝取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleUpdateStatus = async (row, status) => {
+    try {
+        let remark = '';
+        
+        if (status === 'rejected') {
+            const { value } = await ElMessageBox.prompt('请输入拒单原因', '拒单', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+            });
+            remark = value;
+        }
+        
+        await axios.post(`/orders/${row.id}/update-status`, {
+            status,
+            remark,
+        });
+        ElMessage.success('订单状态更新成功');
+        fetchOrders();
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '更新订单状态失败';
+            ElMessage.error(message);
+        }
+    }
+};
+
+onMounted(() => {
+    fetchOrders();
+});
+</script>
+
+
+            dangerouslyUseHTMLString: true,
+        }
+    );
+};
+
+const handleConfirmOrder = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要接单吗？系统将自动调用资源方接口确认订单。'
+                : '确定要接单吗？',
+            '接单确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'confirm';
+        const response = await axios.post(`/orders/${row.id}/confirm`, {
+            remark: '',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '接单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '接单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '接单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectOrder = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒单原因',
+            '拒单',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒单原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒单原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'reject';
+        const response = await axios.post(`/orders/${row.id}/reject`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒单成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒单失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleVerifyOrder = async (row) => {
+    try {
+        // 构建核销数据
+        const verifyData = {
+            use_start_date: row.check_in_date,
+            use_end_date: row.check_out_date,
+            use_quantity: row.room_count,
+            passengers: [],
+            vouchers: [],
+        };
+
+        await ElMessageBox.confirm(
+            row.hotel?.scenic_spot?.is_system_connected 
+                ? '确定要核销订单吗？系统将自动调用资源方接口核销订单。'
+                : '确定要核销订单吗？',
+            '核销确认',
+            {
+                type: 'info',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'verify';
+        const response = await axios.post(`/orders/${row.id}/verify`, verifyData);
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '核销成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '核销失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '核销失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleApproveCancel = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            '确定要同意取消订单吗？同意后将释放库存并通知OTA平台。',
+            '同意取消确认',
+            {
+                type: 'warning',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'approveCancel';
+        const response = await axios.post(`/orders/${row.id}/approve-cancel`, {
+            reason: '人工同意取消',
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '同意取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '同意取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '同意取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRejectCancel = async (row) => {
+    try {
+        const { value: reason } = await ElMessageBox.prompt(
+            '请输入拒绝取消的原因',
+            '拒绝取消',
+            {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+                inputPlaceholder: '请输入拒绝取消的原因',
+                inputValidator: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return '拒绝取消的原因不能为空';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        operating.value[row.id] = 'rejectCancel';
+        const response = await axios.post(`/orders/${row.id}/reject-cancel`, {
+            reason: reason.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '拒绝取消成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '拒绝取消失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '拒绝取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleUpdateStatus = async (row, status) => {
+    try {
+        let remark = '';
+        
+        if (status === 'rejected') {
+            const { value } = await ElMessageBox.prompt('请输入拒单原因', '拒单', {
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+                inputType: 'textarea',
+            });
+            remark = value;
+        }
+        
+        await axios.post(`/orders/${row.id}/update-status`, {
+            status,
+            remark,
+        });
+        ElMessage.success('订单状态更新成功');
+        fetchOrders();
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '更新订单状态失败';
+            ElMessage.error(message);
+        }
+    }
+};
+
+onMounted(() => {
+    fetchOrders();
+});
+</script>

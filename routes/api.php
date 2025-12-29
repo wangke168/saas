@@ -220,3 +220,194 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 });
 
+
+        Route::post('/', [\App\Http\Controllers\PriceRuleController::class, 'store']);
+        Route::get('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'show']);
+        Route::put('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'update']);
+        Route::delete('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'destroy']);
+    });
+
+    // 库存管理
+    Route::prefix('inventories')->group(function () {
+        Route::get('/', [\App\Http\Controllers\InventoryController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\InventoryController::class, 'store']);
+        Route::put('/{inventory}', [\App\Http\Controllers\InventoryController::class, 'update']);
+        Route::post('/{inventory}/close', [\App\Http\Controllers\InventoryController::class, 'close']);
+        Route::post('/{inventory}/open', [\App\Http\Controllers\InventoryController::class, 'open']);
+    });
+
+    // 订单管理
+    Route::prefix('orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
+        Route::get('/{order}', [\App\Http\Controllers\OrderController::class, 'show']);
+        Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
+        // 订单操作
+        Route::post('/{order}/confirm', [\App\Http\Controllers\OrderController::class, 'confirmOrder']);
+        Route::post('/{order}/reject', [\App\Http\Controllers\OrderController::class, 'rejectOrder']);
+        Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);
+        Route::post('/{order}/approve-cancel', [\App\Http\Controllers\OrderController::class, 'approveCancel']);
+        Route::post('/{order}/reject-cancel', [\App\Http\Controllers\OrderController::class, 'rejectCancel']);
+    });
+
+    // 异常订单处理
+    Route::prefix('exception-orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ExceptionOrderController::class, 'index']);
+        Route::get('/{exceptionOrder}', [\App\Http\Controllers\ExceptionOrderController::class, 'show']);
+        Route::post('/{exceptionOrder}/start-processing', [\App\Http\Controllers\ExceptionOrderController::class, 'startProcessing']);
+        Route::post('/{exceptionOrder}/resolve', [\App\Http\Controllers\ExceptionOrderController::class, 'resolve']);
+    });
+
+    // OTA平台管理（只读）
+    // OTA平台公开接口（用于产品绑定时的下拉选择）
+    Route::prefix('ota-platforms')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OtaPlatformController::class, 'index']);
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\OtaPlatformController::class, 'show']);
+    });
+
+    // OTA平台管理接口（仅超级管理员）
+    Route::prefix('admin/ota-platforms')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'store']);
+        
+        // OTA配置管理（必须在/{otaPlatform}之前，避免路由冲突）
+        Route::get('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'show']);
+        Route::post('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'store']);
+        
+        // OTA平台CRUD
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'show']);
+        Route::put('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'update']);
+        Route::delete('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'destroy']);
+        
+        // OTA配置更新和删除（使用config ID）
+        Route::put('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'update']);
+        Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);
+    });
+});
+
+
+        Route::post('/', [\App\Http\Controllers\PriceRuleController::class, 'store']);
+        Route::get('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'show']);
+        Route::put('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'update']);
+        Route::delete('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'destroy']);
+    });
+
+    // 库存管理
+    Route::prefix('inventories')->group(function () {
+        Route::get('/', [\App\Http\Controllers\InventoryController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\InventoryController::class, 'store']);
+        Route::put('/{inventory}', [\App\Http\Controllers\InventoryController::class, 'update']);
+        Route::post('/{inventory}/close', [\App\Http\Controllers\InventoryController::class, 'close']);
+        Route::post('/{inventory}/open', [\App\Http\Controllers\InventoryController::class, 'open']);
+    });
+
+    // 订单管理
+    Route::prefix('orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
+        Route::get('/{order}', [\App\Http\Controllers\OrderController::class, 'show']);
+        Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
+        // 订单操作
+        Route::post('/{order}/confirm', [\App\Http\Controllers\OrderController::class, 'confirmOrder']);
+        Route::post('/{order}/reject', [\App\Http\Controllers\OrderController::class, 'rejectOrder']);
+        Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);
+        Route::post('/{order}/approve-cancel', [\App\Http\Controllers\OrderController::class, 'approveCancel']);
+        Route::post('/{order}/reject-cancel', [\App\Http\Controllers\OrderController::class, 'rejectCancel']);
+    });
+
+    // 异常订单处理
+    Route::prefix('exception-orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ExceptionOrderController::class, 'index']);
+        Route::get('/{exceptionOrder}', [\App\Http\Controllers\ExceptionOrderController::class, 'show']);
+        Route::post('/{exceptionOrder}/start-processing', [\App\Http\Controllers\ExceptionOrderController::class, 'startProcessing']);
+        Route::post('/{exceptionOrder}/resolve', [\App\Http\Controllers\ExceptionOrderController::class, 'resolve']);
+    });
+
+    // OTA平台管理（只读）
+    // OTA平台公开接口（用于产品绑定时的下拉选择）
+    Route::prefix('ota-platforms')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OtaPlatformController::class, 'index']);
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\OtaPlatformController::class, 'show']);
+    });
+
+    // OTA平台管理接口（仅超级管理员）
+    Route::prefix('admin/ota-platforms')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'store']);
+        
+        // OTA配置管理（必须在/{otaPlatform}之前，避免路由冲突）
+        Route::get('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'show']);
+        Route::post('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'store']);
+        
+        // OTA平台CRUD
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'show']);
+        Route::put('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'update']);
+        Route::delete('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'destroy']);
+        
+        // OTA配置更新和删除（使用config ID）
+        Route::put('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'update']);
+        Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);
+    });
+});
+
+
+        Route::post('/', [\App\Http\Controllers\PriceRuleController::class, 'store']);
+        Route::get('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'show']);
+        Route::put('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'update']);
+        Route::delete('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'destroy']);
+    });
+
+    // 库存管理
+    Route::prefix('inventories')->group(function () {
+        Route::get('/', [\App\Http\Controllers\InventoryController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\InventoryController::class, 'store']);
+        Route::put('/{inventory}', [\App\Http\Controllers\InventoryController::class, 'update']);
+        Route::post('/{inventory}/close', [\App\Http\Controllers\InventoryController::class, 'close']);
+        Route::post('/{inventory}/open', [\App\Http\Controllers\InventoryController::class, 'open']);
+    });
+
+    // 订单管理
+    Route::prefix('orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
+        Route::get('/{order}', [\App\Http\Controllers\OrderController::class, 'show']);
+        Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
+        // 订单操作
+        Route::post('/{order}/confirm', [\App\Http\Controllers\OrderController::class, 'confirmOrder']);
+        Route::post('/{order}/reject', [\App\Http\Controllers\OrderController::class, 'rejectOrder']);
+        Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);
+        Route::post('/{order}/approve-cancel', [\App\Http\Controllers\OrderController::class, 'approveCancel']);
+        Route::post('/{order}/reject-cancel', [\App\Http\Controllers\OrderController::class, 'rejectCancel']);
+    });
+
+    // 异常订单处理
+    Route::prefix('exception-orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ExceptionOrderController::class, 'index']);
+        Route::get('/{exceptionOrder}', [\App\Http\Controllers\ExceptionOrderController::class, 'show']);
+        Route::post('/{exceptionOrder}/start-processing', [\App\Http\Controllers\ExceptionOrderController::class, 'startProcessing']);
+        Route::post('/{exceptionOrder}/resolve', [\App\Http\Controllers\ExceptionOrderController::class, 'resolve']);
+    });
+
+    // OTA平台管理（只读）
+    // OTA平台公开接口（用于产品绑定时的下拉选择）
+    Route::prefix('ota-platforms')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OtaPlatformController::class, 'index']);
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\OtaPlatformController::class, 'show']);
+    });
+
+    // OTA平台管理接口（仅超级管理员）
+    Route::prefix('admin/ota-platforms')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'store']);
+        
+        // OTA配置管理（必须在/{otaPlatform}之前，避免路由冲突）
+        Route::get('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'show']);
+        Route::post('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'store']);
+        
+        // OTA平台CRUD
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'show']);
+        Route::put('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'update']);
+        Route::delete('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'destroy']);
+        
+        // OTA配置更新和删除（使用config ID）
+        Route::put('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'update']);
+        Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);
+    });
+});

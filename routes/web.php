@@ -8,3 +8,12 @@ Route::prefix('manage')->group(function () {
         return view('app');
     })->where('any', '^(?!assets|build).*$');
 });
+
+    })->where('any', '^(?!assets|build).*$');
+});
+
+    })->where('any', '^(?!assets|build).*$');
+});
+
+    })->where('any', '^(?!assets|build).*$');
+});

@@ -116,3 +116,168 @@ class ScenicSpot extends Model
         return $this->hasMany(Product::class);
     }
 }
+
+    public function softwareProvider(): BelongsTo
+    {
+        return $this->belongsTo(SoftwareProvider::class);
+    }
+
+    /**
+     * 资源方（直接关联，用于快速查询）
+     */
+    public function resourceProvider(): BelongsTo
+    {
+        return $this->belongsTo(ResourceProvider::class);
+    }
+
+    /**
+     * 资源方（多对多关联，一个景区可以属于多个资源方）
+     */
+    public function resourceProviders(): BelongsToMany
+    {
+        return $this->belongsToMany(ResourceProvider::class, 'resource_provider_scenic_spots');
+    }
+
+    /**
+     * 系统配置（该景区在系统中的配置）
+     */
+    public function resourceConfig(): BelongsTo
+    {
+        return $this->belongsTo(ResourceConfig::class);
+    }
+
+    /**
+     * 绑定的用户（保留用于兼容，但不再使用）
+     * @deprecated 使用 resourceProviders 关联替代
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_scenic_spots');
+    }
+
+    /**
+     * 酒店列表
+     */
+    public function hotels(): HasMany
+    {
+        return $this->hasMany(Hotel::class);
+    }
+
+    /**
+     * 产品列表
+     */
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+}
+
+    public function softwareProvider(): BelongsTo
+    {
+        return $this->belongsTo(SoftwareProvider::class);
+    }
+
+    /**
+     * 资源方（直接关联，用于快速查询）
+     */
+    public function resourceProvider(): BelongsTo
+    {
+        return $this->belongsTo(ResourceProvider::class);
+    }
+
+    /**
+     * 资源方（多对多关联，一个景区可以属于多个资源方）
+     */
+    public function resourceProviders(): BelongsToMany
+    {
+        return $this->belongsToMany(ResourceProvider::class, 'resource_provider_scenic_spots');
+    }
+
+    /**
+     * 系统配置（该景区在系统中的配置）
+     */
+    public function resourceConfig(): BelongsTo
+    {
+        return $this->belongsTo(ResourceConfig::class);
+    }
+
+    /**
+     * 绑定的用户（保留用于兼容，但不再使用）
+     * @deprecated 使用 resourceProviders 关联替代
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_scenic_spots');
+    }
+
+    /**
+     * 酒店列表
+     */
+    public function hotels(): HasMany
+    {
+        return $this->hasMany(Hotel::class);
+    }
+
+    /**
+     * 产品列表
+     */
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+}
+
+    public function softwareProvider(): BelongsTo
+    {
+        return $this->belongsTo(SoftwareProvider::class);
+    }
+
+    /**
+     * 资源方（直接关联，用于快速查询）
+     */
+    public function resourceProvider(): BelongsTo
+    {
+        return $this->belongsTo(ResourceProvider::class);
+    }
+
+    /**
+     * 资源方（多对多关联，一个景区可以属于多个资源方）
+     */
+    public function resourceProviders(): BelongsToMany
+    {
+        return $this->belongsToMany(ResourceProvider::class, 'resource_provider_scenic_spots');
+    }
+
+    /**
+     * 系统配置（该景区在系统中的配置）
+     */
+    public function resourceConfig(): BelongsTo
+    {
+        return $this->belongsTo(ResourceConfig::class);
+    }
+
+    /**
+     * 绑定的用户（保留用于兼容，但不再使用）
+     * @deprecated 使用 resourceProviders 关联替代
+     */
+    public function users(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_scenic_spots');
+    }
+
+    /**
+     * 酒店列表
+     */
+    public function hotels(): HasMany
+    {
+        return $this->hasMany(Hotel::class);
+    }
+
+    /**
+     * 产品列表
+     */
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+}

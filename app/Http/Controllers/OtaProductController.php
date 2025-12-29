@@ -550,3 +550,557 @@ class OtaProductController extends Controller
     }
 }
 
+
+                            $priceResult['header']['resultMessage'] ?? null
+                        );
+                    $stockError = $stockSuccess 
+                        ? '库存推送成功' 
+                        : CtripErrorCodeHelper::getErrorMessage(
+                            $stockResultCode, 
+                            $stockResult['header']['resultMessage'] ?? null
+                        );
+                    $errors[] = "酒店 {$hotel->name} 房型 {$roomType->name}: {$priceError}; {$stockError}";
+                }
+            }
+
+            if ($failCount > 0) {
+                return [
+                    'success' => false,
+                    'message' => "部分推送失败：成功 {$successCount} 个，失败 {$failCount} 个",
+                    'errors' => $errors,
+                ];
+            }
+
+            Log::info('推送产品到携程成功', [
+                'product_id' => $product->id,
+                'combo_count' => count($combos),
+            ]);
+
+            return [
+                'success' => true,
+                'ota_product_id' => 'CTRIP_' . $product->id,
+                'message' => "推送成功，共推送 {$successCount} 个组合",
+            ];
+        } catch (\Exception $e) {
+            Log::error('推送到携程失败', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * 推送到飞猪
+     */
+    protected function pushToFliggy(Product $product): array
+    {
+        try {
+            // TODO: 实现飞猪产品推送
+            Log::info('推送产品到飞猪', [
+                'product_id' => $product->id,
+            ]);
+
+            return [
+                'success' => true,
+                'ota_product_id' => 'FLIGGY_' . $product->id,
+                'message' => '推送成功（待实现实际API调用）',
+            ];
+        } catch (\Exception $e) {
+            Log::error('推送到飞猪失败', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * 构建携程产品数据
+     */
+    protected function buildCtripProductData(Product $product): array
+    {
+        // 根据携程API文档构建产品数据
+        // 这里需要根据实际API文档调整
+        return [
+            'productId' => $product->code,
+            'productName' => $product->name,
+            'description' => $product->description,
+            'scenicSpot' => $product->scenicSpot->name ?? '',
+            // 更多字段根据API文档添加
+        ];
+    }
+
+    /**
+     * 删除OTA产品绑定（不调用OTA API取消推送）
+     */
+    public function destroy(OtaProduct $otaProduct): JsonResponse
+    {
+        try {
+            // 只删除本地绑定记录，不调用OTA API取消推送
+            $otaProduct->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => '删除成功',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('删除OTA产品失败', [
+                'ota_product_id' => $otaProduct->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '删除失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * 更新OTA产品（编辑）
+     */
+    public function update(Request $request, OtaProduct $otaProduct): JsonResponse
+    {
+        $request->validate([
+            'ota_platform_id' => 'sometimes|exists:ota_platforms,id',
+            'is_active' => 'sometimes|boolean',
+        ]);
+
+        try {
+            // 如果已推送，不允许修改平台
+            if ($otaProduct->pushed_at && $request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => '已推送的记录不允许修改OTA平台',
+                    ], 422);
+                }
+            }
+
+            // 检查新平台是否已绑定
+            if ($request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    $existing = OtaProduct::where('product_id', $otaProduct->product_id)
+                        ->where('ota_platform_id', $newPlatformId)
+                        ->where('id', '!=', $otaProduct->id)
+                        ->first();
+                    
+                    if ($existing) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => '该产品已绑定到此OTA平台',
+                        ], 422);
+                    }
+                }
+            }
+
+            $updateData = [];
+            if ($request->has('ota_platform_id')) {
+                $updateData['ota_platform_id'] = $request->input('ota_platform_id');
+            }
+            if ($request->has('is_active')) {
+                $updateData['is_active'] = $request->boolean('is_active');
+            }
+
+            $otaProduct->update($updateData);
+
+            return response()->json([
+                'success' => true,
+                'message' => '更新成功',
+                'data' => $otaProduct->fresh(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('更新OTA产品失败', [
+                'ota_product_id' => $otaProduct->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '更新失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+}
+
+
+                            $priceResult['header']['resultMessage'] ?? null
+                        );
+                    $stockError = $stockSuccess 
+                        ? '库存推送成功' 
+                        : CtripErrorCodeHelper::getErrorMessage(
+                            $stockResultCode, 
+                            $stockResult['header']['resultMessage'] ?? null
+                        );
+                    $errors[] = "酒店 {$hotel->name} 房型 {$roomType->name}: {$priceError}; {$stockError}";
+                }
+            }
+
+            if ($failCount > 0) {
+                return [
+                    'success' => false,
+                    'message' => "部分推送失败：成功 {$successCount} 个，失败 {$failCount} 个",
+                    'errors' => $errors,
+                ];
+            }
+
+            Log::info('推送产品到携程成功', [
+                'product_id' => $product->id,
+                'combo_count' => count($combos),
+            ]);
+
+            return [
+                'success' => true,
+                'ota_product_id' => 'CTRIP_' . $product->id,
+                'message' => "推送成功，共推送 {$successCount} 个组合",
+            ];
+        } catch (\Exception $e) {
+            Log::error('推送到携程失败', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * 推送到飞猪
+     */
+    protected function pushToFliggy(Product $product): array
+    {
+        try {
+            // TODO: 实现飞猪产品推送
+            Log::info('推送产品到飞猪', [
+                'product_id' => $product->id,
+            ]);
+
+            return [
+                'success' => true,
+                'ota_product_id' => 'FLIGGY_' . $product->id,
+                'message' => '推送成功（待实现实际API调用）',
+            ];
+        } catch (\Exception $e) {
+            Log::error('推送到飞猪失败', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * 构建携程产品数据
+     */
+    protected function buildCtripProductData(Product $product): array
+    {
+        // 根据携程API文档构建产品数据
+        // 这里需要根据实际API文档调整
+        return [
+            'productId' => $product->code,
+            'productName' => $product->name,
+            'description' => $product->description,
+            'scenicSpot' => $product->scenicSpot->name ?? '',
+            // 更多字段根据API文档添加
+        ];
+    }
+
+    /**
+     * 删除OTA产品绑定（不调用OTA API取消推送）
+     */
+    public function destroy(OtaProduct $otaProduct): JsonResponse
+    {
+        try {
+            // 只删除本地绑定记录，不调用OTA API取消推送
+            $otaProduct->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => '删除成功',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('删除OTA产品失败', [
+                'ota_product_id' => $otaProduct->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '删除失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * 更新OTA产品（编辑）
+     */
+    public function update(Request $request, OtaProduct $otaProduct): JsonResponse
+    {
+        $request->validate([
+            'ota_platform_id' => 'sometimes|exists:ota_platforms,id',
+            'is_active' => 'sometimes|boolean',
+        ]);
+
+        try {
+            // 如果已推送，不允许修改平台
+            if ($otaProduct->pushed_at && $request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => '已推送的记录不允许修改OTA平台',
+                    ], 422);
+                }
+            }
+
+            // 检查新平台是否已绑定
+            if ($request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    $existing = OtaProduct::where('product_id', $otaProduct->product_id)
+                        ->where('ota_platform_id', $newPlatformId)
+                        ->where('id', '!=', $otaProduct->id)
+                        ->first();
+                    
+                    if ($existing) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => '该产品已绑定到此OTA平台',
+                        ], 422);
+                    }
+                }
+            }
+
+            $updateData = [];
+            if ($request->has('ota_platform_id')) {
+                $updateData['ota_platform_id'] = $request->input('ota_platform_id');
+            }
+            if ($request->has('is_active')) {
+                $updateData['is_active'] = $request->boolean('is_active');
+            }
+
+            $otaProduct->update($updateData);
+
+            return response()->json([
+                'success' => true,
+                'message' => '更新成功',
+                'data' => $otaProduct->fresh(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('更新OTA产品失败', [
+                'ota_product_id' => $otaProduct->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '更新失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+}
+
+
+                            $priceResult['header']['resultMessage'] ?? null
+                        );
+                    $stockError = $stockSuccess 
+                        ? '库存推送成功' 
+                        : CtripErrorCodeHelper::getErrorMessage(
+                            $stockResultCode, 
+                            $stockResult['header']['resultMessage'] ?? null
+                        );
+                    $errors[] = "酒店 {$hotel->name} 房型 {$roomType->name}: {$priceError}; {$stockError}";
+                }
+            }
+
+            if ($failCount > 0) {
+                return [
+                    'success' => false,
+                    'message' => "部分推送失败：成功 {$successCount} 个，失败 {$failCount} 个",
+                    'errors' => $errors,
+                ];
+            }
+
+            Log::info('推送产品到携程成功', [
+                'product_id' => $product->id,
+                'combo_count' => count($combos),
+            ]);
+
+            return [
+                'success' => true,
+                'ota_product_id' => 'CTRIP_' . $product->id,
+                'message' => "推送成功，共推送 {$successCount} 个组合",
+            ];
+        } catch (\Exception $e) {
+            Log::error('推送到携程失败', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * 推送到飞猪
+     */
+    protected function pushToFliggy(Product $product): array
+    {
+        try {
+            // TODO: 实现飞猪产品推送
+            Log::info('推送产品到飞猪', [
+                'product_id' => $product->id,
+            ]);
+
+            return [
+                'success' => true,
+                'ota_product_id' => 'FLIGGY_' . $product->id,
+                'message' => '推送成功（待实现实际API调用）',
+            ];
+        } catch (\Exception $e) {
+            Log::error('推送到飞猪失败', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * 构建携程产品数据
+     */
+    protected function buildCtripProductData(Product $product): array
+    {
+        // 根据携程API文档构建产品数据
+        // 这里需要根据实际API文档调整
+        return [
+            'productId' => $product->code,
+            'productName' => $product->name,
+            'description' => $product->description,
+            'scenicSpot' => $product->scenicSpot->name ?? '',
+            // 更多字段根据API文档添加
+        ];
+    }
+
+    /**
+     * 删除OTA产品绑定（不调用OTA API取消推送）
+     */
+    public function destroy(OtaProduct $otaProduct): JsonResponse
+    {
+        try {
+            // 只删除本地绑定记录，不调用OTA API取消推送
+            $otaProduct->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => '删除成功',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('删除OTA产品失败', [
+                'ota_product_id' => $otaProduct->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '删除失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * 更新OTA产品（编辑）
+     */
+    public function update(Request $request, OtaProduct $otaProduct): JsonResponse
+    {
+        $request->validate([
+            'ota_platform_id' => 'sometimes|exists:ota_platforms,id',
+            'is_active' => 'sometimes|boolean',
+        ]);
+
+        try {
+            // 如果已推送，不允许修改平台
+            if ($otaProduct->pushed_at && $request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => '已推送的记录不允许修改OTA平台',
+                    ], 422);
+                }
+            }
+
+            // 检查新平台是否已绑定
+            if ($request->has('ota_platform_id')) {
+                $newPlatformId = $request->input('ota_platform_id');
+                if ($otaProduct->ota_platform_id != $newPlatformId) {
+                    $existing = OtaProduct::where('product_id', $otaProduct->product_id)
+                        ->where('ota_platform_id', $newPlatformId)
+                        ->where('id', '!=', $otaProduct->id)
+                        ->first();
+                    
+                    if ($existing) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => '该产品已绑定到此OTA平台',
+                        ], 422);
+                    }
+                }
+            }
+
+            $updateData = [];
+            if ($request->has('ota_platform_id')) {
+                $updateData['ota_platform_id'] = $request->input('ota_platform_id');
+            }
+            if ($request->has('is_active')) {
+                $updateData['is_active'] = $request->boolean('is_active');
+            }
+
+            $otaProduct->update($updateData);
+
+            return response()->json([
+                'success' => true,
+                'message' => '更新成功',
+                'data' => $otaProduct->fresh(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('更新OTA产品失败', [
+                'ota_product_id' => $otaProduct->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '更新失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+}

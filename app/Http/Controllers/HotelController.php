@@ -196,3 +196,81 @@ class HotelController extends Controller
         ]);
     }
 }
+
+     * 删除酒店
+     */
+    public function destroy(Hotel $hotel): JsonResponse
+    {
+        // 权限控制：运营只能删除所属资源方下的所有景区下的酒店
+        if (request()->user()->isOperator()) {
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
+            if (! $scenicSpotIds->contains($hotel->scenic_spot_id)) {
+                return response()->json([
+                    'message' => '无权删除该酒店',
+                ], 403);
+            }
+        }
+
+        $hotel->delete();
+
+        return response()->json([
+            'message' => '酒店删除成功',
+        ]);
+    }
+}
+
+     * 删除酒店
+     */
+    public function destroy(Hotel $hotel): JsonResponse
+    {
+        // 权限控制：运营只能删除所属资源方下的所有景区下的酒店
+        if (request()->user()->isOperator()) {
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
+            if (! $scenicSpotIds->contains($hotel->scenic_spot_id)) {
+                return response()->json([
+                    'message' => '无权删除该酒店',
+                ], 403);
+            }
+        }
+
+        $hotel->delete();
+
+        return response()->json([
+            'message' => '酒店删除成功',
+        ]);
+    }
+}
+
+     * 删除酒店
+     */
+    public function destroy(Hotel $hotel): JsonResponse
+    {
+        // 权限控制：运营只能删除所属资源方下的所有景区下的酒店
+        if (request()->user()->isOperator()) {
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
+            if (! $scenicSpotIds->contains($hotel->scenic_spot_id)) {
+                return response()->json([
+                    'message' => '无权删除该酒店',
+                ], 403);
+            }
+        }
+
+        $hotel->delete();
+
+        return response()->json([
+            'message' => '酒店删除成功',
+        ]);
+    }
+}

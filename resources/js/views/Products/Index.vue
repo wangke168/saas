@@ -591,3 +591,393 @@ h2 {
     margin-bottom: 20px;
 }
 </style>
+
+                type: 'warning',
+                confirmButtonText: '确定删除',
+                cancelButtonText: '取消'
+            }
+        );
+        
+        await axios.delete(`/products/${row.id}`);
+        ElMessage.success('删除成功');
+        fetchProducts();
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '删除失败';
+            ElMessage.error(message);
+        }
+    }
+};
+
+const resetForm = () => {
+    editingId.value = null;
+    form.value = {
+        scenic_spot_id: null,
+        name: '',
+        code: '', // 创建时为空，系统自动生成
+        external_code: '',
+        description: '',
+        price_source: 'manual',
+        stay_days: 1, // 默认值为1，必填
+        sale_start_date: null,
+        sale_end_date: null,
+        is_active: true,
+    };
+    if (formRef.value) {
+        formRef.value.clearValidate();
+    }
+};
+
+const formatDate = (date) => {
+    if (!date) return '';
+    return new Date(date).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const handleExport = async (product) => {
+    exporting.value[product.id] = true;
+    try {
+        const response = await axios.get(`/products/${product.id}/export`, {
+            responseType: 'blob',
+            // 处理错误响应（可能是 JSON 格式）
+            validateStatus: (status) => status < 500, // 允许 4xx 状态码
+        });
+        
+        // 检查响应类型
+        const contentType = response.headers['content-type'] || '';
+        
+        // 如果是 JSON 格式，说明是错误响应
+        if (contentType.includes('application/json') || response.status >= 400) {
+            // 尝试解析 JSON 错误信息
+            const text = await response.data.text();
+            let errorMessage = '导出失败';
+            
+            try {
+                const errorData = JSON.parse(text);
+                errorMessage = errorData.message || errorMessage;
+            } catch (e) {
+                // 如果解析失败，使用默认消息
+                errorMessage = text || errorMessage;
+            }
+            
+            ElMessage.error(errorMessage);
+            console.error('导出失败', errorMessage);
+            return;
+        }
+        
+        // 创建下载链接
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `product_${product.code}_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        
+        ElMessage.success('导出成功');
+    } catch (error) {
+        // 处理网络错误或其他异常
+        let message = '导出失败';
+        
+        if (error.response) {
+            // 尝试获取错误消息
+            if (error.response.data) {
+                if (typeof error.response.data === 'string') {
+                    try {
+                        const errorData = JSON.parse(error.response.data);
+                        message = errorData.message || message;
+                    } catch (e) {
+                        message = error.response.data || message;
+                    }
+                } else if (error.response.data.message) {
+                    message = error.response.data.message;
+                }
+            }
+        } else if (error.message) {
+            message = error.message;
+        }
+        
+        ElMessage.error(message);
+        console.error('导出失败', error);
+    } finally {
+        exporting.value[product.id] = false;
+    }
+};
+
+onMounted(() => {
+    fetchProducts();
+    fetchScenicSpots();
+});
+</script>
+
+<style scoped>
+h2 {
+    margin-bottom: 20px;
+}
+</style>
+
+                type: 'warning',
+                confirmButtonText: '确定删除',
+                cancelButtonText: '取消'
+            }
+        );
+        
+        await axios.delete(`/products/${row.id}`);
+        ElMessage.success('删除成功');
+        fetchProducts();
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '删除失败';
+            ElMessage.error(message);
+        }
+    }
+};
+
+const resetForm = () => {
+    editingId.value = null;
+    form.value = {
+        scenic_spot_id: null,
+        name: '',
+        code: '', // 创建时为空，系统自动生成
+        external_code: '',
+        description: '',
+        price_source: 'manual',
+        stay_days: 1, // 默认值为1，必填
+        sale_start_date: null,
+        sale_end_date: null,
+        is_active: true,
+    };
+    if (formRef.value) {
+        formRef.value.clearValidate();
+    }
+};
+
+const formatDate = (date) => {
+    if (!date) return '';
+    return new Date(date).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const handleExport = async (product) => {
+    exporting.value[product.id] = true;
+    try {
+        const response = await axios.get(`/products/${product.id}/export`, {
+            responseType: 'blob',
+            // 处理错误响应（可能是 JSON 格式）
+            validateStatus: (status) => status < 500, // 允许 4xx 状态码
+        });
+        
+        // 检查响应类型
+        const contentType = response.headers['content-type'] || '';
+        
+        // 如果是 JSON 格式，说明是错误响应
+        if (contentType.includes('application/json') || response.status >= 400) {
+            // 尝试解析 JSON 错误信息
+            const text = await response.data.text();
+            let errorMessage = '导出失败';
+            
+            try {
+                const errorData = JSON.parse(text);
+                errorMessage = errorData.message || errorMessage;
+            } catch (e) {
+                // 如果解析失败，使用默认消息
+                errorMessage = text || errorMessage;
+            }
+            
+            ElMessage.error(errorMessage);
+            console.error('导出失败', errorMessage);
+            return;
+        }
+        
+        // 创建下载链接
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `product_${product.code}_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        
+        ElMessage.success('导出成功');
+    } catch (error) {
+        // 处理网络错误或其他异常
+        let message = '导出失败';
+        
+        if (error.response) {
+            // 尝试获取错误消息
+            if (error.response.data) {
+                if (typeof error.response.data === 'string') {
+                    try {
+                        const errorData = JSON.parse(error.response.data);
+                        message = errorData.message || message;
+                    } catch (e) {
+                        message = error.response.data || message;
+                    }
+                } else if (error.response.data.message) {
+                    message = error.response.data.message;
+                }
+            }
+        } else if (error.message) {
+            message = error.message;
+        }
+        
+        ElMessage.error(message);
+        console.error('导出失败', error);
+    } finally {
+        exporting.value[product.id] = false;
+    }
+};
+
+onMounted(() => {
+    fetchProducts();
+    fetchScenicSpots();
+});
+</script>
+
+<style scoped>
+h2 {
+    margin-bottom: 20px;
+}
+</style>
+
+                type: 'warning',
+                confirmButtonText: '确定删除',
+                cancelButtonText: '取消'
+            }
+        );
+        
+        await axios.delete(`/products/${row.id}`);
+        ElMessage.success('删除成功');
+        fetchProducts();
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '删除失败';
+            ElMessage.error(message);
+        }
+    }
+};
+
+const resetForm = () => {
+    editingId.value = null;
+    form.value = {
+        scenic_spot_id: null,
+        name: '',
+        code: '', // 创建时为空，系统自动生成
+        external_code: '',
+        description: '',
+        price_source: 'manual',
+        stay_days: 1, // 默认值为1，必填
+        sale_start_date: null,
+        sale_end_date: null,
+        is_active: true,
+    };
+    if (formRef.value) {
+        formRef.value.clearValidate();
+    }
+};
+
+const formatDate = (date) => {
+    if (!date) return '';
+    return new Date(date).toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const handleExport = async (product) => {
+    exporting.value[product.id] = true;
+    try {
+        const response = await axios.get(`/products/${product.id}/export`, {
+            responseType: 'blob',
+            // 处理错误响应（可能是 JSON 格式）
+            validateStatus: (status) => status < 500, // 允许 4xx 状态码
+        });
+        
+        // 检查响应类型
+        const contentType = response.headers['content-type'] || '';
+        
+        // 如果是 JSON 格式，说明是错误响应
+        if (contentType.includes('application/json') || response.status >= 400) {
+            // 尝试解析 JSON 错误信息
+            const text = await response.data.text();
+            let errorMessage = '导出失败';
+            
+            try {
+                const errorData = JSON.parse(text);
+                errorMessage = errorData.message || errorMessage;
+            } catch (e) {
+                // 如果解析失败，使用默认消息
+                errorMessage = text || errorMessage;
+            }
+            
+            ElMessage.error(errorMessage);
+            console.error('导出失败', errorMessage);
+            return;
+        }
+        
+        // 创建下载链接
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `product_${product.code}_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        
+        ElMessage.success('导出成功');
+    } catch (error) {
+        // 处理网络错误或其他异常
+        let message = '导出失败';
+        
+        if (error.response) {
+            // 尝试获取错误消息
+            if (error.response.data) {
+                if (typeof error.response.data === 'string') {
+                    try {
+                        const errorData = JSON.parse(error.response.data);
+                        message = errorData.message || message;
+                    } catch (e) {
+                        message = error.response.data || message;
+                    }
+                } else if (error.response.data.message) {
+                    message = error.response.data.message;
+                }
+            }
+        } else if (error.message) {
+            message = error.message;
+        }
+        
+        ElMessage.error(message);
+        console.error('导出失败', error);
+    } finally {
+        exporting.value[product.id] = false;
+    }
+};
+
+onMounted(() => {
+    fetchProducts();
+    fetchScenicSpots();
+});
+</script>
+
+<style scoped>
+h2 {
+    margin-bottom: 20px;
+}
+</style>

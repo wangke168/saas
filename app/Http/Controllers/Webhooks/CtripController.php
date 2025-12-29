@@ -1422,3 +1422,540 @@ class CtripController extends Controller
         return 'ORD' . date('YmdHis') . str_pad(mt_rand(1, 99999), 5, '0', STR_PAD_LEFT);
     }
 }
+
+
+                // TODO: 检查目标日期的库存和价格
+                // TODO: 更新订单的入住和离店日期
+            }
+
+            // TODO: 实现订单修改逻辑
+
+            return $this->successResponse([
+                'supplierConfirmType' => 1, // 1.修改已确认
+                'items' => array_map(function($item) {
+                    return ['itemId' => $item['itemId'] ?? '1'];
+                }, $items),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('携程订单修改失败', [
+                'error' => $e->getMessage(),
+                'data' => $data,
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->errorResponse('0005', '系统处理异常');
+        }
+    }
+
+    /**
+     * 检查连续入住天数的库存是否足够
+     *
+     * @param int $roomTypeId 房型ID
+     * @param \Carbon\Carbon $checkInDate 入住日期
+     * @param int $stayDays 入住天数
+     * @param int $quantity 房间数量
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function checkInventoryForStayDays(int $roomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity): array
+    {
+        // 检查连续入住天数的库存
+        for ($i = 0; $i < $stayDays; $i++) {
+            $date = $checkInDate->copy()->addDays($i);
+            $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
+                ->where('date', $date->format('Y-m-d'))
+                ->first();
+
+            if (!$inventory) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，没有库存记录',
+                ];
+            }
+
+            if ($inventory->is_closed) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，库存已关闭',
+                ];
+            }
+
+            // 可用库存 = 总库存 - 锁定库存 - 已扣减库存
+            // available_quantity 已经考虑了锁定库存，所以直接比较即可
+            if ($inventory->available_quantity < $quantity) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，实际可用库存：' . $inventory->available_quantity . '，需要：' . $quantity,
+                ];
+            }
+        }
+
+        return ['success' => true, 'message' => ''];
+    }
+
+    /**
+     * 锁定库存（预下单时使用）
+     * 预下单的核心目的就是锁库存，防止其他订单占用
+     *
+     * @param Order $order 订单
+     * @param int|null $stayDays 入住天数，如果为null则从产品获取
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function lockInventoryForPreOrder(Order $order, ?int $stayDays = null): array
+    {
+        try {
+            // 获取入住天数
+            if ($stayDays === null) {
+                $product = $order->product;
+                $stayDays = $product->stay_days ?: 1;
+            }
+
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+
+            // 使用统一的库存服务锁定库存
+            $success = $this->inventoryService->lockInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
+
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存锁定成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存锁定失败：库存不足或并发冲突',
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单库存锁定异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '库存锁定失败：系统异常',
+            ];
+        }
+    }
+
+    /**
+     * 释放库存（预下单取消时使用）
+     * 将锁定的库存释放回可用库存
+     *
+     * @param Order $order 订单
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function releaseInventoryForPreOrder(Order $order): array
+    {
+        try {
+            // 获取入住天数
+            $product = $order->product;
+            $stayDays = $product->stay_days ?: 1;
+
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+
+            // 使用统一的库存服务释放库存（自动支持 Redis 降级方案）
+            $success = $this->inventoryService->releaseInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
+
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存释放成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存释放失败：系统异常',
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单库存释放异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '库存释放失败：系统异常',
+            ];
+        }
+    }
+
+    /**
+     * 生成订单号
+     */
+    protected function generateOrderNo(): string
+    {
+        return 'ORD' . date('YmdHis') . str_pad(mt_rand(1, 99999), 5, '0', STR_PAD_LEFT);
+    }
+}
+
+
+                // TODO: 检查目标日期的库存和价格
+                // TODO: 更新订单的入住和离店日期
+            }
+
+            // TODO: 实现订单修改逻辑
+
+            return $this->successResponse([
+                'supplierConfirmType' => 1, // 1.修改已确认
+                'items' => array_map(function($item) {
+                    return ['itemId' => $item['itemId'] ?? '1'];
+                }, $items),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('携程订单修改失败', [
+                'error' => $e->getMessage(),
+                'data' => $data,
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->errorResponse('0005', '系统处理异常');
+        }
+    }
+
+    /**
+     * 检查连续入住天数的库存是否足够
+     *
+     * @param int $roomTypeId 房型ID
+     * @param \Carbon\Carbon $checkInDate 入住日期
+     * @param int $stayDays 入住天数
+     * @param int $quantity 房间数量
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function checkInventoryForStayDays(int $roomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity): array
+    {
+        // 检查连续入住天数的库存
+        for ($i = 0; $i < $stayDays; $i++) {
+            $date = $checkInDate->copy()->addDays($i);
+            $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
+                ->where('date', $date->format('Y-m-d'))
+                ->first();
+
+            if (!$inventory) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，没有库存记录',
+                ];
+            }
+
+            if ($inventory->is_closed) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，库存已关闭',
+                ];
+            }
+
+            // 可用库存 = 总库存 - 锁定库存 - 已扣减库存
+            // available_quantity 已经考虑了锁定库存，所以直接比较即可
+            if ($inventory->available_quantity < $quantity) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，实际可用库存：' . $inventory->available_quantity . '，需要：' . $quantity,
+                ];
+            }
+        }
+
+        return ['success' => true, 'message' => ''];
+    }
+
+    /**
+     * 锁定库存（预下单时使用）
+     * 预下单的核心目的就是锁库存，防止其他订单占用
+     *
+     * @param Order $order 订单
+     * @param int|null $stayDays 入住天数，如果为null则从产品获取
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function lockInventoryForPreOrder(Order $order, ?int $stayDays = null): array
+    {
+        try {
+            // 获取入住天数
+            if ($stayDays === null) {
+                $product = $order->product;
+                $stayDays = $product->stay_days ?: 1;
+            }
+
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+
+            // 使用统一的库存服务锁定库存
+            $success = $this->inventoryService->lockInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
+
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存锁定成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存锁定失败：库存不足或并发冲突',
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单库存锁定异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '库存锁定失败：系统异常',
+            ];
+        }
+    }
+
+    /**
+     * 释放库存（预下单取消时使用）
+     * 将锁定的库存释放回可用库存
+     *
+     * @param Order $order 订单
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function releaseInventoryForPreOrder(Order $order): array
+    {
+        try {
+            // 获取入住天数
+            $product = $order->product;
+            $stayDays = $product->stay_days ?: 1;
+
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+
+            // 使用统一的库存服务释放库存（自动支持 Redis 降级方案）
+            $success = $this->inventoryService->releaseInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
+
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存释放成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存释放失败：系统异常',
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单库存释放异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '库存释放失败：系统异常',
+            ];
+        }
+    }
+
+    /**
+     * 生成订单号
+     */
+    protected function generateOrderNo(): string
+    {
+        return 'ORD' . date('YmdHis') . str_pad(mt_rand(1, 99999), 5, '0', STR_PAD_LEFT);
+    }
+}
+
+
+                // TODO: 检查目标日期的库存和价格
+                // TODO: 更新订单的入住和离店日期
+            }
+
+            // TODO: 实现订单修改逻辑
+
+            return $this->successResponse([
+                'supplierConfirmType' => 1, // 1.修改已确认
+                'items' => array_map(function($item) {
+                    return ['itemId' => $item['itemId'] ?? '1'];
+                }, $items),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('携程订单修改失败', [
+                'error' => $e->getMessage(),
+                'data' => $data,
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->errorResponse('0005', '系统处理异常');
+        }
+    }
+
+    /**
+     * 检查连续入住天数的库存是否足够
+     *
+     * @param int $roomTypeId 房型ID
+     * @param \Carbon\Carbon $checkInDate 入住日期
+     * @param int $stayDays 入住天数
+     * @param int $quantity 房间数量
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function checkInventoryForStayDays(int $roomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity): array
+    {
+        // 检查连续入住天数的库存
+        for ($i = 0; $i < $stayDays; $i++) {
+            $date = $checkInDate->copy()->addDays($i);
+            $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
+                ->where('date', $date->format('Y-m-d'))
+                ->first();
+
+            if (!$inventory) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，没有库存记录',
+                ];
+            }
+
+            if ($inventory->is_closed) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，库存已关闭',
+                ];
+            }
+
+            // 可用库存 = 总库存 - 锁定库存 - 已扣减库存
+            // available_quantity 已经考虑了锁定库存，所以直接比较即可
+            if ($inventory->available_quantity < $quantity) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，实际可用库存：' . $inventory->available_quantity . '，需要：' . $quantity,
+                ];
+            }
+        }
+
+        return ['success' => true, 'message' => ''];
+    }
+
+    /**
+     * 锁定库存（预下单时使用）
+     * 预下单的核心目的就是锁库存，防止其他订单占用
+     *
+     * @param Order $order 订单
+     * @param int|null $stayDays 入住天数，如果为null则从产品获取
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function lockInventoryForPreOrder(Order $order, ?int $stayDays = null): array
+    {
+        try {
+            // 获取入住天数
+            if ($stayDays === null) {
+                $product = $order->product;
+                $stayDays = $product->stay_days ?: 1;
+            }
+
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+
+            // 使用统一的库存服务锁定库存
+            $success = $this->inventoryService->lockInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
+
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存锁定成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存锁定失败：库存不足或并发冲突',
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单库存锁定异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '库存锁定失败：系统异常',
+            ];
+        }
+    }
+
+    /**
+     * 释放库存（预下单取消时使用）
+     * 将锁定的库存释放回可用库存
+     *
+     * @param Order $order 订单
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function releaseInventoryForPreOrder(Order $order): array
+    {
+        try {
+            // 获取入住天数
+            $product = $order->product;
+            $stayDays = $product->stay_days ?: 1;
+
+            // 获取日期范围
+            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+
+            // 使用统一的库存服务释放库存（自动支持 Redis 降级方案）
+            $success = $this->inventoryService->releaseInventoryForDates(
+                $order->room_type_id,
+                $dates,
+                $order->room_count
+            );
+
+            if ($success) {
+                return [
+                    'success' => true,
+                    'message' => '库存释放成功',
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'message' => '库存释放失败：系统异常',
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单库存释放异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '库存释放失败：系统异常',
+            ];
+        }
+    }
+
+    /**
+     * 生成订单号
+     */
+    protected function generateOrderNo(): string
+    {
+        return 'ORD' . date('YmdHis') . str_pad(mt_rand(1, 99999), 5, '0', STR_PAD_LEFT);
+    }
+}

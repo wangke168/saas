@@ -114,3 +114,56 @@ router.beforeEach(async (to, from, next) => {
 
 export default router;
 
+
+    if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+        next('/manage/login');
+    } else if (to.meta.requiresAdmin) {
+        const role = authStore.user?.role;
+        const isAdmin = role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
+        if (!isAdmin) {
+            next('/manage/');
+        } else {
+            next();
+        }
+    } else {
+        next();
+    }
+});
+
+export default router;
+
+
+    if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+        next('/manage/login');
+    } else if (to.meta.requiresAdmin) {
+        const role = authStore.user?.role;
+        const isAdmin = role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
+        if (!isAdmin) {
+            next('/manage/');
+        } else {
+            next();
+        }
+    } else {
+        next();
+    }
+});
+
+export default router;
+
+
+    if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+        next('/manage/login');
+    } else if (to.meta.requiresAdmin) {
+        const role = authStore.user?.role;
+        const isAdmin = role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
+        if (!isAdmin) {
+            next('/manage/');
+        } else {
+            next();
+        }
+    } else {
+        next();
+    }
+});
+
+export default router;

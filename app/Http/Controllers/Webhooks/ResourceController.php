@@ -255,3 +255,173 @@ class ResourceController extends Controller
     }
 }
 
+
+                    } catch (\Exception $e) {
+                        DB::rollBack();
+                        $failCount++;
+                        $errors[] = "更新库存失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
+                        Log::error('资源方库存推送：更新库存失败', [
+                            'hotel_id' => $hotel->id,
+                            'room_type_id' => $roomTypeModel->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+
+                } catch (\Exception $e) {
+                    $failCount++;
+                    $errors[] = "处理失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
+                    Log::error('资源方库存推送：处理失败', [
+                        'hotel_no' => $hotelNo,
+                        'room_type' => $roomType,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            if ($failCount > 0) {
+                Log::warning('资源方库存推送：部分失败', [
+                    'success_count' => $successCount,
+                    'fail_count' => $failCount,
+                    'errors' => $errors,
+                ]);
+            }
+
+            return $this->xmlResponse('0', '成功');
+
+        } catch (\Exception $e) {
+            Log::error('资源方库存推送：同步处理异常', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->xmlResponse('-1', '处理异常：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 返回XML响应
+     */
+    protected function xmlResponse(string $resultCode, string $message): JsonResponse
+    {
+        $xml = new SimpleXMLElement('<Result></Result>');
+        $xml->addChild('ResultCode', $resultCode);
+        $xml->addChild('Message', $message);
+
+        return response($xml->asXML(), 200, [
+            'Content-Type' => 'application/xml; charset=utf-8',
+        ]);
+    }
+}
+
+
+                    } catch (\Exception $e) {
+                        DB::rollBack();
+                        $failCount++;
+                        $errors[] = "更新库存失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
+                        Log::error('资源方库存推送：更新库存失败', [
+                            'hotel_id' => $hotel->id,
+                            'room_type_id' => $roomTypeModel->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+
+                } catch (\Exception $e) {
+                    $failCount++;
+                    $errors[] = "处理失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
+                    Log::error('资源方库存推送：处理失败', [
+                        'hotel_no' => $hotelNo,
+                        'room_type' => $roomType,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            if ($failCount > 0) {
+                Log::warning('资源方库存推送：部分失败', [
+                    'success_count' => $successCount,
+                    'fail_count' => $failCount,
+                    'errors' => $errors,
+                ]);
+            }
+
+            return $this->xmlResponse('0', '成功');
+
+        } catch (\Exception $e) {
+            Log::error('资源方库存推送：同步处理异常', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->xmlResponse('-1', '处理异常：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 返回XML响应
+     */
+    protected function xmlResponse(string $resultCode, string $message): JsonResponse
+    {
+        $xml = new SimpleXMLElement('<Result></Result>');
+        $xml->addChild('ResultCode', $resultCode);
+        $xml->addChild('Message', $message);
+
+        return response($xml->asXML(), 200, [
+            'Content-Type' => 'application/xml; charset=utf-8',
+        ]);
+    }
+}
+
+
+                    } catch (\Exception $e) {
+                        DB::rollBack();
+                        $failCount++;
+                        $errors[] = "更新库存失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
+                        Log::error('资源方库存推送：更新库存失败', [
+                            'hotel_id' => $hotel->id,
+                            'room_type_id' => $roomTypeModel->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+
+                } catch (\Exception $e) {
+                    $failCount++;
+                    $errors[] = "处理失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
+                    Log::error('资源方库存推送：处理失败', [
+                        'hotel_no' => $hotelNo,
+                        'room_type' => $roomType,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            if ($failCount > 0) {
+                Log::warning('资源方库存推送：部分失败', [
+                    'success_count' => $successCount,
+                    'fail_count' => $failCount,
+                    'errors' => $errors,
+                ]);
+            }
+
+            return $this->xmlResponse('0', '成功');
+
+        } catch (\Exception $e) {
+            Log::error('资源方库存推送：同步处理异常', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->xmlResponse('-1', '处理异常：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 返回XML响应
+     */
+    protected function xmlResponse(string $resultCode, string $message): JsonResponse
+    {
+        $xml = new SimpleXMLElement('<Result></Result>');
+        $xml->addChild('ResultCode', $resultCode);
+        $xml->addChild('Message', $message);
+
+        return response($xml->asXML(), 200, [
+            'Content-Type' => 'application/xml; charset=utf-8',
+        ]);
+    }
+}

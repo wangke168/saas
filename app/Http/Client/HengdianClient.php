@@ -263,3 +263,374 @@ class HengdianClient
     }
 }
 
+
+        $auth->addChild('Password', $credentials['password']);
+        
+        // 递归添加其他数据
+        $this->addXmlChildren($xml, $data);
+        
+        return $xml->asXML();
+    }
+
+    /**
+     * 递归添加XML子元素（支持复杂嵌套结构）
+     */
+    protected function addXmlChildren(\SimpleXMLElement $xml, array $data): void
+    {
+        foreach ($data as $key => $value) {
+            // 跳过 null 值
+            if ($value === null) {
+                continue;
+            }
+            
+            if (is_array($value)) {
+                // 判断是否为索引数组（列表）
+                if (array_keys($value) === range(0, count($value) - 1)) {
+                    // 索引数组：创建多个同名子元素
+                    foreach ($value as $item) {
+                        if (is_array($item)) {
+                            $child = $xml->addChild($key);
+                            $this->addXmlChildren($child, $item);
+                        } else {
+                            $xml->addChild($key, htmlspecialchars((string)$item, ENT_XML1, 'UTF-8'));
+                        }
+                    }
+                } else {
+                    // 关联数组：创建单个子元素
+                    $child = $xml->addChild($key);
+                    $this->addXmlChildren($child, $value);
+                }
+            } else {
+                $xml->addChild($key, htmlspecialchars((string)$value, ENT_XML1, 'UTF-8'));
+            }
+        }
+    }
+
+    /**
+     * 可订查询（ValidateRQ）
+     */
+    public function validate(array $data): array
+    {
+        $xml = $this->buildXml('ValidateRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 下单预订（BookRQ）
+     */
+    public function book(array $data): array
+    {
+        // 记录原始数据（用于调试）
+        Log::info('横店下单原始数据', [
+            'data' => $data,
+            'OrderGuests' => $data['OrderGuests'] ?? null,
+            'OrderGuests_is_null' => is_null($data['OrderGuests'] ?? null),
+            'OrderGuests_is_array' => is_array($data['OrderGuests'] ?? null),
+            'OrderGuests_structure' => $data['OrderGuests'] ?? null,
+        ]);
+        
+        $xml = $this->buildXml('BookRQ', $data);
+        
+        // 验证 XML 中是否包含 OrderGuests 节点
+        $hasOrderGuests = strpos($xml, '<OrderGuests>') !== false;
+        $orderGuestsContent = '';
+        $orderGuestCount = 0;
+        
+        if ($hasOrderGuests) {
+            // 提取 OrderGuests 节点的内容
+            preg_match('/<OrderGuests>(.*?)<\/OrderGuests>/s', $xml, $matches);
+            $orderGuestsContent = $matches[1] ?? '';
+            
+            // 统计 OrderGuest 节点数量
+            $orderGuestCount = substr_count($orderGuestsContent, '<OrderGuest>');
+        }
+        
+        // 记录发送到景区方系统的 XML 数据
+        Log::info('发送到景区方系统的 XML 请求', [
+            'api' => 'BookRQ',
+            'url' => $this->config->api_url,
+            'xml' => $xml,
+            'xml_length' => strlen($xml),
+            'has_order_guests' => $hasOrderGuests,
+            'order_guest_count' => $orderGuestCount,
+            'order_guests_content' => $orderGuestsContent,
+        ]);
+        
+        return $this->request($xml);
+    }
+
+    /**
+     * 订单查询（QueryStatusRQ）
+     */
+    public function query(array $data): array
+    {
+        $xml = $this->buildXml('QueryStatusRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 动态订阅（SubscribeRoomStatusRQ）
+     */
+    public function subscribeRoomStatus(array $data): array
+    {
+        $xml = $this->buildXml('SubscribeRoomStatusRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 订单取消（CancelRQ）
+     */
+    public function cancel(array $data): array
+    {
+        $xml = $this->buildXml('CancelRQ', $data);
+        return $this->request($xml);
+    }
+}
+
+
+        $auth->addChild('Password', $credentials['password']);
+        
+        // 递归添加其他数据
+        $this->addXmlChildren($xml, $data);
+        
+        return $xml->asXML();
+    }
+
+    /**
+     * 递归添加XML子元素（支持复杂嵌套结构）
+     */
+    protected function addXmlChildren(\SimpleXMLElement $xml, array $data): void
+    {
+        foreach ($data as $key => $value) {
+            // 跳过 null 值
+            if ($value === null) {
+                continue;
+            }
+            
+            if (is_array($value)) {
+                // 判断是否为索引数组（列表）
+                if (array_keys($value) === range(0, count($value) - 1)) {
+                    // 索引数组：创建多个同名子元素
+                    foreach ($value as $item) {
+                        if (is_array($item)) {
+                            $child = $xml->addChild($key);
+                            $this->addXmlChildren($child, $item);
+                        } else {
+                            $xml->addChild($key, htmlspecialchars((string)$item, ENT_XML1, 'UTF-8'));
+                        }
+                    }
+                } else {
+                    // 关联数组：创建单个子元素
+                    $child = $xml->addChild($key);
+                    $this->addXmlChildren($child, $value);
+                }
+            } else {
+                $xml->addChild($key, htmlspecialchars((string)$value, ENT_XML1, 'UTF-8'));
+            }
+        }
+    }
+
+    /**
+     * 可订查询（ValidateRQ）
+     */
+    public function validate(array $data): array
+    {
+        $xml = $this->buildXml('ValidateRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 下单预订（BookRQ）
+     */
+    public function book(array $data): array
+    {
+        // 记录原始数据（用于调试）
+        Log::info('横店下单原始数据', [
+            'data' => $data,
+            'OrderGuests' => $data['OrderGuests'] ?? null,
+            'OrderGuests_is_null' => is_null($data['OrderGuests'] ?? null),
+            'OrderGuests_is_array' => is_array($data['OrderGuests'] ?? null),
+            'OrderGuests_structure' => $data['OrderGuests'] ?? null,
+        ]);
+        
+        $xml = $this->buildXml('BookRQ', $data);
+        
+        // 验证 XML 中是否包含 OrderGuests 节点
+        $hasOrderGuests = strpos($xml, '<OrderGuests>') !== false;
+        $orderGuestsContent = '';
+        $orderGuestCount = 0;
+        
+        if ($hasOrderGuests) {
+            // 提取 OrderGuests 节点的内容
+            preg_match('/<OrderGuests>(.*?)<\/OrderGuests>/s', $xml, $matches);
+            $orderGuestsContent = $matches[1] ?? '';
+            
+            // 统计 OrderGuest 节点数量
+            $orderGuestCount = substr_count($orderGuestsContent, '<OrderGuest>');
+        }
+        
+        // 记录发送到景区方系统的 XML 数据
+        Log::info('发送到景区方系统的 XML 请求', [
+            'api' => 'BookRQ',
+            'url' => $this->config->api_url,
+            'xml' => $xml,
+            'xml_length' => strlen($xml),
+            'has_order_guests' => $hasOrderGuests,
+            'order_guest_count' => $orderGuestCount,
+            'order_guests_content' => $orderGuestsContent,
+        ]);
+        
+        return $this->request($xml);
+    }
+
+    /**
+     * 订单查询（QueryStatusRQ）
+     */
+    public function query(array $data): array
+    {
+        $xml = $this->buildXml('QueryStatusRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 动态订阅（SubscribeRoomStatusRQ）
+     */
+    public function subscribeRoomStatus(array $data): array
+    {
+        $xml = $this->buildXml('SubscribeRoomStatusRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 订单取消（CancelRQ）
+     */
+    public function cancel(array $data): array
+    {
+        $xml = $this->buildXml('CancelRQ', $data);
+        return $this->request($xml);
+    }
+}
+
+
+        $auth->addChild('Password', $credentials['password']);
+        
+        // 递归添加其他数据
+        $this->addXmlChildren($xml, $data);
+        
+        return $xml->asXML();
+    }
+
+    /**
+     * 递归添加XML子元素（支持复杂嵌套结构）
+     */
+    protected function addXmlChildren(\SimpleXMLElement $xml, array $data): void
+    {
+        foreach ($data as $key => $value) {
+            // 跳过 null 值
+            if ($value === null) {
+                continue;
+            }
+            
+            if (is_array($value)) {
+                // 判断是否为索引数组（列表）
+                if (array_keys($value) === range(0, count($value) - 1)) {
+                    // 索引数组：创建多个同名子元素
+                    foreach ($value as $item) {
+                        if (is_array($item)) {
+                            $child = $xml->addChild($key);
+                            $this->addXmlChildren($child, $item);
+                        } else {
+                            $xml->addChild($key, htmlspecialchars((string)$item, ENT_XML1, 'UTF-8'));
+                        }
+                    }
+                } else {
+                    // 关联数组：创建单个子元素
+                    $child = $xml->addChild($key);
+                    $this->addXmlChildren($child, $value);
+                }
+            } else {
+                $xml->addChild($key, htmlspecialchars((string)$value, ENT_XML1, 'UTF-8'));
+            }
+        }
+    }
+
+    /**
+     * 可订查询（ValidateRQ）
+     */
+    public function validate(array $data): array
+    {
+        $xml = $this->buildXml('ValidateRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 下单预订（BookRQ）
+     */
+    public function book(array $data): array
+    {
+        // 记录原始数据（用于调试）
+        Log::info('横店下单原始数据', [
+            'data' => $data,
+            'OrderGuests' => $data['OrderGuests'] ?? null,
+            'OrderGuests_is_null' => is_null($data['OrderGuests'] ?? null),
+            'OrderGuests_is_array' => is_array($data['OrderGuests'] ?? null),
+            'OrderGuests_structure' => $data['OrderGuests'] ?? null,
+        ]);
+        
+        $xml = $this->buildXml('BookRQ', $data);
+        
+        // 验证 XML 中是否包含 OrderGuests 节点
+        $hasOrderGuests = strpos($xml, '<OrderGuests>') !== false;
+        $orderGuestsContent = '';
+        $orderGuestCount = 0;
+        
+        if ($hasOrderGuests) {
+            // 提取 OrderGuests 节点的内容
+            preg_match('/<OrderGuests>(.*?)<\/OrderGuests>/s', $xml, $matches);
+            $orderGuestsContent = $matches[1] ?? '';
+            
+            // 统计 OrderGuest 节点数量
+            $orderGuestCount = substr_count($orderGuestsContent, '<OrderGuest>');
+        }
+        
+        // 记录发送到景区方系统的 XML 数据
+        Log::info('发送到景区方系统的 XML 请求', [
+            'api' => 'BookRQ',
+            'url' => $this->config->api_url,
+            'xml' => $xml,
+            'xml_length' => strlen($xml),
+            'has_order_guests' => $hasOrderGuests,
+            'order_guest_count' => $orderGuestCount,
+            'order_guests_content' => $orderGuestsContent,
+        ]);
+        
+        return $this->request($xml);
+    }
+
+    /**
+     * 订单查询（QueryStatusRQ）
+     */
+    public function query(array $data): array
+    {
+        $xml = $this->buildXml('QueryStatusRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 动态订阅（SubscribeRoomStatusRQ）
+     */
+    public function subscribeRoomStatus(array $data): array
+    {
+        $xml = $this->buildXml('SubscribeRoomStatusRQ', $data);
+        return $this->request($xml);
+    }
+
+    /**
+     * 订单取消（CancelRQ）
+     */
+    public function cancel(array $data): array
+    {
+        $xml = $this->buildXml('CancelRQ', $data);
+        return $this->request($xml);
+    }
+}

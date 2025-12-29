@@ -102,3 +102,78 @@ class User extends Authenticatable
         return $this->role === UserRole::OPERATOR;
     }
 }
+
+        
+        // 运营人员：获取所属资源方下的所有景区
+        $resourceProviderIds = $this->resourceProviders->pluck('id');
+        return ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+            $query->whereIn('resource_providers.id', $resourceProviderIds);
+        });
+    }
+
+    /**
+     * 是否为超级管理员
+     */
+    public function isAdmin(): bool
+    {
+        return $this->role === UserRole::ADMIN;
+    }
+
+    /**
+     * 是否为运营
+     */
+    public function isOperator(): bool
+    {
+        return $this->role === UserRole::OPERATOR;
+    }
+}
+
+        
+        // 运营人员：获取所属资源方下的所有景区
+        $resourceProviderIds = $this->resourceProviders->pluck('id');
+        return ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+            $query->whereIn('resource_providers.id', $resourceProviderIds);
+        });
+    }
+
+    /**
+     * 是否为超级管理员
+     */
+    public function isAdmin(): bool
+    {
+        return $this->role === UserRole::ADMIN;
+    }
+
+    /**
+     * 是否为运营
+     */
+    public function isOperator(): bool
+    {
+        return $this->role === UserRole::OPERATOR;
+    }
+}
+
+        
+        // 运营人员：获取所属资源方下的所有景区
+        $resourceProviderIds = $this->resourceProviders->pluck('id');
+        return ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+            $query->whereIn('resource_providers.id', $resourceProviderIds);
+        });
+    }
+
+    /**
+     * 是否为超级管理员
+     */
+    public function isAdmin(): bool
+    {
+        return $this->role === UserRole::ADMIN;
+    }
+
+    /**
+     * 是否为运营
+     */
+    public function isOperator(): bool
+    {
+        return $this->role === UserRole::OPERATOR;
+    }
+}

@@ -153,3 +153,63 @@ class RoomTypeController extends Controller
         ]);
     }
 }
+
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
+            if (! $scenicSpotIds->contains($roomType->hotel->scenic_spot_id)) {
+                return response()->json([
+                    'message' => '无权删除该房型',
+                ], 403);
+            }
+        }
+
+        $roomType->delete();
+
+        return response()->json([
+            'message' => '房型删除成功',
+        ]);
+    }
+}
+
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
+            if (! $scenicSpotIds->contains($roomType->hotel->scenic_spot_id)) {
+                return response()->json([
+                    'message' => '无权删除该房型',
+                ], 403);
+            }
+        }
+
+        $roomType->delete();
+
+        return response()->json([
+            'message' => '房型删除成功',
+        ]);
+    }
+}
+
+            $resourceProviderIds = request()->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
+            if (! $scenicSpotIds->contains($roomType->hotel->scenic_spot_id)) {
+                return response()->json([
+                    'message' => '无权删除该房型',
+                ], 403);
+            }
+        }
+
+        $roomType->delete();
+
+        return response()->json([
+            'message' => '房型删除成功',
+        ]);
+    }
+}

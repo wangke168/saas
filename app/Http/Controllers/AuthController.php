@@ -160,3 +160,60 @@ class AuthController extends Controller
         ]);
     }
 }
+
+                    'name' => $rp->name,
+                    'code' => $rp->code,
+                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
+                        'id' => $spot->id,
+                        'name' => $spot->name,
+                        'code' => $spot->code,
+                    ]),
+                ]),
+                // 保留scenic_spots用于兼容（但不再使用）
+                'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
+                    'id' => $spot->id,
+                    'name' => $spot->name,
+                    'code' => $spot->code,
+                ]),
+            ],
+        ]);
+    }
+}
+
+                    'name' => $rp->name,
+                    'code' => $rp->code,
+                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
+                        'id' => $spot->id,
+                        'name' => $spot->name,
+                        'code' => $spot->code,
+                    ]),
+                ]),
+                // 保留scenic_spots用于兼容（但不再使用）
+                'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
+                    'id' => $spot->id,
+                    'name' => $spot->name,
+                    'code' => $spot->code,
+                ]),
+            ],
+        ]);
+    }
+}
+
+                    'name' => $rp->name,
+                    'code' => $rp->code,
+                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
+                        'id' => $spot->id,
+                        'name' => $spot->name,
+                        'code' => $spot->code,
+                    ]),
+                ]),
+                // 保留scenic_spots用于兼容（但不再使用）
+                'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
+                    'id' => $spot->id,
+                    'name' => $spot->name,
+                    'code' => $spot->code,
+                ]),
+            ],
+        ]);
+    }
+}
