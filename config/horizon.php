@@ -1,7 +1,5 @@
 <?php
 
-use Illuminate\Support\Str;
-
 return [
 
     /*
@@ -289,4 +287,5 @@ return [
     'dark_mode' => env('HORIZON_DARK_MODE', false),
 
 ];
+
 

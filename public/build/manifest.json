@@ -5,7 +5,7 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-C7b5dp06.js",
+    "file": "assets/app-HzGD55g9.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -24,11 +24,11 @@
       "resources/js/views/Profile/Index.vue"
     ],
     "css": [
-      "assets/app-0-OLDh63.css"
+      "assets/app-DPqg0jrY.css"
     ]
   },
   "resources/js/views/ExceptionOrders/Index.vue": {
-    "file": "assets/Index-BV6uZJA_.js",
+    "file": "assets/Index-C0ie3eYU.js",
     "name": "Index",
     "src": "resources/js/views/ExceptionOrders/Index.vue",
     "isDynamicEntry": true,
@@ -37,7 +37,7 @@
     ]
   },
   "resources/js/views/Hotels/Index.vue": {
-    "file": "assets/Index-BreHjR5i.js",
+    "file": "assets/Index-BPRaKT86.js",
     "name": "Index",
     "src": "resources/js/views/Hotels/Index.vue",
     "isDynamicEntry": true,
@@ -49,7 +49,7 @@
     ]
   },
   "resources/js/views/Login.vue": {
-    "file": "assets/Login-CWeEmUqz.js",
+    "file": "assets/Login-D0-skDR6.js",
     "name": "Login",
     "src": "resources/js/views/Login.vue",
     "isDynamicEntry": true,
@@ -57,11 +57,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Login-BpMWjTKx.css"
+      "assets/Login-D3krwcQx.css"
     ]
   },
   "resources/js/views/Orders/Index.vue": {
-    "file": "assets/Index-DB-ZkRBu.js",
+    "file": "assets/Index-BjJm83Vr.js",
     "name": "Index",
     "src": "resources/js/views/Orders/Index.vue",
     "isDynamicEntry": true,
@@ -70,7 +70,7 @@
     ]
   },
   "resources/js/views/OtaPlatforms/Index.vue": {
-    "file": "assets/Index-MxmPiNiq.js",
+    "file": "assets/Index-Cw1R1AwK.js",
     "name": "Index",
     "src": "resources/js/views/OtaPlatforms/Index.vue",
     "isDynamicEntry": true,
@@ -79,7 +79,7 @@
     ]
   },
   "resources/js/views/Products/Detail.vue": {
-    "file": "assets/Detail-sUQ3ZWXO.js",
+    "file": "assets/Detail-Buni6Vg3.js",
     "name": "Detail",
     "src": "resources/js/views/Products/Detail.vue",
     "isDynamicEntry": true,
@@ -87,11 +87,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Detail-CtZTmMCE.css"
+      "assets/Detail-TJ6ygyoR.css"
     ]
   },
   "resources/js/views/Products/Index.vue": {
-    "file": "assets/Index-DPoPf7gN.js",
+    "file": "assets/Index-ByFcWPNz.js",
     "name": "Index",
     "src": "resources/js/views/Products/Index.vue",
     "isDynamicEntry": true,
@@ -99,11 +99,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Index-CSrOI6mw.css"
+      "assets/Index-Cx_wZ1N7.css"
     ]
   },
   "resources/js/views/Profile/Index.vue": {
-    "file": "assets/Index-B6QQ5X0q.js",
+    "file": "assets/Index-BVu8tnUM.js",
     "name": "Index",
     "src": "resources/js/views/Profile/Index.vue",
     "isDynamicEntry": true,
@@ -112,7 +112,7 @@
     ]
   },
   "resources/js/views/ResourceProviders/Index.vue": {
-    "file": "assets/Index-aGEefk1w.js",
+    "file": "assets/Index-CO0PBaEj.js",
     "name": "Index",
     "src": "resources/js/views/ResourceProviders/Index.vue",
     "isDynamicEntry": true,
@@ -120,11 +120,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Index-BB_mItWE.css"
+      "assets/Index-DGJ8yUyc.css"
     ]
   },
   "resources/js/views/ScenicSpots/Index.vue": {
-    "file": "assets/Index-vqtylpAe.js",
+    "file": "assets/Index-BxPAcFHz.js",
     "name": "Index",
     "src": "resources/js/views/ScenicSpots/Index.vue",
     "isDynamicEntry": true,
@@ -136,7 +136,7 @@
     ]
   },
   "resources/js/views/SoftwareProviders/Index.vue": {
-    "file": "assets/Index-CKoZSrM2.js",
+    "file": "assets/Index-q169WYMo.js",
     "name": "Index",
     "src": "resources/js/views/SoftwareProviders/Index.vue",
     "isDynamicEntry": true,
@@ -144,11 +144,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Index-B9XK_qXi.css"
+      "assets/Index-B5ZPUPd1.css"
     ]
   },
   "resources/js/views/Users/Index.vue": {
-    "file": "assets/Index-BOh1sVXn.js",
+    "file": "assets/Index-B1zLr7-A.js",
     "name": "Index",
     "src": "resources/js/views/Users/Index.vue",
     "isDynamicEntry": true,

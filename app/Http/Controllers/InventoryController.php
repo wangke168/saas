@@ -105,7 +105,11 @@ class InventoryController extends Controller
     {
         // 权限控制：运营只能更新自己绑定的景区下的酒店的房型的库存
         if ($request->user()->isOperator()) {
-            $scenicSpotIds = $request->user()->scenicSpots->pluck('id');
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
             $inventory->load('roomType.hotel');
             if (! $scenicSpotIds->contains($inventory->roomType->hotel->scenic_spot_id)) {
                 return response()->json([

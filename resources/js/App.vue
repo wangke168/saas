@@ -5,7 +5,7 @@
                 <h1>OTA酒景套餐分销系统</h1>
                 <div class="user-info">
                     <span>{{ user?.display_name || user?.name }}</span>
-                    <el-button type="text" @click="handleLogout">退出</el-button>
+                    <el-button text @click="handleLogout">退出</el-button>
                 </div>
             </div>
         </el-header>

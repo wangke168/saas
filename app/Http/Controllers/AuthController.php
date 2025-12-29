@@ -151,68 +151,14 @@ class AuthController extends Controller
                     ]),
                 ]),
                 // 保留scenic_spots用于兼容（但不再使用）
-                'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
-                    'id' => $spot->id,
-                    'name' => $spot->name,
-                    'code' => $spot->code,
-                ]),
-            ],
-        ]);
-    }
-}
-
-                    'name' => $rp->name,
-                    'code' => $rp->code,
-                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
+                // 通过 resourceProviders 获取景区
+                'scenic_spots' => $user->resourceProviders->flatMap(function($rp) {
+                    return $rp->scenicSpots->map(fn($spot) => [
                         'id' => $spot->id,
                         'name' => $spot->name,
                         'code' => $spot->code,
-                    ]),
-                ]),
-                // 保留scenic_spots用于兼容（但不再使用）
-                'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
-                    'id' => $spot->id,
-                    'name' => $spot->name,
-                    'code' => $spot->code,
-                ]),
-            ],
-        ]);
-    }
-}
-
-                    'name' => $rp->name,
-                    'code' => $rp->code,
-                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
-                        'id' => $spot->id,
-                        'name' => $spot->name,
-                        'code' => $spot->code,
-                    ]),
-                ]),
-                // 保留scenic_spots用于兼容（但不再使用）
-                'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
-                    'id' => $spot->id,
-                    'name' => $spot->name,
-                    'code' => $spot->code,
-                ]),
-            ],
-        ]);
-    }
-}
-
-                    'name' => $rp->name,
-                    'code' => $rp->code,
-                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
-                        'id' => $spot->id,
-                        'name' => $spot->name,
-                        'code' => $spot->code,
-                    ]),
-                ]),
-                // 保留scenic_spots用于兼容（但不再使用）
-                'scenic_spots' => $user->scenicSpots->map(fn($spot) => [
-                    'id' => $spot->id,
-                    'name' => $spot->name,
-                    'code' => $spot->code,
-                ]),
+                    ]);
+                })->unique('id')->values(),
             ],
         ]);
     }

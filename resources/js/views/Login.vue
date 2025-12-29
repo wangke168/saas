@@ -47,21 +47,21 @@ const rules = {
     ]
 };
 
-const handleLogin = async () => {
+const handleLogin = () => {
     if (!formRef.value) return;
     
-    await formRef.value.validate(async (valid) => {
-        if (valid) {
-            loading.value = true;
-            try {
-                await authStore.login(form.email, form.password);
-                ElMessage.success('登录成功');
-                router.push('/');
-            } catch (error) {
-                ElMessage.error(error.response?.data?.message || '登录失败');
-            } finally {
-                loading.value = false;
-            }
+    formRef.value.validate(async (valid) => {
+        if (!valid) return;
+        
+        loading.value = true;
+        try {
+            await authStore.login(form.email, form.password);
+            ElMessage.success('登录成功');
+            router.push('/');
+        } catch (error) {
+            ElMessage.error(error.response?.data?.message || '登录失败');
+        } finally {
+            loading.value = false;
         }
     });
 };
