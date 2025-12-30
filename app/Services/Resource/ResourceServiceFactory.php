@@ -113,11 +113,22 @@ class ResourceServiceFactory
         $scenicSpot = $order->hotel->scenicSpot ?? null;
         
         if (!$scenicSpot) {
+            Log::info('ResourceServiceFactory::isSystemConnected: 景区不存在', [
+                'order_id' => $order->id,
+                'hotel_id' => $order->hotel_id,
+                'operation' => $operation,
+            ]);
             return false;
         }
 
         $config = $scenicSpot->resourceConfig;
         if (!$config) {
+            Log::info('ResourceServiceFactory::isSystemConnected: 资源配置不存在', [
+                'order_id' => $order->id,
+                'scenic_spot_id' => $scenicSpot->id,
+                'resource_config_id' => $scenicSpot->resource_config_id,
+                'operation' => $operation,
+            ]);
             return false;
         }
 
@@ -125,10 +136,36 @@ class ResourceServiceFactory
         
         if ($operation === 'order') {
             $orderMode = $syncMode['order'] ?? 'manual';
-            return $orderMode === 'auto';
+            $isConnected = $orderMode === 'auto';
+            
+            Log::info('ResourceServiceFactory::isSystemConnected: 订单操作检查结果', [
+                'order_id' => $order->id,
+                'scenic_spot_id' => $scenicSpot->id,
+                'order_mode' => $orderMode,
+                'is_connected' => $isConnected,
+                'sync_mode' => $syncMode,
+            ]);
+            
+            return $isConnected;
         } elseif ($operation === 'inventory') {
-            return ($syncMode['inventory'] ?? 'manual') === 'push';
+            $inventoryMode = $syncMode['inventory'] ?? 'manual';
+            $isConnected = $inventoryMode === 'push';
+            
+            Log::info('ResourceServiceFactory::isSystemConnected: 库存操作检查结果', [
+                'order_id' => $order->id,
+                'scenic_spot_id' => $scenicSpot->id,
+                'inventory_mode' => $inventoryMode,
+                'is_connected' => $isConnected,
+                'sync_mode' => $syncMode,
+            ]);
+            
+            return $isConnected;
         }
+
+        Log::info('ResourceServiceFactory::isSystemConnected: 未知操作类型', [
+            'order_id' => $order->id,
+            'operation' => $operation,
+        ]);
 
         return false;
     }

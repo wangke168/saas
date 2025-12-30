@@ -546,6 +546,9 @@ class CtripController extends Controller
                     ]);
                 }
                 
+                // 加载关联数据，确保能正确检查系统直连
+                $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
+                
                 // 检查是否系统直连，如果是则确保队列任务已派发
                 $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
                 Log::info('携程预下单支付：检查系统直连状态', [
@@ -555,27 +558,61 @@ class CtripController extends Controller
                 
                 if ($isSystemConnected) {
                     // 检查是否已经有异常订单（说明队列任务可能已执行但失败）
-                    $hasExceptionOrder = ExceptionOrder::where('order_id', $order->id)
+                    $exceptionOrder = ExceptionOrder::where('order_id', $order->id)
                         ->where('status', ExceptionOrderStatus::PENDING)
-                        ->exists();
+                        ->first();
                     
                     Log::info('携程预下单支付：检查异常订单', [
                         'order_id' => $order->id,
-                        'has_exception_order' => $hasExceptionOrder,
+                        'has_exception_order' => $exceptionOrder !== null,
+                        'exception_order_id' => $exceptionOrder?->id,
+                        'exception_message' => $exceptionOrder?->exception_message,
+                        'exception_data' => $exceptionOrder?->exception_data,
                     ]);
                     
-                    if (!$hasExceptionOrder) {
-                        // 如果没有异常订单，说明可能队列任务还未执行或执行中，不需要重复派发
-                        // 但为了安全，可以再次派发（Laravel队列会自动去重）
-                        \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                            ->timeout(10);
-                        Log::info('携程预下单支付：已派发 ProcessResourceOrderJob（幂等性保护）', [
+                    if ($exceptionOrder) {
+                        // 存在异常订单，说明之前的队列任务执行失败
+                        // 可以选择重新派发队列任务（重试），或者等待人工处理
+                        // 这里选择重新派发，给系统一次自动重试的机会
+                        Log::warning('携程预下单支付：存在异常订单，但重新派发队列任务进行重试', [
                             'order_id' => $order->id,
+                            'exception_order_id' => $exceptionOrder->id,
+                            'exception_message' => $exceptionOrder->exception_message,
                         ]);
+                        
+                        try {
+                            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
+                                ->timeout(10);
+                            
+                            Log::info('携程预下单支付：已重新派发 ProcessResourceOrderJob（异常订单重试）', [
+                                'order_id' => $order->id,
+                                'exception_order_id' => $exceptionOrder->id,
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('携程预下单支付：重新派发 ProcessResourceOrderJob 失败', [
+                                'order_id' => $order->id,
+                                'exception_order_id' => $exceptionOrder->id,
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString(),
+                            ]);
+                        }
                     } else {
-                        Log::info('携程预下单支付：存在异常订单，不重复派发队列任务', [
-                            'order_id' => $order->id,
-                        ]);
+                        // 如果没有异常订单，说明可能队列任务还未执行或执行中
+                        // 为了安全，可以再次派发（Laravel队列会自动去重）
+                        try {
+                            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
+                                ->timeout(10);
+                            
+                            Log::info('携程预下单支付：已派发 ProcessResourceOrderJob（幂等性保护）', [
+                                'order_id' => $order->id,
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('携程预下单支付：派发 ProcessResourceOrderJob 失败', [
+                                'order_id' => $order->id,
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString(),
+                            ]);
+                        }
                     }
                 }
                 
@@ -606,17 +643,57 @@ class CtripController extends Controller
             }
 
             // 4. 检查是否系统直连
+            Log::info('携程预下单支付：开始检查系统直连', [
+                'order_id' => $order->id,
+                'hotel_id' => $order->hotel_id,
+            ]);
+            
+            // 加载关联数据，确保能正确检查
+            $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
+            
             $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+            
+            Log::info('携程预下单支付：系统直连检查结果', [
+                'order_id' => $order->id,
+                'is_system_connected' => $isSystemConnected,
+                'has_scenic_spot' => $order->hotel->scenicSpot !== null,
+                'scenic_spot_id' => $order->hotel->scenicSpot?->id,
+                'has_resource_config' => $order->hotel->scenicSpot?->resourceConfig !== null,
+                'has_software_provider' => $order->hotel->scenicSpot?->softwareProvider !== null,
+                'software_provider_api_type' => $order->hotel->scenicSpot?->softwareProvider?->api_type,
+                'sync_mode' => $order->hotel->scenicSpot?->resourceConfig?->extra_config['sync_mode'] ?? null,
+            ]);
 
             if ($isSystemConnected) {
                 // 系统直连：先更新状态为确认中，然后异步调用景区方接口接单
+                Log::info('携程预下单支付：系统直连，准备派发队列', [
+                    'order_id' => $order->id,
+                ]);
+                
                 $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程预下单支付成功，等待向景区下发订单');
                 
                 // 异步处理景区方接口调用（设置 10 秒超时）
-                \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                    ->timeout(10);
+                try {
+                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
+                        ->timeout(10);
+                    
+                    Log::info('携程预下单支付：已成功派发 ProcessResourceOrderJob', [
+                        'order_id' => $order->id,
+                        'queue' => 'resource-push',
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('携程预下单支付：派发 ProcessResourceOrderJob 失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                }
             } else {
                 // 非系统直连：同步确认（保持现有逻辑）
+                Log::info('携程预下单支付：非系统直连，同步确认', [
+                    'order_id' => $order->id,
+                ]);
+                
                 $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程预下单支付成功（同步确认）');
             }
 
@@ -810,21 +887,41 @@ class CtripController extends Controller
             }
 
             // 更新订单状态
-            if ($totalCancelQuantity === $order->room_count) {
-                // 全部取消
+            // 注意：根据状态流转规则，CONFIRMED 不能直接转换为 CANCEL_APPROVED
+            // 需要先转换为 CANCEL_REQUESTED，然后再转换为 CANCEL_APPROVED
+            if ($order->status === OrderStatus::CONFIRMED) {
+                // 如果订单已确认，先转换为取消申请中
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CANCEL_REQUESTED,
+                    '携程申请取消订单，数量：' . $totalCancelQuantity
+                );
+                
+                // 然后立即转换为取消通过（因为携程的 CancelOrder 是确认取消）
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CANCEL_APPROVED,
+                    '携程取消订单已确认，数量：' . $totalCancelQuantity
+                );
+            } elseif ($order->status === OrderStatus::CONFIRMING) {
+                // 如果订单还在确认中，直接转换为取消通过
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CANCEL_APPROVED,
+                    '携程申请取消订单（订单确认中），数量：' . $totalCancelQuantity
+                );
+            } else {
+                // 其他状态，直接转换为取消通过
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::CANCEL_APPROVED,
                     '携程申请取消订单，数量：' . $totalCancelQuantity
                 );
+            }
+            
+            // 更新取消时间
+            if ($totalCancelQuantity === $order->room_count) {
                 $order->update(['cancelled_at' => now()]);
-            } else {
-                // 部分取消
-                $this->orderService->updateOrderStatus(
-                    $order,
-                    OrderStatus::CANCEL_APPROVED,
-                    '携程申请部分取消订单，数量：' . $totalCancelQuantity
-                );
             }
 
             // 释放库存
