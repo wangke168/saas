@@ -71,7 +71,7 @@ class InventoryObserver
 
             // 使用 Redis 缓存，合并5秒内的推送请求
             $cacheKey = "inventory_push:{$inventory->room_type_id}";
-            $pushDelay = env('INVENTORY_PUSH_DELAY_SECONDS', 5);
+            $pushDelay = (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5);
             
             $cachedDates = Cache::get($cacheKey, []);
             $dateStr = $inventory->date->format('Y-m-d');

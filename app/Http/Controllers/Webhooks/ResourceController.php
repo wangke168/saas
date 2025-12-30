@@ -243,7 +243,7 @@ class ResourceController extends Controller
                             $changedDates[] = $date;
 
                             // 更新 Redis 指纹（先更新，避免并发问题）
-                            $fingerprintTtl = env('INVENTORY_FINGERPRINT_TTL_DAYS', 30) * 86400; // 默认30天
+                            $fingerprintTtl = (int) env('INVENTORY_FINGERPRINT_TTL_DAYS', 30) * 86400; // 默认30天
                             Redis::setex($fingerprintKey, $fingerprintTtl, $newQuota);
                         } catch (ConnectionException $e) {
                             // Redis 故障降级：记录所有库存为脏数据
@@ -388,7 +388,7 @@ class ResourceController extends Controller
             }
 
             // 放入队列（延迟合并，避免频繁推送）
-            $pushDelay = env('INVENTORY_PUSH_DELAY_SECONDS', 5);
+            $pushDelay = (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5);
             PushChangedInventoryToOtaJob::dispatch(
                 $roomType->id,
                 $dates,
