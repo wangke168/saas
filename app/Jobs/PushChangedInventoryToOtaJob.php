@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\RoomType;
 use App\Models\Product;
 use App\Models\OtaPlatform;
+use App\Enums\OtaPlatform as OtaPlatformEnum;
 use App\Services\OTA\CtripService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -53,6 +54,13 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
      */
     public function handle(CtripService $ctripService): void
     {
+        Log::info('PushChangedInventoryToOtaJob 开始执行', [
+            'room_type_id' => $this->roomTypeId,
+            'dates' => $this->dates,
+            'dates_count' => count($this->dates),
+            'ota_platform_id' => $this->otaPlatformId,
+        ]);
+
         try {
             // 加载房型
             $roomType = RoomType::with('hotel')->find($this->roomTypeId);
@@ -94,7 +102,7 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                 }
             } else {
                 // 默认只推送到携程
-                $ctripPlatform = OtaPlatform::where('code', 'ctrip')->first();
+                $ctripPlatform = OtaPlatform::where('code', OtaPlatformEnum::CTRIP->value)->first();
                 if ($ctripPlatform) {
                     $otaPlatforms[] = $ctripPlatform;
                 }
@@ -141,18 +149,18 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                         Log::info('推送库存变化：产品未推送到该OTA平台', [
                             'product_id' => $product->id,
                             'ota_platform_id' => $platform->id,
-                            'platform_code' => $platform->code,
+                            'platform_code' => $platform->code->value,
                         ]);
                         continue;
                     }
 
                     // 根据平台类型推送
-                    if ($platform->code === 'ctrip') {
+                    if ($platform->code === OtaPlatformEnum::CTRIP) {
                         $this->pushToCtrip($product, $hotel, $roomType, $ctripService);
                     } else {
                         Log::info('推送库存变化：暂不支持该OTA平台', [
                             'product_id' => $product->id,
-                            'platform_code' => $platform->code,
+                            'platform_code' => $platform->code->value,
                         ]);
                     }
                 }

@@ -66,6 +66,10 @@ class InventoryObserver
         try {
             $roomType = $inventory->roomType;
             if (!$roomType) {
+                Log::warning('InventoryObserver：房型不存在', [
+                    'inventory_id' => $inventory->id,
+                    'room_type_id' => $inventory->room_type_id,
+                ]);
                 return;
             }
 
@@ -81,27 +85,47 @@ class InventoryObserver
                 Cache::put($cacheKey, $cachedDates, now()->addSeconds($pushDelay + 1));
             }
 
-            // 延迟执行，合并多个库存变化
-            // 注意：这里会为每个库存变化创建一个任务，但由于延迟相同，可能会合并执行
-            // 更好的方式是使用唯一的缓存键，但为了简化，这里保持当前的实现
-            PushChangedInventoryToOtaJob::dispatch(
-                $inventory->room_type_id,
-                $cachedDates, // 包含所有需要推送的日期
-                null // 默认推送到携程
-            )->onQueue('ota-push')->delay(now()->addSeconds($pushDelay));
+            // 只在一个日期首次变化时创建任务（避免重复创建）
+            $taskKey = "inventory_push_task:{$inventory->room_type_id}";
+            if (!Cache::has($taskKey)) {
+                // 延迟执行，合并多个库存变化
+                $job = PushChangedInventoryToOtaJob::dispatch(
+                    $inventory->room_type_id,
+                    array_unique($cachedDates), // 包含所有需要推送的日期
+                    null // 默认推送到携程
+                )->onQueue('ota-push');
+                
+                // 只有在延迟时间 > 0 时才设置延迟
+                if ($pushDelay > 0) {
+                    $job->delay(now()->addSeconds($pushDelay));
+                }
 
-            Log::debug('InventoryObserver：已调度OTA推送任务', [
-                'inventory_id' => $inventory->id,
-                'room_type_id' => $inventory->room_type_id,
-                'date' => $dateStr,
-                'delay_seconds' => $pushDelay,
-            ]);
+                // 标记任务已创建（防止短时间内重复创建）
+                $taskTtl = $pushDelay > 0 ? $pushDelay : 1;
+                Cache::put($taskKey, true, now()->addSeconds($taskTtl));
+
+                Log::info('InventoryObserver：已调度OTA推送任务', [
+                    'inventory_id' => $inventory->id,
+                    'room_type_id' => $inventory->room_type_id,
+                    'date' => $dateStr,
+                    'dates' => array_unique($cachedDates),
+                    'delay_seconds' => $pushDelay,
+                    'job_id' => $job->getJobId() ?? 'unknown',
+                ]);
+            } else {
+                Log::debug('InventoryObserver：推送任务已存在，跳过创建', [
+                    'inventory_id' => $inventory->id,
+                    'room_type_id' => $inventory->room_type_id,
+                    'date' => $dateStr,
+                ]);
+            }
 
         } catch (\Exception $e) {
             Log::error('InventoryObserver：调度OTA推送任务失败', [
                 'inventory_id' => $inventory->id,
                 'room_type_id' => $inventory->room_type_id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             // 不抛出异常，避免影响库存更新流程
         }
