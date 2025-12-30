@@ -8,12 +8,17 @@ use App\Models\RoomType;
 use App\Models\Inventory;
 use App\Models\ResourceSyncLog;
 use App\Models\SoftwareProvider;
+use App\Models\OtaPlatform;
 use App\Enums\PriceSource;
+use App\Enums\OtaPlatform as OtaPlatformEnum;
+use App\Jobs\PushChangedInventoryToOtaJob;
 use App\Services\Resource\ScenicSpotIdentificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
+use Illuminate\Redis\Connections\ConnectionException;
 use SimpleXMLElement;
 
 class ResourceController extends Controller
@@ -201,57 +206,137 @@ class ResourceController extends Controller
                         continue;
                     }
 
-                    // 更新库存
-                    DB::beginTransaction();
-                    try {
-                        foreach ($roomQuota as $quotaData) {
-                            $date = $quotaData['date'] ?? null;
-                            $quota = (int)($quotaData['quota'] ?? 0);
+                    // Redis 指纹比对，找出变化的库存
+                    $dirtyInventories = [];
+                    $changedDates = [];
 
-                            if (!$date) {
-                                continue;
+                    foreach ($roomQuota as $quotaData) {
+                        $date = $quotaData['date'] ?? null;
+                        $newQuota = (int)($quotaData['quota'] ?? 0);
+
+                        if (!$date) {
+                            continue;
+                        }
+
+                        // Redis 指纹比对
+                        $fingerprintKey = "inventory:fingerprint:{$roomTypeModel->id}:{$date}";
+                        
+                        try {
+                            $lastQuota = Redis::get($fingerprintKey);
+                            
+                            // 如果值相同，跳过（去重）
+                            if ($lastQuota !== null && (int)$lastQuota === $newQuota) {
+                                continue; // 库存未变化，丢弃
                             }
 
-                            // 查找或创建库存记录
-                            $inventory = Inventory::firstOrNew([
+                            // 值不同或不存在，记录为脏数据
+                            $dirtyInventories[] = [
                                 'room_type_id' => $roomTypeModel->id,
                                 'date' => $date,
+                                'total_quantity' => $newQuota,
+                                'available_quantity' => $newQuota,
+                                'source' => PriceSource::API->value,
+                                'is_closed' => false,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ];
+                            $changedDates[] = $date;
+
+                            // 更新 Redis 指纹（先更新，避免并发问题）
+                            $fingerprintTtl = env('INVENTORY_FINGERPRINT_TTL_DAYS', 30) * 86400; // 默认30天
+                            Redis::setex($fingerprintKey, $fingerprintTtl, $newQuota);
+                        } catch (ConnectionException $e) {
+                            // Redis 故障降级：记录所有库存为脏数据
+                            Log::warning('资源方库存推送：Redis 指纹比对失败，降级处理', [
+                                'room_type_id' => $roomTypeModel->id,
+                                'date' => $date,
+                                'error' => $e->getMessage(),
                             ]);
-
-                            // 更新可用库存（总库存 = 可用库存）
-                            $inventory->total_quantity = $quota;
-                            $inventory->available_quantity = $quota;
-                            $inventory->source = PriceSource::API; // 标记为接口推送
-                            $inventory->save();
+                            $dirtyInventories[] = [
+                                'room_type_id' => $roomTypeModel->id,
+                                'date' => $date,
+                                'total_quantity' => $newQuota,
+                                'available_quantity' => $newQuota,
+                                'source' => PriceSource::API->value,
+                                'is_closed' => false,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ];
+                            $changedDates[] = $date;
+                        } catch (\Exception $e) {
+                            // 其他异常也降级处理
+                            Log::warning('资源方库存推送：Redis 指纹比对异常，降级处理', [
+                                'room_type_id' => $roomTypeModel->id,
+                                'date' => $date,
+                                'error' => $e->getMessage(),
+                            ]);
+                            $dirtyInventories[] = [
+                                'room_type_id' => $roomTypeModel->id,
+                                'date' => $date,
+                                'total_quantity' => $newQuota,
+                                'available_quantity' => $newQuota,
+                                'source' => PriceSource::API->value,
+                                'is_closed' => false,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ];
+                            $changedDates[] = $date;
                         }
+                    }
 
-                        DB::commit();
-                        $successCount++;
+                    // 批量更新数据库（只更新变化的库存）
+                    if (!empty($dirtyInventories)) {
+                        DB::beginTransaction();
+                        try {
+                            // 使用批量 upsert（高性能，不触发 Observer，但符合预期）
+                            Inventory::upsert(
+                                $dirtyInventories,
+                                ['room_type_id', 'date'], // 唯一键
+                                ['total_quantity', 'available_quantity', 'source', 'updated_at'] // 更新字段
+                            );
 
-                        // 记录同步日志
-                        $scenicSpot = $hotel->scenicSpot ?? null;
-                        if ($scenicSpot) {
-                            ResourceSyncLog::create([
-                                'software_provider_id' => $scenicSpot->software_provider_id ?? null,
-                                'scenic_spot_id' => $scenicSpot->id,
-                                'sync_type' => 'inventory',
-                                'sync_mode' => 'push',
-                                'status' => 'success',
-                                'message' => "成功更新库存：酒店{$hotelNo}，房型{$roomType}，共" . count($roomQuota) . "条记录",
-                                'synced_count' => count($roomQuota),
-                                'last_synced_at' => now(),
+                            DB::commit();
+                            $successCount++;
+
+                            // 记录同步日志
+                            $scenicSpot = $hotel->scenicSpot ?? null;
+                            if ($scenicSpot) {
+                                ResourceSyncLog::create([
+                                    'software_provider_id' => $scenicSpot->software_provider_id ?? null,
+                                    'scenic_spot_id' => $scenicSpot->id,
+                                    'sync_type' => 'inventory',
+                                    'sync_mode' => 'push',
+                                    'status' => 'success',
+                                    'message' => "成功更新库存：酒店{$hotelNo}，房型{$roomType}，共" . count($dirtyInventories) . "条记录（变化）",
+                                    'synced_count' => count($dirtyInventories),
+                                    'last_synced_at' => now(),
+                                ]);
+                            }
+
+                            // 触发推送到携程（如果启用自动推送）
+                            if (!empty($changedDates) && env('ENABLE_AUTO_PUSH_INVENTORY_TO_OTA', true)) {
+                                $this->triggerOtaPushForRoomType($roomTypeModel, array_unique($changedDates));
+                            }
+
+                        } catch (\Exception $e) {
+                            DB::rollBack();
+                            // 可选：回滚 Redis 指纹（但为了简单，这里不处理）
+                            $failCount++;
+                            $errors[] = "更新库存失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
+                            Log::error('资源方库存推送：更新库存失败', [
+                                'hotel_id' => $hotel->id,
+                                'room_type_id' => $roomTypeModel->id,
+                                'error' => $e->getMessage(),
                             ]);
                         }
-
-                    } catch (\Exception $e) {
-                        DB::rollBack();
-                        $failCount++;
-                        $errors[] = "更新库存失败（酒店：{$hotelNo}，房型：{$roomType}）：" . $e->getMessage();
-                        Log::error('资源方库存推送：更新库存失败', [
+                    } else {
+                        // 没有变化的库存，只记录日志
+                        Log::info('资源方库存推送：库存未变化，跳过更新', [
                             'hotel_id' => $hotel->id,
                             'room_type_id' => $roomTypeModel->id,
-                            'error' => $e->getMessage(),
+                            'total_records' => count($roomQuota),
                         ]);
+                        $successCount++;
                     }
 
                 } catch (\Exception $e) {
@@ -281,6 +366,48 @@ class ResourceController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
             return $this->xmlResponse('-1', '处理异常：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 触发推送到携程（针对特定房型和日期）
+     * 
+     * @param RoomType $roomType 房型
+     * @param array $dates 变化的日期数组
+     */
+    protected function triggerOtaPushForRoomType(RoomType $roomType, array $dates): void
+    {
+        try {
+            // 查找携程平台
+            $ctripPlatform = OtaPlatform::where('code', OtaPlatformEnum::CTRIP->value)->first();
+            if (!$ctripPlatform) {
+                Log::warning('资源方库存推送：携程平台不存在', [
+                    'room_type_id' => $roomType->id,
+                ]);
+                return;
+            }
+
+            // 放入队列（延迟合并，避免频繁推送）
+            $pushDelay = env('INVENTORY_PUSH_DELAY_SECONDS', 5);
+            PushChangedInventoryToOtaJob::dispatch(
+                $roomType->id,
+                $dates,
+                $ctripPlatform->id
+            )->delay(now()->addSeconds($pushDelay));
+
+            Log::info('资源方库存推送：已触发OTA推送任务', [
+                'room_type_id' => $roomType->id,
+                'dates_count' => count($dates),
+                'dates' => array_slice($dates, 0, 10), // 只记录前10个日期
+                'delay_seconds' => $pushDelay,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('资源方库存推送：触发OTA推送失败', [
+                'room_type_id' => $roomType->id,
+                'dates' => $dates,
+                'error' => $e->getMessage(),
+            ]);
+            // 不抛出异常，避免影响主流程
         }
     }
 

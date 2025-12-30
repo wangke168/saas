@@ -85,14 +85,23 @@ class HengdianClient
                 ->withBody($xml, 'application/xml')
                 ->post($url);
             
+            $responseBody = $response->body();
+            
+            // 记录响应（成功和失败都记录）
+            Log::info('资源方API响应', [
+                'url' => $url,
+                'status' => $response->status(),
+                'body' => $responseBody,
+            ]);
+            
             if ($response->successful()) {
-                return $this->parseXmlResponse($response->body());
+                return $this->parseXmlResponse($responseBody);
             }
             
             Log::error('资源方API请求失败', [
                 'url' => $url,
                 'status' => $response->status(),
-                'body' => $response->body(),
+                'body' => $responseBody,
             ]);
             
             return ['success' => false, 'message' => '请求失败'];
@@ -114,9 +123,19 @@ class HengdianClient
         try {
             $xmlObj = new SimpleXMLElement($xml);
             
+            $resultCode = (string)$xmlObj->ResultCode;
+            $message = (string)$xmlObj->Message;
+            
+            // 记录解析后的结果
+            Log::info('资源方API响应解析结果', [
+                'result_code' => $resultCode,
+                'message' => $message,
+                'success' => $resultCode === '0',
+            ]);
+            
             return [
-                'success' => (string)$xmlObj->ResultCode === '0',
-                'message' => (string)$xmlObj->Message,
+                'success' => $resultCode === '0',
+                'message' => $message,
                 'data' => $xmlObj,
             ];
         } catch (\Exception $e) {
