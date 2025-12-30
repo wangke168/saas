@@ -393,7 +393,7 @@ class ResourceController extends Controller
                 $roomType->id,
                 $dates,
                 $ctripPlatform->id
-            )->delay(now()->addSeconds($pushDelay));
+            )->onQueue('ota-push')->delay(now()->addSeconds($pushDelay));
 
             Log::info('资源方库存推送：已触发OTA推送任务', [
                 'room_type_id' => $roomType->id,

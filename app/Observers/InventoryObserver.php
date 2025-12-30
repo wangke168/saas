@@ -88,7 +88,7 @@ class InventoryObserver
                 $inventory->room_type_id,
                 $cachedDates, // 包含所有需要推送的日期
                 null // 默认推送到携程
-            )->delay(now()->addSeconds($pushDelay));
+            )->onQueue('ota-push')->delay(now()->addSeconds($pushDelay));
 
             Log::debug('InventoryObserver：已调度OTA推送任务', [
                 'inventory_id' => $inventory->id,

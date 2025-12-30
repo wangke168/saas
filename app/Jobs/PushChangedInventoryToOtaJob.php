@@ -34,11 +34,6 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
     public int $timeout = 300;
 
     /**
-     * 队列名称
-     */
-    public string $queue = 'ota-push';
-
-    /**
      * Create a new job instance.
      * 
      * @param int $roomTypeId 房型ID
@@ -49,7 +44,9 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
         public int $roomTypeId,
         public array $dates,
         public ?int $otaPlatformId = null
-    ) {}
+    ) {
+        $this->onQueue('ota-push');
+    }
 
     /**
      * Execute the job.
