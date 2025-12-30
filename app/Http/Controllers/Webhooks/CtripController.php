@@ -540,21 +540,42 @@ class CtripController extends Controller
                 // 保存携程传递的 itemId（如果还没有保存）
                 if (!empty($items) && isset($items[0]['itemId']) && !$order->ctrip_item_id) {
                     $order->update(['ctrip_item_id' => $items[0]['itemId']]);
+                    Log::info('携程预下单支付：已保存 itemId', [
+                        'order_id' => $order->id,
+                        'item_id' => $items[0]['itemId'],
+                    ]);
                 }
                 
                 // 检查是否系统直连，如果是则确保队列任务已派发
                 $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+                Log::info('携程预下单支付：检查系统直连状态', [
+                    'order_id' => $order->id,
+                    'is_system_connected' => $isSystemConnected,
+                ]);
+                
                 if ($isSystemConnected) {
                     // 检查是否已经有异常订单（说明队列任务可能已执行但失败）
                     $hasExceptionOrder = ExceptionOrder::where('order_id', $order->id)
                         ->where('status', ExceptionOrderStatus::PENDING)
                         ->exists();
                     
+                    Log::info('携程预下单支付：检查异常订单', [
+                        'order_id' => $order->id,
+                        'has_exception_order' => $hasExceptionOrder,
+                    ]);
+                    
                     if (!$hasExceptionOrder) {
                         // 如果没有异常订单，说明可能队列任务还未执行或执行中，不需要重复派发
                         // 但为了安全，可以再次派发（Laravel队列会自动去重）
                         \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
                             ->timeout(10);
+                        Log::info('携程预下单支付：已派发 ProcessResourceOrderJob（幂等性保护）', [
+                            'order_id' => $order->id,
+                        ]);
+                    } else {
+                        Log::info('携程预下单支付：存在异常订单，不重复派发队列任务', [
+                            'order_id' => $order->id,
+                        ]);
                     }
                 }
                 
