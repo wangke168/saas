@@ -188,22 +188,35 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
         try {
             // 根据产品的入住天数，扩大查询日期范围
             // 如果产品有入住天数（stay_days > 1），需要查询所有相关日期，以便正确计算连续入住天数的库存
+            // 
+            // 逻辑说明：
+            // - 如果 stay_days = 2，变化日期是 2026-01-11
+            // - 需要查询：2026-01-10, 2026-01-11, 2026-01-12
+            // - 因为：
+            //   1. 从 2026-01-10 开始入住需要：2026-01-10, 2026-01-11（如果 2026-01-11 变成0，2026-01-10 也应该变成0）
+            //   2. 从 2026-01-11 开始入住需要：2026-01-11, 2026-01-12
             $stayDays = $product->stay_days ?: 1;
             $queryDates = $this->dates;
             
             if ($stayDays > 1 && !empty($this->dates)) {
-                // 对于每个变化的日期，需要查询从该日期开始的连续 stay_days 天的库存
+                // 对于每个变化的日期，需要查询前后相关日期的库存
                 $expandedDates = [];
                 foreach ($this->dates as $date) {
                     $dateObj = \Carbon\Carbon::parse($date);
-                    // 查询从该日期开始的连续 stay_days 天
-                    for ($i = 0; $i < $stayDays; $i++) {
+                    
+                    // 查询范围：[变化日期 - (stay_days-1), 变化日期 + (stay_days-1)]
+                    // 例如：stay_days=2, 变化日期=2026-01-11
+                    // 查询：2026-01-10, 2026-01-11, 2026-01-12
+                    for ($i = -($stayDays - 1); $i < $stayDays; $i++) {
                         $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
                         if (!in_array($checkDate, $expandedDates)) {
                             $expandedDates[] = $checkDate;
                         }
                     }
                 }
+                
+                // 排序日期，确保顺序正确
+                sort($expandedDates);
                 $queryDates = $expandedDates;
                 
                 Log::debug('推送库存变化：扩大查询日期范围（考虑入住天数）', [

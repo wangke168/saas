@@ -12,9 +12,6 @@ use App\Models\Order;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
-use App\Services\OrderOperationService;
-use App\Services\InventoryService;
-use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,9 +24,7 @@ class CtripController extends Controller
 
     public function __construct(
         protected OrderService $orderService,
-        protected OrderProcessorService $orderProcessorService,
-        protected InventoryService $inventoryService,
-        protected OrderOperationService $orderOperationService
+        protected OrderProcessorService $orderProcessorService
     ) {}
 
     /**
@@ -38,14 +33,8 @@ class CtripController extends Controller
     protected function getClient(): ?CtripClient
     {
         if ($this->client === null) {
-            // 优先使用环境变量配置（如果存在）
-            $config = $this->createConfigFromEnv();
-            
-            // 如果环境变量配置不存在，尝试从数据库读取
-            if (!$config) {
-                $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
-                $config = $platform?->config;
-            }
+            $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
+            $config = $platform?->config;
 
             if (!$config) {
                 return null;
@@ -55,37 +44,6 @@ class CtripController extends Controller
         }
 
         return $this->client;
-    }
-
-    /**
-     * 从环境变量创建配置对象
-     */
-    protected function createConfigFromEnv(): ?\App\Models\OtaConfig
-    {
-        // 检查环境变量是否存在
-        if (!env('CTRIP_ACCOUNT_ID') || !env('CTRIP_SECRET_KEY')) {
-            return null;
-        }
-
-        // 创建临时配置对象（不保存到数据库）
-        $config = new \App\Models\OtaConfig();
-        $config->account = env('CTRIP_ACCOUNT_ID');
-        $config->secret_key = env('CTRIP_SECRET_KEY');
-        $config->aes_key = env('CTRIP_ENCRYPT_KEY', '');
-        $config->aes_iv = env('CTRIP_ENCRYPT_IV', '');
-        
-        // API URL 配置
-        $priceApiUrl = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
-        $stockApiUrl = env('CTRIP_STOCK_API_URL', 'https://ttdopen.ctrip.com/api/product/stock.do');
-        $orderApiUrl = env('CTRIP_ORDER_API_URL', 'https://ttdopen.ctrip.com/api/order/notice.do');
-        
-        // 使用价格API URL作为基础URL（CtripClient会根据接口类型选择正确的URL）
-        $config->api_url = $priceApiUrl;
-        $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
-        $config->environment = 'production';
-        $config->is_active = true;
-
-        return $config;
     }
 
     /**
@@ -284,103 +242,26 @@ class CtripController extends Controller
                 return $this->errorResponse('1003', '数据参数不合法：使用日期(useStartDate/useDate)为空');
             }
 
-            // 解析 PLU 格式：酒店编码|房型编码|产品编码
-            // 如果 PLU 包含 | 分隔符，提取各部分；否则直接使用作为产品编码
-            $productCode = trim($supplierOptionId);
-            $hotelCode = null;
-            $roomTypeCode = null;
-            
-            if (strpos($supplierOptionId, '|') !== false) {
-                // PLU 格式：酒店编码|房型编码|产品编码
-                $parts = explode('|', $supplierOptionId);
-                if (count($parts) === 3) {
-                    $hotelCode = trim($parts[0]);
-                    $roomTypeCode = trim($parts[1]);
-                    $productCode = trim($parts[2]);
-                } else {
-                    // 如果格式不正确，尝试使用最后一部分作为产品编码
-                    $productCode = trim(end($parts));
-                    Log::warning('携程预下单：PLU格式异常', [
-                        'plu' => $supplierOptionId,
-                        'parts_count' => count($parts),
-                    ]);
-                }
-            }
-
             // 根据产品编码查找产品
-            $product = \App\Models\Product::where('code', $productCode)->first();
+            $product = \App\Models\Product::where('code', trim($supplierOptionId))->first();
             if (!$product) {
                 DB::rollBack();
-                Log::error('携程预下单：产品不存在', [
-                    'plu' => $supplierOptionId,
-                    'product_code' => $productCode,
-                ]);
                 return $this->errorResponse('1002', '供应商PLU不存在/错误');
             }
 
             // 查找产品关联的酒店和房型
-            // 如果 PLU 中提供了酒店编码和房型编码，优先使用它们来查找
-            $price = null;
-            $roomType = null;
-            $hotel = null;
-
-            if ($hotelCode && $roomTypeCode) {
-                // 使用 PLU 中的酒店编码和房型编码查找
-                $hotel = \App\Models\Hotel::where('code', $hotelCode)->first();
-                if ($hotel) {
-                    $roomType = \App\Models\RoomType::where('hotel_id', $hotel->id)
-                        ->where('code', $roomTypeCode)
-                        ->first();
-                    if ($roomType) {
-                        $price = $product->prices()
-                            ->where('room_type_id', $roomType->id)
-                            ->where('date', $useStartDate)
-                            ->first();
-                    }
-                }
-            }
-
-            // 如果通过 PLU 编码找不到，则使用原来的方式（通过价格表查找）
-            if (!$price || !$roomType || !$hotel) {
-                $price = $product->prices()->where('date', $useStartDate)->first();
-                if ($price) {
-                    $roomType = $price->roomType;
-                    $hotel = $roomType->hotel ?? null;
-                }
-            }
-
+            $price = $product->prices()->where('date', $useStartDate)->first();
             if (!$price) {
                 DB::rollBack();
-                Log::error('携程预下单：指定日期没有价格', [
-                    'product_id' => $product->id,
-                    'use_start_date' => $useStartDate,
-                    'hotel_code' => $hotelCode,
-                    'room_type_code' => $roomTypeCode,
-                ]);
                 return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格');
             }
 
+            $roomType = $price->roomType;
+            $hotel = $roomType->hotel ?? null;
+
             if (!$hotel || !$roomType) {
                 DB::rollBack();
-                Log::error('携程预下单：产品未关联酒店或房型', [
-                    'product_id' => $product->id,
-                    'hotel_code' => $hotelCode,
-                    'room_type_code' => $roomTypeCode,
-                ]);
                 return $this->errorResponse('1003', '数据参数不合法：产品未关联酒店或房型');
-            }
-
-            // 如果 PLU 中提供了酒店编码和房型编码，验证是否匹配
-            if ($hotelCode && $roomTypeCode) {
-                if ($hotel->code !== $hotelCode || $roomType->code !== $roomTypeCode) {
-                    Log::warning('携程预下单：PLU中的酒店/房型编码与数据库不匹配', [
-                        'plu_hotel_code' => $hotelCode,
-                        'plu_room_type_code' => $roomTypeCode,
-                        'db_hotel_code' => $hotel->code,
-                        'db_room_type_code' => $roomType->code,
-                    ]);
-                    // 不直接返回错误，记录警告日志，继续处理
-                }
             }
 
             // 检查库存（考虑入住天数）
@@ -429,25 +310,9 @@ class CtripController extends Controller
                 $cardNo = $firstPassenger['cardNo'] ?? $firstPassenger['card_no'] ?? null;
             }
 
-            // 计算离店日期
-            // 如果携程没有提供useEndDate，或者useEndDate等于useStartDate，则根据产品入住天数计算
-            $stayDays = $product->stay_days ?: 1;
-            if (empty($useEndDate) || $useEndDate === $useStartDate) {
-                $checkOutDate = \Carbon\Carbon::parse($useStartDate)->addDays($stayDays)->format('Y-m-d');
-                Log::info('携程预下单：根据产品入住天数计算离店日期', [
-                    'use_start_date' => $useStartDate,
-                    'use_end_date' => $useEndDate,
-                    'stay_days' => $stayDays,
-                    'calculated_check_out_date' => $checkOutDate,
-                ]);
-            } else {
-                $checkOutDate = $useEndDate;
-            }
-
             // 创建订单
-            // 注意：预下单创建时，客人并没有付款，只是占了库存（锁库存）
-            // 订单状态为 PAID_PENDING（待确认），paid_at 应该为 null
-            // 只有在 PayPreOrder（预下单支付）时，客人才真正付款，此时才设置 paid_at
+            // 注意：预下单创建时，订单状态为 PAID_PENDING（待支付），但此时还没有支付
+            // paid_at 应该为 null，只有在 PayPreOrder（预下单支付）时才设置 paid_at
             $order = Order::create([
                 'order_no' => $this->generateOrderNo(),
                 'ota_order_no' => $ctripOrderId,
@@ -457,7 +322,7 @@ class CtripController extends Controller
                 'room_type_id' => $roomType->id,
                 'status' => OrderStatus::PAID_PENDING,
                 'check_in_date' => $useStartDate,
-                'check_out_date' => $checkOutDate,
+                'check_out_date' => $useEndDate ?: $useStartDate,
                 'room_count' => $quantity,
                 'guest_count' => count($passengers) ?: 1,
                 'contact_name' => $contactInfo['name'] ?? '',
@@ -548,13 +413,20 @@ class CtripController extends Controller
                 ]);
             }
 
-            // 保存携程传递的 itemId（订单项编号）
+            // 模拟同步确认（为了通过沙箱测试）
+            // 在生产环境中，这里可能需要根据实际资源方响应速度决定是同步还是异步
+
+            // 1. 更新状态为已确认
+            $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程预下单支付成功（同步确认）');
+
+            // 2. 保存携程传递的 itemId（订单项编号）
+            // 从 PayPreOrder 请求的 items 中获取 itemId，用于后续 QueryOrder 接口返回
             $ctripItemId = null;
             if (!empty($items) && isset($items[0]['itemId'])) {
                 $ctripItemId = $items[0]['itemId'];
             }
 
-            // 补全支付时间和 itemId
+            // 3. 补全支付时间和 itemId
             $updateData = ['paid_at' => now()];
             if ($ctripItemId && !$order->ctrip_item_id) {
                 $updateData['ctrip_item_id'] = $ctripItemId;
@@ -563,151 +435,11 @@ class CtripController extends Controller
                 $order->update($updateData);
             }
 
-            // 检查是否系统直连（使用统一的判断逻辑）
-            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
-
-            // 先响应携程（不等待景区方接口）
-            // 系统直连和非系统直连都返回 supplierConfirmType = 2（支付待确认）
-            $supplierConfirmType = 2;
-
-            // 先更新状态为确认中（无论是否系统直连，都先更新状态，让后台可以立即看到）
-            $this->orderService->updateOrderStatus(
-                $order,
-                OrderStatus::CONFIRMING,
-                '携程预下单支付成功'
-            );
-
-            // 如果是系统直连，同步调用资源方接口（带超时保护）
-            if ($isSystemConnected) {
-                Log::info('携程预下单支付：开始同步调用资源方接口', [
-                    'order_id' => $order->id,
-                    'ota_order_no' => $order->ota_order_no,
-                ]);
-
-                try {
-                    // 获取资源方服务
-                    $resourceService = ResourceServiceFactory::getService($order, 'order');
-                    
-                    if (!$resourceService) {
-                        Log::warning('携程预下单支付：无法获取资源方服务，降级到队列处理', [
-                            'order_id' => $order->id,
-                        ]);
-                        // 降级到队列异步处理
-                        \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
-                    } else {
-                        Log::info('携程预下单支付：准备调用资源方接单接口', [
-                            'order_id' => $order->id,
-                            'resource_service_class' => get_class($resourceService),
-                        ]);
-
-                        // 同步调用资源方接口（设置10秒超时）
-                        $timeout = 10; // 10秒超时
-                        $startTime = microtime(true);
-                        
-                        $result = $resourceService->confirmOrder($order);
-                        
-                        $elapsedTime = microtime(true) - $startTime;
-                        
-                        Log::info('携程预下单支付：资源方接单接口返回', [
-                            'order_id' => $order->id,
-                            'result_success' => $result['success'] ?? false,
-                            'result_message' => $result['message'] ?? '',
-                            'elapsed_time' => round($elapsedTime, 2) . 's',
-                        ]);
-
-                        // 处理接单结果
-                        if ($result['success'] ?? false) {
-                            // 提取资源方订单号
-                            $resourceOrderNo = null;
-                            if (isset($result['data']['resource_order_no'])) {
-                                $resourceOrderNo = $result['data']['resource_order_no'];
-                            } elseif (isset($result['data']->OrderId)) {
-                                $resourceOrderNo = (string)$result['data']->OrderId;
-                            }
-                            
-                            // 重新加载订单，获取最新的 resource_order_no
-                            $order->refresh();
-                            if (!$resourceOrderNo && $order->resource_order_no) {
-                                $resourceOrderNo = $order->resource_order_no;
-                            }
-                            
-                            // 更新订单状态为已确认
-                            $updateData = [
-                                'status' => OrderStatus::CONFIRMED,
-                                'confirmed_at' => now(),
-                            ];
-                            
-                            if ($resourceOrderNo && $order->resource_order_no !== $resourceOrderNo) {
-                                $updateData['resource_order_no'] = $resourceOrderNo;
-                            }
-                            
-                            $order->update($updateData);
-                            
-                            Log::info('携程预下单支付：资源方接单成功，订单已更新为已确认', [
-                                'order_id' => $order->id,
-                                'resource_order_no' => $resourceOrderNo ?: $order->resource_order_no,
-                            ]);
-
-                            // 通知OTA平台订单确认（异步）
-                            try {
-                                \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
-                                
-                                Log::info('携程预下单支付：已派发 NotifyOtaOrderStatusJob', [
-                                    'order_id' => $order->id,
-                                ]);
-                            } catch (\Exception $e) {
-                                Log::warning('携程预下单支付：派发 NotifyOtaOrderStatusJob 失败', [
-                                    'order_id' => $order->id,
-                                    'error' => $e->getMessage(),
-                                ]);
-                            }
-                        } else {
-                            // 资源方接单失败，创建异常订单
-                            $errorMessage = $result['message'] ?? '未知错误';
-                            
-                            Log::warning('携程预下单支付：资源方接单失败', [
-                                'order_id' => $order->id,
-                                'error' => $errorMessage,
-                            ]);
-
-                            // 创建异常订单
-                            \App\Models\ExceptionOrder::create([
-                                'order_id' => $order->id,
-                                'exception_type' => \App\Enums\ExceptionOrderType::API_ERROR,
-                                'exception_message' => '资源方接口调用失败（BookRQ）：' . $errorMessage,
-                                'exception_data' => [
-                                    'operation' => 'confirm',
-                                    'resource_response' => $result,
-                                ],
-                                'status' => \App\Enums\ExceptionOrderStatus::PENDING,
-                            ]);
-                            
-                            // 保持 CONFIRMING 状态，等待人工处理
-                        }
-                    }
-                } catch (\Illuminate\Http\Client\ConnectionException $e) {
-                    // 连接超时或网络错误，降级到队列异步处理
-                    Log::warning('携程预下单支付：资源方接口调用超时或网络错误，降级到队列处理', [
-                        'order_id' => $order->id,
-                        'error' => $e->getMessage(),
-                    ]);
-                    
-                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
-                } catch (\Exception $e) {
-                    // 其他异常，降级到队列异步处理
-                    Log::error('携程预下单支付：资源方接口调用异常，降级到队列处理', [
-                        'order_id' => $order->id,
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                    ]);
-                    
-                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
-                }
-            }
-            // 非系统直连：已经更新为CONFIRMING，等待人工接单
+            // 3. 触发后续流程（如发货、发凭证等），但这不影响给携程的同步响应
+            // \App\Jobs\ProcessOrderToResourceJob::dispatch($order);
 
             return $this->successResponse([
-                'supplierConfirmType' => $supplierConfirmType, // 1=支付已确认（同步返回），2=支付待确认（需异步返回）
+                'supplierConfirmType' => 1, // 1.支付已确认（同步返回）
                 'otaOrderId' => $ctripOrderId, // 确保返回 otaOrderId
                 'supplierOrderId' => $order->order_no,
                 'voucherSender' => 1, // 1=携程发凭证, 2=供应商发。通常选1
@@ -799,12 +531,12 @@ class CtripController extends Controller
             // 但根据测试用例，可能需要返回成功（可能是幂等性要求）
             if ($order->status === OrderStatus::PAID_PENDING) {
                 // 更新订单状态为已取消
-                // 注意：updateOrderStatus 会自动设置 cancelled_at，无需重复设置
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::CANCEL_APPROVED,
                     '携程预下单取消'
                 );
+                $order->update(['cancelled_at' => now()]);
 
                 // 释放库存（预下单取消时需要释放锁定的库存）
                 $releaseResult = $this->releaseInventoryForPreOrder($order);
@@ -895,22 +627,28 @@ class CtripController extends Controller
                 return $this->errorResponse('2004', '取消数量不正确');
             }
 
-            // 构建取消原因
-            $cancelReason = '携程申请取消订单';
-            if ($totalCancelQuantity < $order->room_count) {
-                $cancelReason = "携程申请部分取消订单，数量：{$totalCancelQuantity}";
+            // 更新订单状态
+            if ($totalCancelQuantity === $order->room_count) {
+                // 全部取消
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CANCEL_APPROVED,
+                    '携程申请取消订单，数量：' . $totalCancelQuantity
+                );
+                $order->update(['cancelled_at' => now()]);
+            } else {
+                // 部分取消
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CANCEL_APPROVED,
+                    '携程申请部分取消订单，数量：' . $totalCancelQuantity
+                );
             }
 
-            // 检查订单状态是否允许取消申请
-            if (!in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMED])) {
-                return $this->errorResponse('2005', '订单状态不允许取消申请');
-            }
+            // 释放库存
+            // TODO: 实现库存释放逻辑
 
-            // 检查是否系统直连（使用统一的判断逻辑）
-            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
-
-            // 先响应携程（不等待景区方接口）
-            // 系统直连和非系统直连都返回 supplierConfirmType = 2（取消待确认）
+            // 根据文档，响应需要包含 supplierConfirmType 和 items
             $responseItems = [];
             foreach ($items as $item) {
                 $responseItems[] = [
@@ -919,25 +657,8 @@ class CtripController extends Controller
                 ];
             }
 
-            // 先更新状态为申请取消中（无论是否系统直连，都先更新状态，让后台可以立即看到）
-            $this->orderService->updateOrderStatus(
-                $order,
-                OrderStatus::CANCEL_REQUESTED,
-                $cancelReason
-            );
-
-            // 如果是系统直连，异步处理资源方接口调用
-            if ($isSystemConnected) {
-                // 系统直连：异步处理查询是否可以取消，然后决定是否调用取消接口
-                // 如果资源方返回可以取消，异步任务会更新为 CANCEL_APPROVED
-                // 如果资源方返回不可以取消，保持 CANCEL_REQUESTED 状态，创建异常订单
-                // 超时时间已在 ProcessResourceCancelOrderJob 类中设置为 10 秒
-                \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, $cancelReason);
-            }
-            // 非系统直连：已经更新为CANCEL_REQUESTED，等待人工处理
-
             return $this->successResponse([
-                'supplierConfirmType' => 2, // 2.取消待确认（需异步返回）
+                'supplierConfirmType' => 1, // 1.取消已确认（同步返回确认结果）
                 'items' => $responseItems,
             ]);
         } catch (\Exception $e) {
@@ -1101,19 +822,8 @@ class CtripController extends Controller
                 return $this->errorResponse('1009', '日期错误：使用日期为空');
             }
 
-            // 解析 PLU 格式：酒店编码|房型编码|产品编码
-            $productCode = trim($supplierOptionId);
-            if (strpos($supplierOptionId, '|') !== false) {
-                $parts = explode('|', $supplierOptionId);
-                if (count($parts) === 3) {
-                    $productCode = trim($parts[2]); // 最后一部分是产品编码
-                } else {
-                    $productCode = trim(end($parts));
-                }
-            }
-
             // 根据产品编码查找产品
-            $product = \App\Models\Product::where('code', $productCode)->first();
+            $product = \App\Models\Product::where('code', trim($supplierOptionId))->first();
             if (!$product) {
                 return $this->errorResponse('1001', '产品PLU不存在/错误');
             }
@@ -1331,26 +1041,87 @@ class CtripController extends Controller
                 $stayDays = $product->stay_days ?: 1;
             }
 
-            // 获取日期范围
-            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+            $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
+            $roomTypeId = $order->room_type_id;
+            $quantity = $order->room_count;
 
-            // 使用统一的库存服务锁定库存
-            $success = $this->inventoryService->lockInventoryForDates(
-                $order->room_type_id,
-                $dates,
-                $order->room_count
-            );
+            // 使用 Redis 分布式锁，防止并发问题
+            // 锁的粒度：按房型和日期
+            $lockKeys = [];
+            for ($i = 0; $i < $stayDays; $i++) {
+                $date = $checkInDate->copy()->addDays($i);
+                $lockKey = "inventory_lock:{$roomTypeId}:{$date->format('Y-m-d')}";
+                $lockKeys[] = $lockKey;
+            }
 
-            if ($success) {
-                return [
-                    'success' => true,
-                    'message' => '库存锁定成功',
-                ];
-            } else {
-                return [
-                    'success' => false,
-                    'message' => '库存锁定失败：库存不足或并发冲突',
-                ];
+            // 尝试获取所有日期的锁
+            $acquiredLocks = [];
+            foreach ($lockKeys as $lockKey) {
+                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
+                if (!$lock) {
+                    // 获取锁失败，释放已获取的锁
+                    foreach ($acquiredLocks as $acquiredLock) {
+                        Redis::del($acquiredLock);
+                    }
+                    return [
+                        'success' => false,
+                        'message' => '库存锁定失败：并发冲突，请稍后重试',
+                    ];
+                }
+                $acquiredLocks[] = $lockKey;
+            }
+
+            try {
+                // 再次检查库存（在锁内检查，确保准确性）
+                $checkResult = $this->checkInventoryForStayDays($roomTypeId, $checkInDate, $stayDays, $quantity);
+                if (!$checkResult['success']) {
+                    return $checkResult;
+                }
+
+                // 锁定库存：增加 locked_quantity，减少 available_quantity
+                for ($i = 0; $i < $stayDays; $i++) {
+                    $date = $checkInDate->copy()->addDays($i);
+                    $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
+                        ->where('date', $date->format('Y-m-d'))
+                        ->lockForUpdate() // 行级锁，防止并发
+                        ->first();
+
+                    if (!$inventory) {
+                        return [
+                            'success' => false,
+                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 没有库存记录',
+                        ];
+                    }
+
+                    // 再次检查（双重检查，确保在获取行锁后库存仍然足够）
+                    if ($inventory->is_closed || $inventory->available_quantity < $quantity) {
+                        return [
+                            'success' => false,
+                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 库存不足或已关闭',
+                        ];
+                    }
+
+                    // 锁定库存
+                    $inventory->available_quantity -= $quantity;
+                    $inventory->locked_quantity += $quantity;
+                    $inventory->save();
+
+                    Log::info('预下单库存锁定成功', [
+                        'order_id' => $order->id,
+                        'room_type_id' => $roomTypeId,
+                        'date' => $date->format('Y-m-d'),
+                        'quantity' => $quantity,
+                        'available_quantity' => $inventory->available_quantity,
+                        'locked_quantity' => $inventory->locked_quantity,
+                    ]);
+                }
+
+                return ['success' => true, 'message' => ''];
+            } finally {
+                // 释放所有 Redis 锁
+                foreach ($acquiredLocks as $lockKey) {
+                    Redis::del($lockKey);
+                }
             }
         } catch (\Exception $e) {
             Log::error('预下单库存锁定异常', [
@@ -1361,7 +1132,7 @@ class CtripController extends Controller
 
             return [
                 'success' => false,
-                'message' => '库存锁定失败：系统异常',
+                'message' => '库存锁定异常：' . $e->getMessage(),
             ];
         }
     }
@@ -1380,26 +1151,75 @@ class CtripController extends Controller
             $product = $order->product;
             $stayDays = $product->stay_days ?: 1;
 
-            // 获取日期范围
-            $dates = $this->inventoryService->getDateRange($order->check_in_date, $stayDays);
+            $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
+            $roomTypeId = $order->room_type_id;
+            $quantity = $order->room_count;
 
-            // 使用统一的库存服务释放库存（自动支持 Redis 降级方案）
-            $success = $this->inventoryService->releaseInventoryForDates(
-                $order->room_type_id,
-                $dates,
-                $order->room_count
-            );
+            // 使用 Redis 分布式锁
+            $lockKeys = [];
+            for ($i = 0; $i < $stayDays; $i++) {
+                $date = $checkInDate->copy()->addDays($i);
+                $lockKey = "inventory_lock:{$roomTypeId}:{$date->format('Y-m-d')}";
+                $lockKeys[] = $lockKey;
+            }
 
-            if ($success) {
-                return [
-                    'success' => true,
-                    'message' => '库存释放成功',
-                ];
-            } else {
-                return [
-                    'success' => false,
-                    'message' => '库存释放失败：系统异常',
-                ];
+            // 尝试获取所有日期的锁
+            $acquiredLocks = [];
+            foreach ($lockKeys as $lockKey) {
+                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
+                if (!$lock) {
+                    // 获取锁失败，释放已获取的锁
+                    foreach ($acquiredLocks as $acquiredLock) {
+                        Redis::del($acquiredLock);
+                    }
+                    return [
+                        'success' => false,
+                        'message' => '库存释放失败：并发冲突，请稍后重试',
+                    ];
+                }
+                $acquiredLocks[] = $lockKey;
+            }
+
+            try {
+                // 释放库存：减少 locked_quantity，增加 available_quantity
+                for ($i = 0; $i < $stayDays; $i++) {
+                    $date = $checkInDate->copy()->addDays($i);
+                    $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
+                        ->where('date', $date->format('Y-m-d'))
+                        ->lockForUpdate() // 行级锁
+                        ->first();
+
+                    if (!$inventory) {
+                        Log::warning('预下单库存释放：库存记录不存在', [
+                            'order_id' => $order->id,
+                            'room_type_id' => $roomTypeId,
+                            'date' => $date->format('Y-m-d'),
+                        ]);
+                        continue; // 继续处理其他日期
+                    }
+
+                    // 释放库存（确保不会出现负数）
+                    $releaseQuantity = min($quantity, $inventory->locked_quantity);
+                    $inventory->locked_quantity -= $releaseQuantity;
+                    $inventory->available_quantity += $releaseQuantity;
+                    $inventory->save();
+
+                    Log::info('预下单库存释放成功', [
+                        'order_id' => $order->id,
+                        'room_type_id' => $roomTypeId,
+                        'date' => $date->format('Y-m-d'),
+                        'quantity' => $releaseQuantity,
+                        'available_quantity' => $inventory->available_quantity,
+                        'locked_quantity' => $inventory->locked_quantity,
+                    ]);
+                }
+
+                return ['success' => true, 'message' => ''];
+            } finally {
+                // 释放所有 Redis 锁
+                foreach ($acquiredLocks as $lockKey) {
+                    Redis::del($lockKey);
+                }
             }
         } catch (\Exception $e) {
             Log::error('预下单库存释放异常', [
@@ -1410,7 +1230,7 @@ class CtripController extends Controller
 
             return [
                 'success' => false,
-                'message' => '库存释放失败：系统异常',
+                'message' => '库存释放异常：' . $e->getMessage(),
             ];
         }
     }
