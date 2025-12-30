@@ -155,14 +155,13 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                     }
 
                     // 根据平台类型推送
-                    if ($platform->code === OtaPlatformEnum::CTRIP) {
-                        $this->pushToCtrip($product, $hotel, $roomType, $ctripService);
-                    } else {
-                        Log::info('推送库存变化：暂不支持该OTA平台', [
+                    match ($platform->code->value) {
+                        'ctrip' => $this->pushToCtrip($product, $hotel, $roomType, $ctripService),
+                        default => Log::info('推送库存变化：暂不支持该OTA平台', [
                             'product_id' => $product->id,
                             'platform_code' => $platform->code->value,
-                        ]);
-                    }
+                        ]),
+                    };
                 }
             }
 
