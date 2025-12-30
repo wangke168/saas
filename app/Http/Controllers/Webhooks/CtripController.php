@@ -745,13 +745,283 @@ class CtripController extends Controller
     /**
      * 处理订单新订（CreateOrder）
      * 根据文档：当客人在携程平台进行订单预定后，携程会通过该接口向供应商系统提交客人的预定信息
-     * 注意：如果已接入 CreatePreOrder，此接口通常不需要实现
+     * 
+     * 注意：CreateOrder 是直接下单（已支付），与预下单流程（CreatePreOrder + PayPreOrder）不同
+     * - CreateOrder：直接创建订单，已支付，需要立即调用横店接口接单
+     * - CreatePreOrder：创建预下单，未支付，需要等待 PayPreOrder 后才调用横店接口
+     * 
+     * 流程：
+     * 1. 创建订单（paid_at = now()，因为已支付）
+     * 2. 锁定库存
+     * 3. 立即调用横店接口接单（异步）
+     * 4. 返回成功响应
      */
     protected function handleCreateOrder(array $data): JsonResponse
     {
-        // 如果已实现 CreatePreOrder，此接口可以复用 handlePreCreateOrder 的逻辑
-        // 或者返回错误提示使用预下单流程
-        return $this->errorResponse('1002', '产品已经下架。请使用预下单流程（CreatePreOrder）');
+        try {
+            DB::beginTransaction();
+
+            $otaPlatform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
+            if (!$otaPlatform) {
+                DB::rollBack();
+                return $this->errorResponse('0001', 'OTA平台配置不存在');
+            }
+
+            // 支持两种数据格式（与 CreatePreOrder 类似）
+            if (isset($data['items']) && is_array($data['items']) && !empty($data['items'])) {
+                // 新格式：从 items[0] 中获取信息
+                $item = $data['items'][0];
+                $supplierOptionId = $item['PLU'] ?? '';
+                $ctripOrderId = $data['otaOrderId'] ?? '';
+                $useStartDate = $item['useStartDate'] ?? '';
+                $useEndDate = $item['useEndDate'] ?? $useStartDate;
+                $quantity = intval($item['quantity'] ?? 1);
+                $salePrice = floatval($item['salePrice'] ?? 0);
+                $costPrice = floatval($item['cost'] ?? 0);
+                $passengers = $item['passengers'] ?? [];
+                $contacts = $data['contacts'] ?? [];
+                $contactInfo = !empty($contacts) ? $contacts[0] : [];
+                $items = $data['items'] ?? [];
+            } else {
+                // 旧格式：直接字段
+                $supplierOptionId = $data['supplierOptionId'] ?? '';
+                $ctripOrderId = $data['orderId'] ?? $data['otaOrderId'] ?? '';
+                $useStartDate = $data['useDate'] ?? $data['useStartDate'] ?? '';
+                $useEndDate = $data['useEndDate'] ?? $useStartDate;
+                $quantity = intval($data['quantity'] ?? 1);
+                $passengers = $data['travelers'] ?? $data['passengers'] ?? [];
+                $contactInfo = $data['contactInfo'] ?? [];
+                $salePrice = 0;
+                $costPrice = 0;
+                $items = [];
+            }
+
+            // 验证必要参数
+            if (empty($supplierOptionId)) {
+                DB::rollBack();
+                return $this->errorResponse('1003', '数据参数不合法：产品编码(PLU/supplierOptionId)为空');
+            }
+
+            if (empty($ctripOrderId)) {
+                DB::rollBack();
+                return $this->errorResponse('1003', '数据参数不合法：订单号(otaOrderId/orderId)为空');
+            }
+
+            if (empty($useStartDate)) {
+                DB::rollBack();
+                return $this->errorResponse('1003', '数据参数不合法：使用日期(useStartDate/useDate)为空');
+            }
+
+            // 检查是否已存在订单（防止重复）
+            $existingOrder = Order::where('ota_order_no', $ctripOrderId)
+                ->where('ota_platform_id', $otaPlatform->id)
+                ->first();
+
+            if ($existingOrder) {
+                // 已存在，返回成功（幂等性）
+                DB::rollBack();
+                Log::info('携程直接下单：订单已存在，返回成功', [
+                    'ctrip_order_id' => $ctripOrderId,
+                    'order_no' => $existingOrder->order_no,
+                ]);
+                return $this->successResponse([
+                    'otaOrderId' => $ctripOrderId,
+                    'orderId' => $existingOrder->order_no,
+                    'supplierOrderId' => $existingOrder->order_no,
+                ]);
+            }
+
+            // 解析携程PLU格式：酒店编码|房型编码|产品编码（与 CreatePreOrder 相同逻辑）
+            $hotelCode = null;
+            $roomTypeCode = null;
+            $productCode = $supplierOptionId;
+            
+            if (strpos($supplierOptionId, '|') !== false) {
+                $parts = explode('|', $supplierOptionId);
+                if (count($parts) >= 3) {
+                    $hotelCode = trim($parts[0]);
+                    $roomTypeCode = trim($parts[1]);
+                    $productCode = trim($parts[2]);
+                } else {
+                    $productCode = trim(end($parts));
+                }
+            } else {
+                $productCode = trim($productCode);
+            }
+            
+            // 根据产品编码查找产品
+            $product = \App\Models\Product::where('code', $productCode)->first();
+            if (!$product) {
+                DB::rollBack();
+                return $this->errorResponse('1002', '供应商PLU不存在/错误');
+            }
+            
+            // 查找酒店和房型（与 CreatePreOrder 相同逻辑）
+            if ($hotelCode && $roomTypeCode) {
+                $hotel = \App\Models\Hotel::where('code', $hotelCode)->first();
+                if (!$hotel) {
+                    DB::rollBack();
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误：酒店编码不存在');
+                }
+                
+                $roomType = \App\Models\RoomType::where('code', $roomTypeCode)
+                    ->where('hotel_id', $hotel->id)
+                    ->first();
+                if (!$roomType) {
+                    DB::rollBack();
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误：房型编码不存在');
+                }
+                
+                $price = \App\Models\Price::where('product_id', $product->id)
+                    ->where('room_type_id', $roomType->id)
+                    ->where('date', $useStartDate)
+                    ->first();
+                    
+                if (!$price) {
+                    DB::rollBack();
+                    return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格或产品-酒店-房型组合不匹配');
+                }
+            } else {
+                $price = $product->prices()->where('date', $useStartDate)->first();
+                if (!$price) {
+                    DB::rollBack();
+                    return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格');
+                }
+
+                $roomType = $price->roomType;
+                $hotel = $roomType->hotel ?? null;
+
+                if (!$hotel || !$roomType) {
+                    DB::rollBack();
+                    return $this->errorResponse('1003', '数据参数不合法：产品未关联酒店或房型');
+                }
+            }
+
+            // 检查库存（考虑入住天数）
+            $stayDays = $product->stay_days ?: 1;
+            $checkInDate = \Carbon\Carbon::parse($useStartDate);
+            
+            $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
+            if (!$inventoryCheck['success']) {
+                DB::rollBack();
+                return $this->errorResponse('1003', $inventoryCheck['message']);
+            }
+
+            // 如果没有从 items 中获取价格，则从价格表获取
+            if ($salePrice <= 0) {
+                $salePrice = floatval($price->sale_price) / 100;
+            }
+            if ($costPrice <= 0) {
+                $costPrice = floatval($price->settlement_price) / 100;
+            }
+
+            // 从出行人信息中提取身份证号
+            $cardNo = null;
+            if (!empty($passengers) && is_array($passengers)) {
+                $firstPassenger = $passengers[0] ?? [];
+                $cardNo = $firstPassenger['cardNo'] ?? $firstPassenger['card_no'] ?? null;
+            }
+
+            // 保存携程传递的 itemId（如果存在）
+            $ctripItemId = null;
+            if (!empty($items) && isset($items[0]['itemId'])) {
+                $ctripItemId = $items[0]['itemId'];
+            }
+
+            // 创建订单（注意：CreateOrder 是直接下单，已支付，所以 paid_at = now()）
+            $order = Order::create([
+                'order_no' => $this->generateOrderNo(),
+                'ota_order_no' => $ctripOrderId,
+                'ota_platform_id' => $otaPlatform->id,
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'status' => OrderStatus::PAID_PENDING, // 先创建为待确认，后续会更新为确认中
+                'check_in_date' => $useStartDate,
+                'check_out_date' => $useEndDate ?: $useStartDate,
+                'room_count' => $quantity,
+                'guest_count' => count($passengers) ?: 1,
+                'contact_name' => $contactInfo['name'] ?? '',
+                'contact_phone' => $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '',
+                'contact_email' => $contactInfo['email'] ?? '',
+                'card_no' => $cardNo,
+                'guest_info' => $passengers,
+                'total_amount' => intval($salePrice * $quantity * 100),
+                'settlement_amount' => intval($costPrice * $quantity * 100),
+                'paid_at' => now(), // CreateOrder 是直接下单，已支付
+                'ctrip_item_id' => $ctripItemId, // 保存 itemId
+            ]);
+
+            // 锁定库存
+            $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
+            if (!$lockResult['success']) {
+                DB::rollBack();
+                Log::error('携程直接下单：库存锁定失败', [
+                    'order_id' => $order->id,
+                    'error' => $lockResult['message'],
+                ]);
+                return $this->errorResponse('1003', '库存锁定失败：' . $lockResult['message']);
+            }
+
+            DB::commit();
+
+            Log::info('携程直接下单成功', [
+                'ctrip_order_id' => $ctripOrderId,
+                'order_no' => $order->order_no,
+                'product_code' => $supplierOptionId,
+            ]);
+
+            // 检查是否系统直连，如果是则立即调用横店接口接单
+            $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+            
+            if ($isSystemConnected) {
+                // 系统直连：更新状态为确认中，然后异步调用景区方接口接单
+                Log::info('携程直接下单：系统直连，准备派发队列', [
+                    'order_id' => $order->id,
+                ]);
+                
+                $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程直接下单成功，等待向景区下发订单');
+                
+                // 异步处理景区方接口调用
+                try {
+                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
+                        ->timeout(10);
+                    
+                    Log::info('携程直接下单：已成功派发 ProcessResourceOrderJob', [
+                        'order_id' => $order->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('携程直接下单：派发 ProcessResourceOrderJob 失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            } else {
+                // 非系统直连：同步确认
+                Log::info('携程直接下单：非系统直连，同步确认', [
+                    'order_id' => $order->id,
+                ]);
+                
+                $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程直接下单成功（同步确认）');
+            }
+
+            return $this->successResponse([
+                'otaOrderId' => $ctripOrderId,
+                'orderId' => $order->order_no,
+                'supplierOrderId' => $order->order_no,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::error('携程直接下单失败', [
+                'error' => $e->getMessage(),
+                'data' => $data,
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->errorResponse('0005', '系统处理异常：' . $e->getMessage());
+        }
     }
 
     /**
