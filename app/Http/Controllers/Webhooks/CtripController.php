@@ -268,11 +268,22 @@ class CtripController extends Controller
                 ]);
                 return $this->errorResponse('1002', '供应商PLU不存在/错误');
             }
+            
+            Log::info('携程预下单：产品查找成功', [
+                'product_id' => $product->id,
+                'product_code' => $product->code,
+                'use_start_date' => $useStartDate,
+            ]);
 
             // 查找产品关联的酒店和房型
             $price = $product->prices()->where('date', $useStartDate)->first();
             if (!$price) {
                 DB::rollBack();
+                Log::warning('携程预下单：指定日期没有价格', [
+                    'product_id' => $product->id,
+                    'product_code' => $product->code,
+                    'use_start_date' => $useStartDate,
+                ]);
                 return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格');
             }
 
@@ -281,8 +292,20 @@ class CtripController extends Controller
 
             if (!$hotel || !$roomType) {
                 DB::rollBack();
+                Log::warning('携程预下单：产品未关联酒店或房型', [
+                    'product_id' => $product->id,
+                    'price_id' => $price->id,
+                    'has_room_type' => $roomType !== null,
+                    'has_hotel' => $hotel !== null,
+                ]);
                 return $this->errorResponse('1003', '数据参数不合法：产品未关联酒店或房型');
             }
+            
+            Log::info('携程预下单：价格和关联信息查找成功', [
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'stay_days' => $product->stay_days,
+            ]);
 
             // 检查库存（考虑入住天数）
             $stayDays = $product->stay_days ?: 1;
@@ -292,8 +315,17 @@ class CtripController extends Controller
             $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
             if (!$inventoryCheck['success']) {
                 DB::rollBack();
+                Log::warning('携程预下单：库存检查失败', [
+                    'room_type_id' => $roomType->id,
+                    'check_in_date' => $checkInDate->format('Y-m-d'),
+                    'stay_days' => $stayDays,
+                    'quantity' => $quantity,
+                    'error_message' => $inventoryCheck['message'],
+                ]);
                 return $this->errorResponse('1003', $inventoryCheck['message']);
             }
+            
+            Log::info('携程预下单：库存检查通过');
 
             // 检查是否已存在订单（防止重复）
             $existingOrder = Order::where('ota_order_no', $ctripOrderId)
