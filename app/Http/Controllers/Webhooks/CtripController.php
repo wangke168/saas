@@ -243,10 +243,29 @@ class CtripController extends Controller
                 return $this->errorResponse('1003', '数据参数不合法：使用日期(useStartDate/useDate)为空');
             }
 
+            // 解析携程PLU格式：酒店编码|房型编码|产品编码
+            // 需要提取最后一个部分作为产品编码
+            $productCode = $supplierOptionId;
+            if (strpos($supplierOptionId, '|') !== false) {
+                $parts = explode('|', $supplierOptionId);
+                // PLU格式：酒店编码|房型编码|产品编码，取最后一个部分
+                $productCode = end($parts);
+            }
+            $productCode = trim($productCode);
+            
+            Log::info('携程预下单：解析PLU', [
+                'plu' => $supplierOptionId,
+                'parsed_product_code' => $productCode,
+            ]);
+            
             // 根据产品编码查找产品
-            $product = \App\Models\Product::where('code', trim($supplierOptionId))->first();
+            $product = \App\Models\Product::where('code', $productCode)->first();
             if (!$product) {
                 DB::rollBack();
+                Log::warning('携程预下单：产品不存在', [
+                    'plu' => $supplierOptionId,
+                    'product_code' => $productCode,
+                ]);
                 return $this->errorResponse('1002', '供应商PLU不存在/错误');
             }
 
