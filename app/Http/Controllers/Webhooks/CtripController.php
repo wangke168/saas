@@ -244,17 +244,29 @@ class CtripController extends Controller
             }
 
             // 解析携程PLU格式：酒店编码|房型编码|产品编码
-            // 需要提取最后一个部分作为产品编码
+            $hotelCode = null;
+            $roomTypeCode = null;
             $productCode = $supplierOptionId;
+            
             if (strpos($supplierOptionId, '|') !== false) {
                 $parts = explode('|', $supplierOptionId);
-                // PLU格式：酒店编码|房型编码|产品编码，取最后一个部分
-                $productCode = end($parts);
+                // PLU格式：酒店编码|房型编码|产品编码
+                if (count($parts) >= 3) {
+                    $hotelCode = trim($parts[0]);
+                    $roomTypeCode = trim($parts[1]);
+                    $productCode = trim($parts[2]);
+                } else {
+                    // 如果格式不对，尝试取最后一个部分作为产品编码（向后兼容）
+                    $productCode = trim(end($parts));
+                }
+            } else {
+                $productCode = trim($productCode);
             }
-            $productCode = trim($productCode);
             
             Log::info('携程预下单：解析PLU', [
                 'plu' => $supplierOptionId,
+                'parsed_hotel_code' => $hotelCode,
+                'parsed_room_type_code' => $roomTypeCode,
                 'parsed_product_code' => $productCode,
             ]);
             
@@ -269,36 +281,87 @@ class CtripController extends Controller
                 return $this->errorResponse('1002', '供应商PLU不存在/错误');
             }
             
-            Log::info('携程预下单：产品查找成功', [
-                'product_id' => $product->id,
-                'product_code' => $product->code,
-                'use_start_date' => $useStartDate,
-            ]);
-
-            // 查找产品关联的酒店和房型
-            $price = $product->prices()->where('date', $useStartDate)->first();
-            if (!$price) {
-                DB::rollBack();
-                Log::warning('携程预下单：指定日期没有价格', [
+            // 如果PLU中包含了酒店编码和房型编码，需要验证组合是否正确
+            if ($hotelCode && $roomTypeCode) {
+                // 根据酒店编码查找酒店
+                $hotel = \App\Models\Hotel::where('code', $hotelCode)->first();
+                if (!$hotel) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：酒店不存在', [
+                        'plu' => $supplierOptionId,
+                        'hotel_code' => $hotelCode,
+                    ]);
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误：酒店编码不存在');
+                }
+                
+                // 根据房型编码查找房型
+                $roomType = \App\Models\RoomType::where('code', $roomTypeCode)
+                    ->where('hotel_id', $hotel->id)
+                    ->first();
+                if (!$roomType) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：房型不存在', [
+                        'plu' => $supplierOptionId,
+                        'room_type_code' => $roomTypeCode,
+                        'hotel_id' => $hotel->id,
+                    ]);
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误：房型编码不存在');
+                }
+                
+                // 验证产品-酒店-房型组合是否存在（通过Price表验证）
+                $price = \App\Models\Price::where('product_id', $product->id)
+                    ->where('room_type_id', $roomType->id)
+                    ->where('date', $useStartDate)
+                    ->first();
+                    
+                if (!$price) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：产品-酒店-房型组合不存在或指定日期没有价格', [
+                        'product_id' => $product->id,
+                        'hotel_id' => $hotel->id,
+                        'room_type_id' => $roomType->id,
+                        'use_start_date' => $useStartDate,
+                    ]);
+                    return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格或产品-酒店-房型组合不匹配');
+                }
+                
+                Log::info('携程预下单：通过PLU验证产品-酒店-房型组合成功', [
                     'product_id' => $product->id,
-                    'product_code' => $product->code,
-                    'use_start_date' => $useStartDate,
-                ]);
-                return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格');
-            }
-
-            $roomType = $price->roomType;
-            $hotel = $roomType->hotel ?? null;
-
-            if (!$hotel || !$roomType) {
-                DB::rollBack();
-                Log::warning('携程预下单：产品未关联酒店或房型', [
-                    'product_id' => $product->id,
+                    'hotel_id' => $hotel->id,
+                    'room_type_id' => $roomType->id,
                     'price_id' => $price->id,
-                    'has_room_type' => $roomType !== null,
-                    'has_hotel' => $hotel !== null,
                 ]);
-                return $this->errorResponse('1003', '数据参数不合法：产品未关联酒店或房型');
+            } else {
+                // 如果PLU格式不完整（向后兼容），使用原有逻辑
+                Log::info('携程预下单：PLU格式不完整，使用向后兼容逻辑', [
+                    'plu' => $supplierOptionId,
+                ]);
+                
+                // 查找产品关联的酒店和房型
+                $price = $product->prices()->where('date', $useStartDate)->first();
+                if (!$price) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：指定日期没有价格', [
+                        'product_id' => $product->id,
+                        'product_code' => $product->code,
+                        'use_start_date' => $useStartDate,
+                    ]);
+                    return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格');
+                }
+
+                $roomType = $price->roomType;
+                $hotel = $roomType->hotel ?? null;
+
+                if (!$hotel || !$roomType) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：产品未关联酒店或房型', [
+                        'product_id' => $product->id,
+                        'price_id' => $price->id,
+                        'has_room_type' => $roomType !== null,
+                        'has_hotel' => $hotel !== null,
+                    ]);
+                    return $this->errorResponse('1003', '数据参数不合法：产品未关联酒店或房型');
+                }
             }
             
             Log::info('携程预下单：价格和关联信息查找成功', [
