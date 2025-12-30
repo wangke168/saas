@@ -110,7 +110,6 @@ class InventoryObserver
                     'date' => $dateStr,
                     'dates' => array_unique($cachedDates),
                     'delay_seconds' => $pushDelay,
-                    'job_id' => $job->getJobId() ?? 'unknown',
                 ]);
             } else {
                 Log::debug('InventoryObserver：推送任务已存在，跳过创建', [
