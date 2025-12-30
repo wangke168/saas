@@ -186,12 +186,40 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
         CtripService $ctripService
     ): void {
         try {
-            // 推送到携程（只推送指定日期的库存）
+            // 根据产品的入住天数，扩大查询日期范围
+            // 如果产品有入住天数（stay_days > 1），需要查询所有相关日期，以便正确计算连续入住天数的库存
+            $stayDays = $product->stay_days ?: 1;
+            $queryDates = $this->dates;
+            
+            if ($stayDays > 1 && !empty($this->dates)) {
+                // 对于每个变化的日期，需要查询从该日期开始的连续 stay_days 天的库存
+                $expandedDates = [];
+                foreach ($this->dates as $date) {
+                    $dateObj = \Carbon\Carbon::parse($date);
+                    // 查询从该日期开始的连续 stay_days 天
+                    for ($i = 0; $i < $stayDays; $i++) {
+                        $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
+                        if (!in_array($checkDate, $expandedDates)) {
+                            $expandedDates[] = $checkDate;
+                        }
+                    }
+                }
+                $queryDates = $expandedDates;
+                
+                Log::debug('推送库存变化：扩大查询日期范围（考虑入住天数）', [
+                    'product_id' => $product->id,
+                    'stay_days' => $stayDays,
+                    'original_dates' => $this->dates,
+                    'expanded_dates' => $queryDates,
+                ]);
+            }
+            
+            // 推送到携程（使用扩大后的日期范围）
             $result = $ctripService->syncProductStockByCombo(
                 $product,
                 $hotel,
                 $roomType,
-                $this->dates,
+                $queryDates,
                 'DATE_REQUIRED'
             );
 
@@ -203,15 +231,19 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                     'product_id' => $product->id,
                     'hotel_id' => $hotel->id,
                     'room_type_id' => $roomType->id,
-                    'dates' => $this->dates,
-                    'dates_count' => count($this->dates),
+                    'original_dates' => $this->dates,
+                    'query_dates' => $queryDates,
+                    'stay_days' => $stayDays,
+                    'dates_count' => count($queryDates),
                 ]);
             } else {
                 Log::warning('库存变化自动推送到携程失败', [
                     'product_id' => $product->id,
                     'hotel_id' => $hotel->id,
                     'room_type_id' => $roomType->id,
-                    'dates' => $this->dates,
+                    'original_dates' => $this->dates,
+                    'query_dates' => $queryDates,
+                    'stay_days' => $stayDays,
                     'result_code' => $resultCode,
                     'result_message' => $resultMessage,
                 ]);
@@ -221,7 +253,9 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                 'product_id' => $product->id,
                 'hotel_id' => $hotel->id,
                 'room_type_id' => $roomType->id,
-                'dates' => $this->dates,
+                'original_dates' => $this->dates,
+                'query_dates' => $queryDates ?? null,
+                'stay_days' => $stayDays ?? null,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
