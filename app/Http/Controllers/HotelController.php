@@ -30,7 +30,8 @@ class HotelController extends Controller
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('code', 'like', "%{$search}%");
+                  ->orWhere('code', 'like', "%{$search}%")
+                  ->orWhere('external_code', 'like', "%{$search}%");
             });
         }
 

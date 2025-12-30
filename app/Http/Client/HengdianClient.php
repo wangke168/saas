@@ -245,11 +245,44 @@ class HengdianClient
     }
 
     /**
-     * 动态订阅（SubscribeRoomStatusRQ）
+     * 房态订阅接口（SubscribeRoomStatusRQ）
+     * 
+     * 根据横店系统接口文档（storage/docs/hengdian/hengdian.txt）：
+     * - 功能：订阅、取消订阅、修改推送地址
+     * - 订阅后，横店系统会定期（每5-10分钟）推送房态信息到NotifyUrl
+     * - 推送格式：<RoomStatus><RoomQuotaMap>JSON字符串</RoomQuotaMap></RoomStatus>
+     * 
+     * @param array $data 请求数据，格式：
+     *   [
+     *     'NotifyUrl' => 'http://your-domain.com/api/webhooks/resource/hengdian/inventory',
+     *     'IsUnsubscribe' => '0',  // '0'=订阅，'1'=取消订阅
+     *     'Hotels' => [
+     *       [
+     *         'HotelId' => '95115428',  // 横店系统酒店编号
+     *         'Rooms' => [
+     *           'RoomType' => ['标准间', '大床房']  // 横店系统房型名称列表
+     *         ]
+     *       ]
+     *     ],
+     *     'Extensions' => '{}'
+     *   ]
+     * 
+     * @return array 返回结果，格式：['success' => true/false, 'message' => '...', 'data' => ...]
      */
     public function subscribeRoomStatus(array $data): array
     {
         $xml = $this->buildXml('SubscribeRoomStatusRQ', $data);
+        
+        // 记录XML请求（用于调试）
+        Log::info('横店房态订阅请求', [
+            'api' => 'SubscribeRoomStatusRQ',
+            'url' => $this->config->api_url,
+            'notify_url' => $data['NotifyUrl'] ?? '',
+            'is_unsubscribe' => $data['IsUnsubscribe'] ?? '0',
+            'hotels_count' => count($data['Hotels'] ?? []),
+            'xml' => $xml,
+        ]);
+        
         return $this->request($xml);
     }
 

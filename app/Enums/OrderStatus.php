@@ -4,7 +4,7 @@ namespace App\Enums;
 
 enum OrderStatus: string
 {
-    case PAID_PENDING = 'paid_pending'; // 已支付/待确认
+    case PAID_PENDING = 'paid_pending'; // 待确认（预下单场景：未支付仅占库存；其他场景：已支付待确认）
     case CONFIRMING = 'confirming'; // 确认中
     case CONFIRMED = 'confirmed'; // 预订成功
     case REJECTED = 'rejected'; // 预订失败/拒单
@@ -16,7 +16,7 @@ enum OrderStatus: string
     public function label(): string
     {
         return match($this) {
-            self::PAID_PENDING => '已支付/待确认',
+            self::PAID_PENDING => '待确认',
             self::CONFIRMING => '确认中',
             self::CONFIRMED => '预订成功',
             self::REJECTED => '预订失败/拒单',

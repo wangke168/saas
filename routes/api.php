@@ -78,6 +78,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // 资源配置
         Route::get('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'show']);
         Route::post('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'store']);
+        Route::post('/{scenicSpot}/resource-config/subscribe-inventory', [\App\Http\Controllers\ResourceConfigController::class, 'subscribeInventory']);
     });
 
     // 软件商管理（仅超级管理员）

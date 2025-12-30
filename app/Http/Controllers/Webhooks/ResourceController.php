@@ -7,7 +7,9 @@ use App\Models\Hotel;
 use App\Models\RoomType;
 use App\Models\Inventory;
 use App\Models\ResourceSyncLog;
+use App\Models\SoftwareProvider;
 use App\Enums\PriceSource;
+use App\Services\Resource\ScenicSpotIdentificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +38,47 @@ class ResourceController extends Controller
             Log::info('资源方库存推送', [
                 'body' => $rawBody,
             ]);
+
+            // 尝试识别景区（用于日志记录和后续可能的验证）
+            $identificationResult = null;
+            try {
+                // 解析回调数据，提取业务标识
+                $xmlObj = new SimpleXMLElement($rawBody);
+                $roomQuotaMapJson = (string)$xmlObj->RoomQuotaMap;
+                $roomQuotaMap = json_decode($roomQuotaMapJson, true);
+                
+                // 从第一个酒店数据中提取 hotelNo
+                $callbackData = [];
+                if (!empty($roomQuotaMap) && isset($roomQuotaMap[0]['hotelNo'])) {
+                    $callbackData['hotelNo'] = $roomQuotaMap[0]['hotelNo'];
+                }
+                
+                // 获取软件服务商ID（横店系统）
+                $softwareProviderId = SoftwareProvider::where('api_type', 'hengdian')->value('id');
+                
+                // 使用识别服务识别景区
+                if (!empty($callbackData)) {
+                    $identificationResult = ScenicSpotIdentificationService::identify(
+                        $request,
+                        $callbackData,
+                        $softwareProviderId
+                    );
+                    
+                    if ($identificationResult) {
+                        Log::info('资源方库存推送：成功识别景区', [
+                            'scenic_spot_id' => $identificationResult['scenic_spot']->id,
+                            'scenic_spot_name' => $identificationResult['scenic_spot']->name,
+                            'identification_method' => $identificationResult['method'],
+                            'config_id' => $identificationResult['config']->id,
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                // 识别失败不影响主流程，只记录日志
+                Log::warning('资源方库存推送：识别景区失败', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             // 检查是否启用异步处理（新功能）
             $useAsync = env('ENABLE_INVENTORY_PUSH_ASYNC', false);

@@ -71,8 +71,20 @@
                 <el-form-item label="景区名称" prop="name">
                     <el-input v-model="form.name" placeholder="请输入景区名称" />
                 </el-form-item>
-                <el-form-item label="景区编码" prop="code">
-                    <el-input v-model="form.code" placeholder="请输入景区编码（唯一）" :disabled="isEdit" />
+                <el-form-item label="景区编码" prop="code" v-if="isEdit">
+                    <el-input v-model="form.code" placeholder="系统自动生成" disabled />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        景区编码由系统自动生成，不可修改
+                    </span>
+                </el-form-item>
+                <el-form-item v-else>
+                    <template #label>
+                        <span>景区编码</span>
+                    </template>
+                    <el-input value="系统自动生成" disabled />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        景区编码将在创建时由系统自动生成
+                    </span>
                 </el-form-item>
                 <el-form-item label="地址" prop="address">
                     <el-input v-model="form.address" placeholder="请输入景区地址" />
@@ -296,7 +308,7 @@ const rules = {
         { max: 255, message: '景区名称不能超过255个字符', trigger: 'blur' }
     ],
     code: [
-        { required: true, message: '请输入景区编码', trigger: 'blur' },
+        // 编辑时验证格式（如果用户通过其他方式修改了编码）
         { pattern: /^[a-zA-Z0-9_-]+$/, message: '景区编码只能包含字母、数字、下划线和连字符', trigger: 'blur' }
     ],
     contact_phone: [
@@ -408,7 +420,9 @@ const handleSubmit = async () => {
                     await axios.put(`/scenic-spots/${editingId.value}`, form.value);
                     ElMessage.success('景区更新成功');
                 } else {
-                    await axios.post('/scenic-spots', form.value);
+                    // 创建时，不发送 code 字段，让后端自动生成
+                    const { code, ...createData } = form.value;
+                    await axios.post('/scenic-spots', createData);
                     ElMessage.success('景区创建成功');
                 }
                 dialogVisible.value = false;
@@ -449,7 +463,7 @@ const handleDelete = async (row) => {
 const resetForm = () => {
     form.value = {
         name: '',
-        code: '',
+        code: '', // 创建时保持为空，后端会自动生成
         address: '',
         contact_phone: '',
         description: '',
@@ -461,6 +475,8 @@ const resetForm = () => {
 
 const handleConfigResource = async (row) => {
     currentScenicSpotId.value = row.id;
+    // 先重置表单，确保没有残留数据
+    resetResourceConfigForm();
     resourceConfigDialogVisible.value = true;
     
     try {
@@ -505,16 +521,15 @@ const handleConfigResource = async (row) => {
                 is_active: config.is_active ?? true,
             };
         } else {
-            // 没有配置，使用默认值
-            resetResourceConfigForm();
+            // 没有配置，表单已重置为空
         }
     } catch (error) {
-        // 404表示没有配置，使用默认值
+        // 404或其他错误表示没有配置，表单已重置为空
         if (error.response?.status !== 404) {
             ElMessage.error('获取资源配置失败');
             console.error(error);
         }
-        resetResourceConfigForm();
+        // 表单已在开始时重置，这里不需要再次重置
     }
 };
 
@@ -585,11 +600,11 @@ const resetResourceConfigForm = () => {
         api_url: '',
         username: '',
         password: '',
-        environment: 'production',
+        environment: 'production', // 只有一个选项，保持默认值
         sync_mode: {
-            inventory: 'manual',
-            price: 'manual',
-            order: 'manual',
+            inventory: '', // 改为空，让用户必须选择
+            price: '', // 改为空，让用户必须选择
+            order: '', // 改为空，让用户必须选择
         },
         order_provider: null,
         credentials: {
@@ -597,7 +612,7 @@ const resetResourceConfigForm = () => {
             meituan: { username: '', password: '' },
             fliggy: { username: '', password: '' },
         },
-        is_active: true,
+        is_active: true, // 保持默认启用状态
     };
     resourceConfigFormRef.value?.clearValidate();
 };

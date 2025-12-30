@@ -20,7 +20,7 @@
                 </el-select>
                 <el-input
                     v-model="searchKeyword"
-                    placeholder="搜索酒店名称或编码"
+                    placeholder="搜索酒店名称、编码或外部编号"
                     style="width: 300px; margin-left: 10px;"
                     clearable
                     @input="handleSearch"
@@ -34,6 +34,11 @@
             <el-table :data="hotels" v-loading="loading" border>
                 <el-table-column prop="name" label="酒店名称" width="200" />
                 <el-table-column prop="code" label="酒店编码" width="150" />
+                <el-table-column prop="external_code" label="外部酒店编号" width="150">
+                    <template #default="{ row }">
+                        {{ row.external_code || '-' }}
+                    </template>
+                </el-table-column>
                 <el-table-column label="所属景区" width="150">
                     <template #default="{ row }">
                         {{ row.scenic_spot?.name || '-' }}

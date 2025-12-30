@@ -25,7 +25,7 @@ class OrderController extends Controller
 
         $query = Order::with([
             'otaPlatform', 
-            'product', 
+            'product.scenicSpot', 
             'hotel.scenicSpot.softwareProvider', 
             'roomType'
         ]);

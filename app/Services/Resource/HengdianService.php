@@ -705,40 +705,108 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
-     * 订阅库存推送
+     * 订阅库存推送（房态订阅）
      * 
-     * @param array $hotels 酒店列表，格式：[['hotel_id' => '001', 'room_types' => ['标准间', '豪华间']]]
-     * @param string $notifyUrl Webhook URL
-     * @param bool $unsubscribe 是否取消订阅
-     * @return array
+     * 根据横店系统接口文档，房态订阅接口说明：
+     * - 接口节点：<SubscribeRoomStatusRQ>
+     * - 功能：订阅、取消订阅、修改推送地址
+     * - 横店系统会定期（每5-10分钟）推送房态信息到指定的NotifyUrl
+     * 
+     * 参数说明：
+     * @param array $hotels 酒店列表，格式：
+     *   [
+     *     [
+     *       'hotel_id' => '95115428',  // 横店系统的酒店编号（系统酒店编号）
+     *       'room_types' => ['标准间', '大床房']  // 横店系统的房型名称列表
+     *     ]
+     *   ]
+     *   注意：hotel_id必须是横店系统中的酒店编号，room_types必须是横店系统中的房型名称
+     *   参考文档：storage/docs/hengdian/hotel.md（横店系统酒店房型映射表）
+     * 
+     * @param string $notifyUrl Webhook接收地址，格式：http://your-domain.com/api/webhooks/resource/hengdian/inventory
+     * @param bool $unsubscribe 是否取消订阅（true=取消订阅，false=订阅）
+     * @return array 返回结果，格式：['success' => true/false, 'message' => '...', 'data' => ...]
      */
     public function subscribeInventory(array $hotels, string $notifyUrl, bool $unsubscribe = false): array
     {
         try {
+            Log::info('横店房态订阅开始', [
+                'hotels_count' => count($hotels),
+                'notify_url' => $notifyUrl,
+                'unsubscribe' => $unsubscribe,
+            ]);
+
             // 构建订阅请求数据
             $hotelsData = [];
-            foreach ($hotels as $hotel) {
+            $skippedCount = 0;
+            
+            foreach ($hotels as $index => $hotel) {
                 $hotelId = $hotel['hotel_id'] ?? '';
                 $roomTypes = $hotel['room_types'] ?? [];
 
+                // 跳过无效的酒店数据
                 if (empty($hotelId) || empty($roomTypes)) {
+                    $skippedCount++;
+                    Log::warning('横店房态订阅：跳过无效酒店数据', [
+                        'index' => $index,
+                        'hotel_id' => $hotelId,
+                        'room_types_count' => count($roomTypes),
+                    ]);
+                    continue;
+                }
+
+                // 过滤空的房型名称
+                $validRoomTypes = array_filter($roomTypes, function($roomType) {
+                    return !empty(trim($roomType));
+                });
+
+                if (empty($validRoomTypes)) {
+                    $skippedCount++;
+                    Log::warning('横店房态订阅：酒店无有效房型', [
+                        'hotel_id' => $hotelId,
+                    ]);
                     continue;
                 }
 
                 $hotelsData[] = [
-                    'HotelId' => $hotelId,
+                    'HotelId' => (string)$hotelId,  // 确保是字符串
                     'Rooms' => [
-                        'RoomType' => $roomTypes, // 索引数组，会生成多个RoomType元素
+                        'RoomType' => array_values($validRoomTypes), // 索引数组，会生成多个RoomType元素
                     ],
                 ];
             }
 
+            if (empty($hotelsData)) {
+                $message = '没有有效的酒店和房型数据，已跳过 ' . $skippedCount . ' 条无效数据';
+                Log::warning('横店房态订阅：没有有效数据', [
+                    'total_hotels' => count($hotels),
+                    'skipped_count' => $skippedCount,
+                ]);
+                return [
+                    'success' => false,
+                    'message' => $message,
+                ];
+            }
+
+            // 构建符合文档规范的XML结构
+            // 文档要求：<Hotels><Hotel><HotelId>...</HotelId><Rooms>...</Rooms></Hotel></Hotels>
             $data = [
                 'NotifyUrl' => $unsubscribe ? '' : $notifyUrl,
                 'IsUnsubscribe' => $unsubscribe ? '1' : '0',
-                'Hotels' => $hotelsData,
+                'Hotels' => [
+                    'Hotel' => $hotelsData,  // 使用 'Hotel' 作为键，这样会生成 <Hotels><Hotel>...</Hotel></Hotels> 结构
+                ],
                 'Extensions' => json_encode([]),
             ];
+
+            Log::info('横店房态订阅：构建请求数据', [
+                'hotels_count' => count($hotelsData),
+                'total_room_types' => array_sum(array_map(function($h) {
+                    return count($h['Rooms']['RoomType']);
+                }, $hotelsData)),
+                'notify_url' => $notifyUrl,
+                'unsubscribe' => $unsubscribe,
+            ]);
 
             // 使用默认认证信息（不传订单，所以不传OTA平台代码）
             $config = null;
@@ -760,26 +828,35 @@ class HengdianService implements ResourceServiceInterface
             }
 
             if (!$config) {
-                throw new \Exception('资源方配置不存在，请检查数据库配置或环境变量');
+                throw new \Exception('资源方配置不存在，请检查数据库配置或环境变量（HENGDIAN_API_URL, HENGDIAN_USERNAME, HENGDIAN_PASSWORD）');
             }
 
             $client = new HengdianClient($config); // 不传OTA平台代码，使用默认认证
             $result = $client->subscribeRoomStatus($data);
 
-            if (!($result['success'] ?? false)) {
-                Log::error('资源方订阅库存推送失败', [
+            if ($result['success'] ?? false) {
+                Log::info('横店房态订阅成功', [
+                    'notify_url' => $notifyUrl,
+                    'unsubscribe' => $unsubscribe,
+                    'hotels_count' => count($hotelsData),
+                    'message' => $result['message'] ?? '',
+                ]);
+            } else {
+                Log::error('横店房态订阅失败', [
                     'notify_url' => $notifyUrl,
                     'unsubscribe' => $unsubscribe,
                     'result' => $result,
+                    'hotels_count' => count($hotelsData),
                 ]);
             }
 
             return $result;
         } catch (\Exception $e) {
-            Log::error('资源方订阅库存推送异常', [
+            Log::error('横店房态订阅异常', [
                 'notify_url' => $notifyUrl,
                 'unsubscribe' => $unsubscribe,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [

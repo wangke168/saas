@@ -445,8 +445,9 @@ class CtripController extends Controller
             }
 
             // 创建订单
-            // 注意：预下单创建时，订单状态为 PAID_PENDING（待支付），但此时还没有支付
-            // paid_at 应该为 null，只有在 PayPreOrder（预下单支付）时才设置 paid_at
+            // 注意：预下单创建时，客人并没有付款，只是占了库存（锁库存）
+            // 订单状态为 PAID_PENDING（待确认），paid_at 应该为 null
+            // 只有在 PayPreOrder（预下单支付）时，客人才真正付款，此时才设置 paid_at
             $order = Order::create([
                 'order_no' => $this->generateOrderNo(),
                 'ota_order_no' => $ctripOrderId,
@@ -798,12 +799,12 @@ class CtripController extends Controller
             // 但根据测试用例，可能需要返回成功（可能是幂等性要求）
             if ($order->status === OrderStatus::PAID_PENDING) {
                 // 更新订单状态为已取消
+                // 注意：updateOrderStatus 会自动设置 cancelled_at，无需重复设置
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::CANCEL_APPROVED,
                     '携程预下单取消'
                 );
-                $order->update(['cancelled_at' => now()]);
 
                 // 释放库存（预下单取消时需要释放锁定的库存）
                 $releaseResult = $this->releaseInventoryForPreOrder($order);
