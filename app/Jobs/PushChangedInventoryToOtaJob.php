@@ -193,13 +193,16 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
             // - 如果 stay_days = 2，变化日期是 2026-01-11
             // - 需要查询：2026-01-10, 2026-01-11, 2026-01-12
             // - 因为：
-            //   1. 从 2026-01-10 开始入住需要：2026-01-10, 2026-01-11（如果 2026-01-11 变成0，2026-01-10 也应该变成0）
+            //   1. 从 2026-01-10 开始入住需要：2026-01-10, 2026-01-11
+            //      - 如果 2026-01-11 变成0，2026-01-10 也应该变成0（无法满足连续入住）
+            //      - 如果 2026-01-11 从0变成正数，2026-01-10 需要重新计算并推送准确库存（可以满足连续入住）
             //   2. 从 2026-01-11 开始入住需要：2026-01-11, 2026-01-12
             $stayDays = $product->stay_days ?: 1;
             $queryDates = $this->dates;
             
             if ($stayDays > 1 && !empty($this->dates)) {
                 // 对于每个变化的日期，需要查询前后相关日期的库存
+                // 这样当库存变化时，可以重新计算所有受影响日期的库存
                 $expandedDates = [];
                 foreach ($this->dates as $date) {
                     $dateObj = \Carbon\Carbon::parse($date);
@@ -207,6 +210,10 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                     // 查询范围：[变化日期 - (stay_days-1), 变化日期 + (stay_days-1)]
                     // 例如：stay_days=2, 变化日期=2026-01-11
                     // 查询：2026-01-10, 2026-01-11, 2026-01-12
+                    // 
+                    // 这样确保：
+                    // - 2026-01-10 的库存会根据 2026-01-11 的最新库存重新计算
+                    // - 2026-01-11 的库存会根据 2026-01-12 的最新库存重新计算
                     for ($i = -($stayDays - 1); $i < $stayDays; $i++) {
                         $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
                         if (!in_array($checkDate, $expandedDates)) {
@@ -224,6 +231,7 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                     'stay_days' => $stayDays,
                     'original_dates' => $this->dates,
                     'expanded_dates' => $queryDates,
+                    'reason' => '需要重新计算前后相关日期的库存，确保连续入住天数的库存计算准确',
                 ]);
             }
             

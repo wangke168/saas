@@ -35,7 +35,10 @@ class ProcessResourceOrderJob implements ShouldQueue
     public function __construct(
         public Order $order,
         public string $operation // 'confirm' 或 'cancel'
-    ) {}
+    ) {
+        // 使用 resource-push 队列，确保高优先级处理
+        $this->onQueue('resource-push');
+    }
 
     /**
      * 执行任务

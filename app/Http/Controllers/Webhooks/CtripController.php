@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
+use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -413,12 +414,6 @@ class CtripController extends Controller
                 ]);
             }
 
-            // 模拟同步确认（为了通过沙箱测试）
-            // 在生产环境中，这里可能需要根据实际资源方响应速度决定是同步还是异步
-
-            // 1. 更新状态为已确认
-            $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程预下单支付成功（同步确认）');
-
             // 2. 保存携程传递的 itemId（订单项编号）
             // 从 PayPreOrder 请求的 items 中获取 itemId，用于后续 QueryOrder 接口返回
             $ctripItemId = null;
@@ -435,8 +430,20 @@ class CtripController extends Controller
                 $order->update($updateData);
             }
 
-            // 3. 触发后续流程（如发货、发凭证等），但这不影响给携程的同步响应
-            // \App\Jobs\ProcessOrderToResourceJob::dispatch($order);
+            // 4. 检查是否系统直连
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+
+            if ($isSystemConnected) {
+                // 系统直连：先更新状态为确认中，然后异步调用景区方接口接单
+                $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程预下单支付成功，等待向景区下发订单');
+                
+                // 异步处理景区方接口调用（设置 10 秒超时）
+                \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
+                    ->timeout(10);
+            } else {
+                // 非系统直连：同步确认（保持现有逻辑）
+                $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程预下单支付成功（同步确认）');
+            }
 
             return $this->successResponse([
                 'supplierConfirmType' => 1, // 1.支付已确认（同步返回）
