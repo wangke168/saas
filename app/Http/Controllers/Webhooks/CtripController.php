@@ -581,8 +581,7 @@ class CtripController extends Controller
                         ]);
                         
                         try {
-                            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                                ->timeout(10);
+                            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
                             
                             Log::info('携程预下单支付：已重新派发 ProcessResourceOrderJob（异常订单重试）', [
                                 'order_id' => $order->id,
@@ -600,8 +599,7 @@ class CtripController extends Controller
                         // 如果没有异常订单，说明可能队列任务还未执行或执行中
                         // 为了安全，可以再次派发（Laravel队列会自动去重）
                         try {
-                            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                                ->timeout(10);
+                            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
                             
                             Log::info('携程预下单支付：已派发 ProcessResourceOrderJob（幂等性保护）', [
                                 'order_id' => $order->id,
@@ -674,8 +672,7 @@ class CtripController extends Controller
                 
                 // 异步处理景区方接口调用（设置 10 秒超时）
                 try {
-                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                        ->timeout(10);
+                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
                     
                     Log::info('携程预下单支付：已成功派发 ProcessResourceOrderJob', [
                         'order_id' => $order->id,
@@ -985,8 +982,7 @@ class CtripController extends Controller
                 
                 // 异步处理景区方接口调用
                 try {
-                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                        ->timeout(10);
+                    \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
                     
                     Log::info('携程直接下单：已成功派发 ProcessResourceOrderJob', [
                         'order_id' => $order->id,

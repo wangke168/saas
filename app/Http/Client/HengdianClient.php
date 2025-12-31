@@ -277,7 +277,7 @@ class HengdianClient
      *     'IsUnsubscribe' => '0',  // '0'=订阅，'1'=取消订阅
      *     'Hotels' => [
      *       [
-     *         'HotelId' => '95115428',  // 横店系统酒店编号
+     *         'HotelId' => '001',  // 横店系统酒店ID（短编号，来自 hotel.txt，如 001, 002, 2078）
      *         'Rooms' => [
      *           'RoomType' => ['标准间', '大床房']  // 横店系统房型名称列表
      *         ]
@@ -285,6 +285,7 @@ class HengdianClient
      *     ],
      *     'Extensions' => '{}'
      *   ]
+     *   注意：HotelId 应使用 hotel.txt 中的酒店ID（短编号，如 001, 002, 2078）
      * 
      * @return array 返回结果，格式：['success' => true/false, 'message' => '...', 'data' => ...]
      */

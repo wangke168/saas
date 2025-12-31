@@ -485,9 +485,8 @@ class MeituanController extends Controller
 
             // 异步处理景区方接口调用
             if ($isSystemConnected) {
-                // 系统直连：异步调用景区方接口接单（设置 10 秒超时）
-                \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm')
-                    ->timeout(10);
+                // 系统直连：异步调用景区方接口接单（超时时间已在 Job 类中定义：10秒）
+                \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
             } else {
                 // 非系统直连：只更新状态为确认中，等待人工接单
                 $this->orderService->updateOrderStatus(
@@ -677,9 +676,8 @@ class MeituanController extends Controller
 
             // 异步处理景区方接口调用
             if ($isSystemConnected) {
-                // 系统直连：异步调用景区方接口取消订单（设置 10 秒超时）
-                \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, '美团申请退款')
-                    ->timeout(10);
+                // 系统直连：异步调用景区方接口取消订单（超时时间已在 Job 类中定义：10秒）
+                \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, '美团申请退款');
             } else {
                 // 非系统直连：只更新状态为申请取消中，等待人工处理
                 $this->orderService->updateOrderStatus(

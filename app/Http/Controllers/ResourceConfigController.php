@@ -334,12 +334,12 @@ class ResourceConfigController extends Controller
     /**
      * 订阅库存推送（房态订阅）- 内部方法
      * 
-     * 根据横店系统接口文档，订阅后横店系统会定期推送房态信息到指定的Webhook地址。
+     * 根据横店系统接口文档（storage/docs/hengdian/hengdian.txt），订阅后横店系统会定期推送房态信息到指定的Webhook地址。
      * 
      * 重要说明：
-     * 1. hotel_id 必须使用横店系统的酒店编号（存储在 hotel.external_code 字段）
+     * 1. hotel_id 应使用横店系统的酒店ID（短编号，如 001, 002, 2078），存储在 hotel.external_code 字段
      * 2. room_type 必须使用横店系统的房型名称（存储在 room_type.external_code 字段，如果为空则使用 name）
-     * 3. 映射关系参考：storage/docs/hengdian/hotel.md（横店系统酒店房型映射表）
+     * 3. 参考文档：storage/docs/hengdian/hotel.txt（酒店ID映射表，用于订阅接口）
      * 4. Webhook接收地址需要在 .env 中配置 HENGDIAN_WEBHOOK_URL
      * 
      * @param ScenicSpot $scenicSpot 景区对象
@@ -373,8 +373,10 @@ class ResourceConfigController extends Controller
         $skippedHotels = [];
         
         foreach ($hotels as $hotel) {
-            // 优先使用 external_code（横店系统的酒店编号），如果没有则使用 code
-            // 注意：根据映射表，应该使用"系统酒店编号"，建议在 hotel.external_code 中存储
+            // 优先使用 external_code（横店系统的酒店ID），如果没有则使用 code
+            // 重要说明：
+            // 1. 根据文档，订阅接口应使用 hotel.txt 中的酒店ID（短编号，如 001, 002, 2078）
+            // 2. hotel.external_code 中应直接存储酒店ID（短编号），参考 hotel.txt
             $hotelId = $hotel->external_code ?? $hotel->code;
             if (!$hotelId) {
                 $skippedHotels[] = [
@@ -389,6 +391,7 @@ class ResourceConfigController extends Controller
                 continue;
             }
 
+
             $roomTypes = [];
             foreach ($hotel->roomTypes as $roomType) {
                 // 优先使用 external_code（横店系统的房型名称），如果没有则使用 name
@@ -401,7 +404,7 @@ class ResourceConfigController extends Controller
 
             if (!empty($roomTypes)) {
                 $hotelsData[] = [
-                    'hotel_id' => (string)$hotelId,
+                    'hotel_id' => (string)$hotelId,  // 横店系统的酒店ID（短编号）
                     'room_types' => $roomTypes,
                 ];
             } else {

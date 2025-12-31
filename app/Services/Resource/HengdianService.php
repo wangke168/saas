@@ -707,21 +707,28 @@ class HengdianService implements ResourceServiceInterface
     /**
      * 订阅库存推送（房态订阅）
      * 
-     * 根据横店系统接口文档，房态订阅接口说明：
+     * 根据横店系统接口文档（storage/docs/hengdian/hengdian.txt），房态订阅接口说明：
      * - 接口节点：<SubscribeRoomStatusRQ>
      * - 功能：订阅、取消订阅、修改推送地址
      * - 横店系统会定期（每5-10分钟）推送房态信息到指定的NotifyUrl
+     * 
+     * 重要说明：
+     * 1. HotelId 应使用 hotel.txt 中的酒店ID（短编号，如 001, 002, 2078）
+     * 2. RoomType 应使用横店系统的房型名称（如"标准间"、"大床房"）
+     * 3. hotel_id 应直接使用数据库中的 hotel.external_code 值
      * 
      * 参数说明：
      * @param array $hotels 酒店列表，格式：
      *   [
      *     [
-     *       'hotel_id' => '95115428',  // 横店系统的酒店编号（系统酒店编号）
+     *       'hotel_id' => '001',  // 横店系统的酒店ID（来自 hotel.txt，如 001, 002, 2078）
+     *                              // 应存储在 hotel.external_code 字段中
      *       'room_types' => ['标准间', '大床房']  // 横店系统的房型名称列表
      *     ]
      *   ]
-     *   注意：hotel_id必须是横店系统中的酒店编号，room_types必须是横店系统中的房型名称
-     *   参考文档：storage/docs/hengdian/hotel.md（横店系统酒店房型映射表）
+     *   参考文档：
+     *   - storage/docs/hengdian/hengdian.txt（接口文档）
+     *   - storage/docs/hengdian/hotel.txt（酒店ID映射表，用于订阅）
      * 
      * @param string $notifyUrl Webhook接收地址，格式：http://your-domain.com/api/webhooks/resource/hengdian/inventory
      * @param bool $unsubscribe 是否取消订阅（true=取消订阅，false=订阅）
