@@ -13,7 +13,7 @@ class HotelController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Hotel::with(['scenicSpot', 'scenicSpot.softwareProvider']);
+        $query = Hotel::with(['scenicSpot', 'scenicSpot.softwareProvider', 'scenicSpot.resourceConfig']);
 
         // 权限控制：运营只能查看所属资源方下的所有景区下的酒店
         if ($request->user()->isOperator()) {
@@ -83,7 +83,7 @@ class HotelController extends Controller
         }
 
         $hotel = Hotel::create($validated);
-        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider']);
+        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider', 'scenicSpot.resourceConfig']);
 
         return response()->json([
             'message' => '酒店创建成功',
@@ -96,7 +96,7 @@ class HotelController extends Controller
      */
     public function show(Hotel $hotel): JsonResponse
     {
-        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider', 'roomTypes']);
+        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider', 'scenicSpot.resourceConfig', 'roomTypes']);
         
         // 权限控制：运营只能查看所属资源方下的所有景区下的酒店
         if (request()->user()->isOperator()) {
@@ -163,7 +163,7 @@ class HotelController extends Controller
         }
 
         $hotel->update($validated);
-        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider']);
+        $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider', 'scenicSpot.resourceConfig']);
 
         return response()->json([
             'message' => '酒店更新成功',

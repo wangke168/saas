@@ -615,8 +615,14 @@ class CtripController extends Controller
                 }
                 
                 // 返回成功响应（幂等性）
+                // 检查是否系统直连（如果还没有检查）
+                if (!isset($isSystemConnected)) {
+                    $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
+                    $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+                }
+                
                 return $this->successResponse([
-                    'supplierConfirmType' => 1, // 1.支付已确认（同步返回）
+                    'supplierConfirmType' => $isSystemConnected ? 2 : 1, // 系统直连返回2，非系统直连返回1
                     'otaOrderId' => $ctripOrderId,
                     'supplierOrderId' => $order->order_no,
                     'voucherSender' => 1,
@@ -685,6 +691,15 @@ class CtripController extends Controller
                         'trace' => $e->getTraceAsString(),
                     ]);
                 }
+                
+                // 系统直连：返回 supplierConfirmType = 2（支付待确认，需异步返回）
+                return $this->successResponse([
+                    'supplierConfirmType' => 2, // 2.支付待确认（需异步返回）
+                    'otaOrderId' => $ctripOrderId, // 确保返回 otaOrderId
+                    'supplierOrderId' => $order->order_no,
+                    'voucherSender' => 1, // 1=携程发凭证, 2=供应商发。通常选1
+                    'items' => $this->buildResponseItems($items, $order), // 必填
+                ]);
             } else {
                 // 非系统直连：同步确认（保持现有逻辑）
                 Log::info('携程预下单支付：非系统直连，同步确认', [
@@ -692,8 +707,8 @@ class CtripController extends Controller
                 ]);
                 
                 $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程预下单支付成功（同步确认）');
-            }
 
+                // 非系统直连：返回 supplierConfirmType = 1（支付已确认，同步返回）
             return $this->successResponse([
                 'supplierConfirmType' => 1, // 1.支付已确认（同步返回）
                 'otaOrderId' => $ctripOrderId, // 确保返回 otaOrderId
@@ -701,6 +716,7 @@ class CtripController extends Controller
                 'voucherSender' => 1, // 1=携程发凭证, 2=供应商发。通常选1
                 'items' => $this->buildResponseItems($items, $order), // 必填
             ]);
+            }
 
         } catch (\Exception $e) {
             Log::error('携程预下单支付处理失败', [
@@ -1002,11 +1018,19 @@ class CtripController extends Controller
                 $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程直接下单成功（同步确认）');
             }
 
-            return $this->successResponse([
+            // 构建响应数据
+            $responseData = [
                 'otaOrderId' => $ctripOrderId,
                 'orderId' => $order->order_no,
                 'supplierOrderId' => $order->order_no,
-            ]);
+            ];
+
+            // 如果是系统直连，添加 supplierConfirmType = 2
+            if ($isSystemConnected) {
+                $responseData['supplierConfirmType'] = 2; // 支付待确认（需异步返回）
+            }
+
+            return $this->successResponse($responseData);
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -1152,32 +1176,103 @@ class CtripController extends Controller
                 return $this->errorResponse('2004', '取消数量不正确');
             }
 
+            // 检查是否系统直连
+            $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+
+            if ($isSystemConnected) {
+                // 系统直连：先更新状态为取消申请中，然后异步调用景区方接口
+                Log::info('携程取消订单：系统直连，准备派发队列', [
+                    'order_id' => $order->id,
+                    'ota_order_no' => $ctripOrderId,
+                ]);
+                
+                // 更新订单状态为取消申请中
+                if ($order->status === OrderStatus::CONFIRMED) {
+                    $this->orderService->updateOrderStatus(
+                        $order,
+                        OrderStatus::CANCEL_REQUESTED,
+                        '携程申请取消订单，等待向景区下发取消请求，数量：' . $totalCancelQuantity
+                    );
+                } elseif ($order->status === OrderStatus::CONFIRMING) {
+                    // 如果订单还在确认中，先更新为取消申请中
+                    $this->orderService->updateOrderStatus(
+                        $order,
+                        OrderStatus::CANCEL_REQUESTED,
+                        '携程申请取消订单（订单确认中），等待向景区下发取消请求，数量：' . $totalCancelQuantity
+                    );
+                } else {
+                    // 其他状态，更新为取消申请中
+                    $this->orderService->updateOrderStatus(
+                        $order,
+                        OrderStatus::CANCEL_REQUESTED,
+                        '携程申请取消订单，等待向景区下发取消请求，数量：' . $totalCancelQuantity
+                    );
+                }
+                
+                // 异步处理景区方接口调用
+                try {
+                    \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, 'OTA平台申请取消订单');
+                    
+                    Log::info('携程取消订单：已成功派发 ProcessResourceCancelOrderJob', [
+                        'order_id' => $order->id,
+                        'queue' => 'resource-push',
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('携程取消订单：派发 ProcessResourceCancelOrderJob 失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    
+                    // 派发失败，回滚订单状态
+                    $this->orderService->updateOrderStatus(
+                        $order,
+                        $order->status, // 恢复原状态
+                        '派发取消订单任务失败：' . $e->getMessage()
+                    );
+                    
+                    return $this->errorResponse('0005', '系统处理异常');
+                }
+                
+                // 返回 supplierConfirmType = 2（取消待确认，需异步返回）
+                $responseItems = [];
+                foreach ($items as $item) {
+                    $responseItems[] = [
+                        'itemId' => $item['itemId'] ?? '1',
+                    ];
+                }
+                
+                return $this->successResponse([
+                    'supplierConfirmType' => 2, // 取消待确认（需异步返回）
+                    'items' => $responseItems,
+                ]);
+            } else {
+                // 非系统直连：同步处理（保持现有逻辑）
+                Log::info('携程取消订单：非系统直连，同步处理', [
+                    'order_id' => $order->id,
+                ]);
+
             // 更新订单状态
-            // 注意：根据状态流转规则，CONFIRMED 不能直接转换为 CANCEL_APPROVED
-            // 需要先转换为 CANCEL_REQUESTED，然后再转换为 CANCEL_APPROVED
             if ($order->status === OrderStatus::CONFIRMED) {
-                // 如果订单已确认，先转换为取消申请中
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::CANCEL_REQUESTED,
                     '携程申请取消订单，数量：' . $totalCancelQuantity
                 );
                 
-                // 然后立即转换为取消通过（因为携程的 CancelOrder 是确认取消）
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::CANCEL_APPROVED,
                     '携程取消订单已确认，数量：' . $totalCancelQuantity
                 );
             } elseif ($order->status === OrderStatus::CONFIRMING) {
-                // 如果订单还在确认中，直接转换为取消通过
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::CANCEL_APPROVED,
                     '携程申请取消订单（订单确认中），数量：' . $totalCancelQuantity
                 );
             } else {
-                // 其他状态，直接转换为取消通过
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::CANCEL_APPROVED,
@@ -1193,19 +1288,19 @@ class CtripController extends Controller
             // 释放库存
             // TODO: 实现库存释放逻辑
 
-            // 根据文档，响应需要包含 supplierConfirmType 和 items
+                // 返回 supplierConfirmType = 1（取消已确认，同步返回）
             $responseItems = [];
             foreach ($items as $item) {
                 $responseItems[] = [
                     'itemId' => $item['itemId'] ?? '1',
-                    // vouchers 根据实际需要添加
                 ];
             }
 
             return $this->successResponse([
-                'supplierConfirmType' => 1, // 1.取消已确认（同步返回确认结果）
+                    'supplierConfirmType' => 1, // 取消已确认（同步返回）
                 'items' => $responseItems,
             ]);
+            }
         } catch (\Exception $e) {
             Log::error('携程取消订单失败', [
                 'error' => $e->getMessage(),

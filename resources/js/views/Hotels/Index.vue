@@ -275,7 +275,7 @@
                             </el-tag>
                         </template>
                     </el-table-column>
-                    <el-table-column label="操作" width="200" fixed="right">
+                    <el-table-column label="操作" width="300" fixed="right">
                         <template #default="{ row }">
                             <el-button size="small" @click="handleEditInventory(row)">编辑</el-button>
                             <el-button 
@@ -284,6 +284,14 @@
                                 @click="handleToggleInventoryStatus(row)"
                             >
                                 {{ row.is_closed ? '开启' : '关闭' }}
+                            </el-button>
+                            <el-button 
+                                size="small" 
+                                type="primary"
+                                @click="handlePushInventoryToOta(row)"
+                                :loading="pushingInventories[row.id]"
+                            >
+                                推送到OTA
                             </el-button>
                         </template>
                     </el-table-column>
@@ -426,6 +434,7 @@ const inventoryFormDialogVisible = ref(false);
 const inventoryFormRef = ref(null);
 const inventorySubmitting = ref(false);
 const editingInventoryId = ref(null);
+const pushingInventories = ref({});
 
 const isEdit = computed(() => editingId.value !== null);
 const dialogTitle = computed(() => isEdit.value ? '编辑酒店' : '创建酒店');
@@ -899,6 +908,26 @@ const handleToggleInventoryStatus = async (row) => {
     } catch (error) {
         ElMessage.error('操作失败');
         console.error(error);
+    }
+};
+
+const handlePushInventoryToOta = async (row) => {
+    try {
+        pushingInventories.value[row.id] = true;
+        
+        const response = await axios.post(`/inventories/${row.id}/push-to-ota`);
+        
+        if (response.data.success) {
+            ElMessage.success('推送任务已提交，正在后台处理中');
+        } else {
+            ElMessage.error(response.data.message || '推送失败');
+        }
+    } catch (error) {
+        const message = error.response?.data?.message || '推送失败';
+        ElMessage.error(message);
+        console.error(error);
+    } finally {
+        pushingInventories.value[row.id] = false;
     }
 };
 

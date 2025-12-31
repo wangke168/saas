@@ -65,6 +65,8 @@ class OrderOperationService
 
     /**
      * 系统直连：接单（用于异常订单处理）
+     * 
+     * @deprecated 异常订单不应该调用此方法，应该使用 confirmOrderManually()
      */
     protected function confirmOrderWithResource(
         Order $order, 
@@ -74,6 +76,24 @@ class OrderOperationService
         ?ExceptionOrder $exceptionOrder = null
     ): array
     {
+        // 如果订单有异常订单，不允许调用资源方接口
+        $pendingExceptionOrder = ExceptionOrder::where('order_id', $order->id)
+            ->where('status', ExceptionOrderStatus::PENDING)
+            ->where('exception_data->operation', 'confirm')
+            ->first();
+        
+        if ($pendingExceptionOrder) {
+            Log::error('OrderOperationService::confirmOrderWithResource: 异常订单不允许调用资源方接口', [
+                'order_id' => $order->id,
+                'exception_order_id' => $pendingExceptionOrder->id,
+            ]);
+            
+            return [
+                'success' => false,
+                'message' => '异常订单不允许调用资源方接口，请使用人工操作',
+            ];
+        }
+
         try {
             DB::beginTransaction();
 
@@ -536,6 +556,8 @@ class OrderOperationService
 
     /**
      * 系统直连：取消订单（用于异常订单处理）
+     * 
+     * @deprecated 异常订单不应该调用此方法，应该使用 cancelOrderManually()
      */
     protected function cancelOrderWithResource(
         Order $order, 
@@ -545,6 +567,24 @@ class OrderOperationService
         ?ExceptionOrder $exceptionOrder = null
     ): array
     {
+        // 如果订单有异常订单，不允许调用资源方接口
+        $pendingExceptionOrder = ExceptionOrder::where('order_id', $order->id)
+            ->where('status', ExceptionOrderStatus::PENDING)
+            ->where('exception_data->operation', 'cancel')
+            ->first();
+        
+        if ($pendingExceptionOrder) {
+            Log::error('OrderOperationService::cancelOrderWithResource: 异常订单不允许调用资源方接口', [
+                'order_id' => $order->id,
+                'exception_order_id' => $pendingExceptionOrder->id,
+            ]);
+            
+            return [
+                'success' => false,
+                'message' => '异常订单不允许调用资源方接口，请使用人工操作',
+            ];
+        }
+
         try {
             DB::beginTransaction();
 

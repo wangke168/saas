@@ -122,6 +122,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{inventory}', [\App\Http\Controllers\InventoryController::class, 'update']);
         Route::post('/{inventory}/close', [\App\Http\Controllers\InventoryController::class, 'close']);
         Route::post('/{inventory}/open', [\App\Http\Controllers\InventoryController::class, 'open']);
+        // 库存推送到OTA
+        Route::post('/{inventory}/push-to-ota', [\App\Http\Controllers\InventoryPushController::class, 'pushInventory']);
+        Route::post('/batch-push-to-ota', [\App\Http\Controllers\InventoryPushController::class, 'batchPushInventory']);
     });
 
     // 产品管理

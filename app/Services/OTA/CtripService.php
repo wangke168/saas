@@ -704,23 +704,128 @@ class CtripService
             foreach ($inventoryByDate as $date => $data) {
                 $dateObj = \Carbon\Carbon::parse($date);
                 $canAccommodate = true;
+                $checkDetails = []; // 记录检查详情
+                
+                Log::debug('检查连续入住库存', [
+                    'date' => $date,
+                    'original_quantity' => $data['quantity'],
+                    'is_closed' => $data['is_closed'],
+                    'stay_days' => $stayDays,
+                ]);
                 
                 for ($i = 0; $i < $stayDays; $i++) {
                     $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
                     
+                    // 如果日期不在查询范围内，查询数据库获取库存（用于判断），但不推送
                     if (!isset($inventoryByDate[$checkDate])) {
-                        $canAccommodate = false;
-                        break;
+                        // 查询数据库获取该日期的库存
+                        $missingInventory = \App\Models\Inventory::where('room_type_id', $roomType->id)
+                            ->where('date', $checkDate)
+                            ->first();
+                        
+                        if (!$missingInventory) {
+                            // 该日期没有库存记录，无法满足连续入住
+                            $canAccommodate = false;
+                            $checkDetails[] = [
+                                'check_date' => $checkDate,
+                                'status' => 'not_found',
+                                'reason' => '数据库中没有库存记录',
+                            ];
+                            Log::debug('连续入住检查：日期不在查询范围内且数据库中没有记录', [
+                                'date' => $date,
+                                'check_date' => $checkDate,
+                                'room_type_id' => $roomType->id,
+                            ]);
+                            break;
+                        }
+                        
+                        // 检查销售日期范围
+                        $isInSalePeriod = true;
+                        if ($product->sale_start_date || $product->sale_end_date) {
+                            $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
+                            $saleEndDate = $product->sale_end_date ? $product->sale_end_date->format('Y-m-d') : null;
+                            
+                            if ($saleStartDate && $checkDate < $saleStartDate) {
+                                $isInSalePeriod = false;
+                            }
+                            if ($saleEndDate && $checkDate > $saleEndDate) {
+                                $isInSalePeriod = false;
+                            }
+                        }
+                        
+                        // 如果不在销售日期范围内、关闭或库存为0，无法满足连续入住
+                        if (!$isInSalePeriod || $missingInventory->is_closed || $missingInventory->available_quantity <= 0) {
+                            $canAccommodate = false;
+                            $checkDetails[] = [
+                                'check_date' => $checkDate,
+                                'status' => 'not_available',
+                                'is_in_sale_period' => $isInSalePeriod,
+                                'is_closed' => $missingInventory->is_closed,
+                                'available_quantity' => $missingInventory->available_quantity,
+                                'reason' => !$isInSalePeriod ? '不在销售日期范围内' : ($missingInventory->is_closed ? '库存已关闭' : '库存为0'),
+                            ];
+                            Log::debug('连续入住检查：日期不在查询范围内且不满足条件', [
+                                'date' => $date,
+                                'check_date' => $checkDate,
+                                'is_in_sale_period' => $isInSalePeriod,
+                                'is_closed' => $missingInventory->is_closed,
+                                'available_quantity' => $missingInventory->available_quantity,
+                                'room_type_id' => $roomType->id,
+                            ]);
+                            break;
+                        }
+                        
+                        $checkDetails[] = [
+                            'check_date' => $checkDate,
+                            'status' => 'available',
+                            'is_in_sale_period' => $isInSalePeriod,
+                            'is_closed' => $missingInventory->is_closed,
+                            'available_quantity' => $missingInventory->available_quantity,
+                        ];
+                        
+                        // 继续检查下一个日期（不添加到 $inventoryByDate，因为不推送）
+                        continue;
                     }
                     
+                    // 日期在查询范围内，直接检查
                     $checkData = $inventoryByDate[$checkDate];
                     if ($checkData['is_closed'] || $checkData['quantity'] <= 0) {
                         $canAccommodate = false;
+                        $checkDetails[] = [
+                            'check_date' => $checkDate,
+                            'status' => 'not_available',
+                            'is_closed' => $checkData['is_closed'],
+                            'quantity' => $checkData['quantity'],
+                            'reason' => $checkData['is_closed'] ? '库存已关闭' : '库存为0',
+                        ];
+                        Log::debug('连续入住检查：日期在查询范围内但不满足条件', [
+                            'date' => $date,
+                            'check_date' => $checkDate,
+                            'is_closed' => $checkData['is_closed'],
+                            'quantity' => $checkData['quantity'],
+                        ]);
                         break;
                     }
+                    
+                    $checkDetails[] = [
+                        'check_date' => $checkDate,
+                        'status' => 'available',
+                        'is_closed' => $checkData['is_closed'],
+                        'quantity' => $checkData['quantity'],
+                    ];
                 }
                 
-                $adjustedInventoryByDate[$date] = $canAccommodate ? $data['quantity'] : 0;
+                // 如果满足连续入住，使用该日期的实际库存；否则设为0
+                $adjustedQuantity = $canAccommodate ? $data['quantity'] : 0;
+                $adjustedInventoryByDate[$date] = $adjustedQuantity;
+                
+                Log::info('连续入住检查结果', [
+                    'date' => $date,
+                    'original_quantity' => $data['quantity'],
+                    'adjusted_quantity' => $adjustedQuantity,
+                    'can_accommodate' => $canAccommodate,
+                    'check_details' => $checkDetails,
+                ]);
             }
             
             $inventoryByDate = $adjustedInventoryByDate;

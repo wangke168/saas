@@ -34,8 +34,14 @@ class InventoryObserver
             return;
         }
 
-        // 检查环境变量是否启用自动推送
+        // 检查环境变量是否启用自动推送（全局开关）
         if (!env('ENABLE_AUTO_PUSH_INVENTORY_TO_OTA', true)) {
+            return;
+        }
+
+        // 检查环境变量是否启用人工操作库存的自动推送（默认禁用）
+        // 资源方推送的库存仍然自动推送（在 ResourceController 中处理）
+        if (!env('ENABLE_AUTO_PUSH_MANUAL_INVENTORY_TO_OTA', false)) {
             return;
         }
 
