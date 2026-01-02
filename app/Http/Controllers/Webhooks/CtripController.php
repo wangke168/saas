@@ -426,6 +426,19 @@ class CtripController extends Controller
                 $cardNo = $firstPassenger['cardNo'] ?? $firstPassenger['card_no'] ?? null;
             }
 
+            // 计算离店日期（如果 useEndDate 为空或等于 useStartDate，根据产品入住天数计算）
+            if (empty($useEndDate) || $useEndDate === $useStartDate) {
+                $checkOutDate = \Carbon\Carbon::parse($useStartDate)->addDays($stayDays)->format('Y-m-d');
+                
+                Log::info('携程预下单：根据产品入住天数计算离店日期', [
+                    'use_start_date' => $useStartDate,
+                    'stay_days' => $stayDays,
+                    'calculated_check_out_date' => $checkOutDate,
+                ]);
+            } else {
+                $checkOutDate = $useEndDate;
+            }
+
             // 创建订单
             // 注意：预下单创建时，订单状态为 PAID_PENDING（待支付），但此时还没有支付
             // paid_at 应该为 null，只有在 PayPreOrder（预下单支付）时才设置 paid_at
@@ -438,7 +451,7 @@ class CtripController extends Controller
                 'room_type_id' => $roomType->id,
                 'status' => OrderStatus::PAID_PENDING,
                 'check_in_date' => $useStartDate,
-                'check_out_date' => $useEndDate ?: $useStartDate,
+                'check_out_date' => $checkOutDate,
                 'room_count' => $quantity,
                 'guest_count' => count($passengers) ?: 1,
                 'contact_name' => $contactInfo['name'] ?? '',
@@ -935,6 +948,19 @@ class CtripController extends Controller
                 $cardNo = $firstPassenger['cardNo'] ?? $firstPassenger['card_no'] ?? null;
             }
 
+            // 计算离店日期（如果 useEndDate 为空或等于 useStartDate，根据产品入住天数计算）
+            if (empty($useEndDate) || $useEndDate === $useStartDate) {
+                $checkOutDate = \Carbon\Carbon::parse($useStartDate)->addDays($stayDays)->format('Y-m-d');
+                
+                Log::info('携程直接下单：根据产品入住天数计算离店日期', [
+                    'use_start_date' => $useStartDate,
+                    'stay_days' => $stayDays,
+                    'calculated_check_out_date' => $checkOutDate,
+                ]);
+            } else {
+                $checkOutDate = $useEndDate;
+            }
+
             // 保存携程传递的 itemId（如果存在）
             $ctripItemId = null;
             if (!empty($items) && isset($items[0]['itemId'])) {
@@ -951,7 +977,7 @@ class CtripController extends Controller
                 'room_type_id' => $roomType->id,
                 'status' => OrderStatus::PAID_PENDING, // 先创建为待确认，后续会更新为确认中
                 'check_in_date' => $useStartDate,
-                'check_out_date' => $useEndDate ?: $useStartDate,
+                'check_out_date' => $checkOutDate,
                 'room_count' => $quantity,
                 'guest_count' => count($passengers) ?: 1,
                 'contact_name' => $contactInfo['name'] ?? '',
