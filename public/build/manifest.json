@@ -5,7 +5,7 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-Czjj7pNL.js",
+    "file": "assets/app-DhXkCbrE.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -28,7 +28,7 @@
     ]
   },
   "resources/js/views/ExceptionOrders/Index.vue": {
-    "file": "assets/Index-CrR4rxhu.js",
+    "file": "assets/Index-C28Xkk_y.js",
     "name": "Index",
     "src": "resources/js/views/ExceptionOrders/Index.vue",
     "isDynamicEntry": true,
@@ -37,7 +37,7 @@
     ]
   },
   "resources/js/views/Hotels/Index.vue": {
-    "file": "assets/Index-DGeu9M1G.js",
+    "file": "assets/Index-DQLoIiwd.js",
     "name": "Index",
     "src": "resources/js/views/Hotels/Index.vue",
     "isDynamicEntry": true,
@@ -45,11 +45,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Index-lL8HrEaU.css"
+      "assets/Index-CkobWKpF.css"
     ]
   },
   "resources/js/views/Login.vue": {
-    "file": "assets/Login-lvckVa_p.js",
+    "file": "assets/Login-vcrA5DXE.js",
     "name": "Login",
     "src": "resources/js/views/Login.vue",
     "isDynamicEntry": true,
@@ -61,7 +61,7 @@
     ]
   },
   "resources/js/views/Orders/Index.vue": {
-    "file": "assets/Index-BX6YWDUw.js",
+    "file": "assets/Index-CJV_x6DB.js",
     "name": "Index",
     "src": "resources/js/views/Orders/Index.vue",
     "isDynamicEntry": true,
@@ -73,7 +73,7 @@
     ]
   },
   "resources/js/views/OtaPlatforms/Index.vue": {
-    "file": "assets/Index-e-GYLdje.js",
+    "file": "assets/Index-BQ_HJ1ms.js",
     "name": "Index",
     "src": "resources/js/views/OtaPlatforms/Index.vue",
     "isDynamicEntry": true,
@@ -82,7 +82,7 @@
     ]
   },
   "resources/js/views/Products/Detail.vue": {
-    "file": "assets/Detail-ETZHGc-a.js",
+    "file": "assets/Detail-DHfPyf-7.js",
     "name": "Detail",
     "src": "resources/js/views/Products/Detail.vue",
     "isDynamicEntry": true,
@@ -94,7 +94,7 @@
     ]
   },
   "resources/js/views/Products/Index.vue": {
-    "file": "assets/Index-DBeY9NOi.js",
+    "file": "assets/Index-Hco9DuQP.js",
     "name": "Index",
     "src": "resources/js/views/Products/Index.vue",
     "isDynamicEntry": true,
@@ -102,11 +102,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Index-Cx_wZ1N7.css"
+      "assets/Index-CGCE9G_7.css"
     ]
   },
   "resources/js/views/Profile/Index.vue": {
-    "file": "assets/Index-BU9lgY7k.js",
+    "file": "assets/Index-DdjkXuee.js",
     "name": "Index",
     "src": "resources/js/views/Profile/Index.vue",
     "isDynamicEntry": true,
@@ -115,7 +115,7 @@
     ]
   },
   "resources/js/views/ResourceProviders/Index.vue": {
-    "file": "assets/Index-Dq1H2h7P.js",
+    "file": "assets/Index-BkHEiUUI.js",
     "name": "Index",
     "src": "resources/js/views/ResourceProviders/Index.vue",
     "isDynamicEntry": true,
@@ -127,7 +127,7 @@
     ]
   },
   "resources/js/views/ScenicSpots/Index.vue": {
-    "file": "assets/Index-C_gRW9aC.js",
+    "file": "assets/Index-BbTHPK8o.js",
     "name": "Index",
     "src": "resources/js/views/ScenicSpots/Index.vue",
     "isDynamicEntry": true,
@@ -135,11 +135,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Index-J1UnAAqA.css"
+      "assets/Index-CyN2UqA0.css"
     ]
   },
   "resources/js/views/SoftwareProviders/Index.vue": {
-    "file": "assets/Index-BRAOQH8o.js",
+    "file": "assets/Index-BDRxRhmX.js",
     "name": "Index",
     "src": "resources/js/views/SoftwareProviders/Index.vue",
     "isDynamicEntry": true,
@@ -147,11 +147,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Index-B5ZPUPd1.css"
+      "assets/Index-DVypDgur.css"
     ]
   },
   "resources/js/views/Users/Index.vue": {
-    "file": "assets/Index-Bmd7FYDc.js",
+    "file": "assets/Index-C2aMumax.js",
     "name": "Index",
     "src": "resources/js/views/Users/Index.vue",
     "isDynamicEntry": true,
