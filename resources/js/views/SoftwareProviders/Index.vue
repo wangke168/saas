@@ -11,6 +11,7 @@
                 <el-table-column prop="code" label="服务商编码" width="150" />
                 <el-table-column prop="description" label="描述" show-overflow-tooltip />
                 <el-table-column prop="api_type" label="API类型" width="120" />
+                <el-table-column prop="api_url" label="API地址" width="200" show-overflow-tooltip />
                 <el-table-column label="关联景区数量" width="120">
                     <template #default="{ row }">
                         {{ row.scenic_spots_count || 0 }}
@@ -78,6 +79,12 @@
                 <el-form-item label="API类型" prop="api_type">
                     <el-input v-model="form.api_type" placeholder="请输入API类型（可选）" />
                 </el-form-item>
+                <el-form-item label="API地址" prop="api_url">
+                    <el-input v-model="form.api_url" placeholder="请输入服务商API地址（必填）" />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        每个服务商的API地址不同，请填写完整的URL
+                    </div>
+                </el-form-item>
                 <el-form-item label="状态" prop="is_active">
                     <el-switch v-model="form.is_active" />
                 </el-form-item>
@@ -113,6 +120,7 @@ const form = ref({
     code: '',
     description: '',
     api_type: '',
+    api_url: '',
     is_active: true,
 });
 
@@ -125,6 +133,11 @@ const rules = {
         { required: true, message: '请输入服务商编码', trigger: 'blur' },
         { max: 255, message: '服务商编码不能超过255个字符', trigger: 'blur' },
         { pattern: /^[a-zA-Z0-9_-]+$/, message: '服务商编码只能包含字母、数字、下划线和连字符', trigger: 'blur' }
+    ],
+    api_url: [
+        { required: true, message: '请输入API地址', trigger: 'blur' },
+        { type: 'url', message: '请输入有效的URL', trigger: ['blur', 'change'] },
+        { max: 255, message: 'API地址不能超过255个字符', trigger: 'blur' }
     ],
 };
 
@@ -160,6 +173,7 @@ const handleEdit = (row) => {
         code: row.code,
         description: row.description || '',
         api_type: row.api_type || '',
+        api_url: row.api_url || '',
         is_active: row.is_active,
     };
     dialogVisible.value = true;
@@ -221,6 +235,7 @@ const resetForm = () => {
         code: '',
         description: '',
         api_type: '',
+        api_url: '',
         is_active: true,
     };
     formRef.value?.clearValidate();

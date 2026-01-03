@@ -60,7 +60,16 @@ class ScenicSpot extends Model
     }
 
     /**
-     * 系统服务商（资源方系统）
+     * 系统服务商（多对多关系，一个景区可以有多个服务商）
+     */
+    public function softwareProviders(): BelongsToMany
+    {
+        return $this->belongsToMany(SoftwareProvider::class, 'scenic_spot_software_providers');
+    }
+    
+    /**
+     * 系统服务商（旧的一对一关系，保留用于向后兼容）
+     * @deprecated 使用 softwareProviders() 多对多关系替代
      */
     public function softwareProvider(): BelongsTo
     {
@@ -84,7 +93,16 @@ class ScenicSpot extends Model
     }
 
     /**
-     * 系统配置（该景区在系统中的配置）
+     * 系统配置列表（该景区在系统中的配置，一个景区可以有多个服务商的配置）
+     */
+    public function resourceConfigs(): HasMany
+    {
+        return $this->hasMany(ResourceConfig::class);
+    }
+    
+    /**
+     * 系统配置（旧的一对一关系，保留用于向后兼容）
+     * @deprecated 使用 resourceConfigs() 一对多关系替代
      */
     public function resourceConfig(): BelongsTo
     {

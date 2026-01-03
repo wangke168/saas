@@ -15,7 +15,6 @@ class ResourceConfig extends Model
         'scenic_spot_id',
         'username',
         'password',
-        'api_url',
         'environment',
         'extra_config',
         'is_active',
@@ -47,6 +46,39 @@ class ResourceConfig extends Model
     public function scenicSpot(): BelongsTo
     {
         return $this->belongsTo(ScenicSpot::class);
+    }
+
+    /**
+     * 获取API地址（从服务商获取）
+     * 使用访问器自动从software_providers表获取api_url
+     */
+    public function getApiUrlAttribute(): string
+    {
+        // 如果关系未加载，且有 software_provider_id，则自动加载
+        // 这可以解决队列序列化后关系丢失的问题
+        if (!$this->relationLoaded('softwareProvider') && $this->software_provider_id) {
+            $this->load('softwareProvider');
+        }
+        
+        // 优先从服务商获取API地址
+        if ($this->softwareProvider) {
+            $apiUrl = $this->softwareProvider->api_url;
+            if (!empty($apiUrl)) {
+                return $apiUrl;
+            }
+        }
+        
+        // 向后兼容：如果服务商没有配置，尝试从extra_config获取（用于临时配置）
+        if (isset($this->extra_config['api_url_override'])) {
+            return $this->extra_config['api_url_override'];
+        }
+        
+        // 向后兼容：如果是从环境变量创建的临时配置，尝试从attributes获取
+        if (isset($this->attributes['api_url'])) {
+            return $this->attributes['api_url'];
+        }
+        
+        return '';
     }
 
     /**
@@ -95,6 +127,58 @@ class ResourceConfig extends Model
     }
 
     /**
+     * 获取自定义参数（已解密）
+     */
+    public function getCustomParams(): array
+    {
+        $params = $this->extra_config['auth']['params'] ?? [];
+        
+        // 解密敏感参数
+        $decryptedParams = [];
+        foreach ($params as $key => $value) {
+            // 如果值是加密的（以encrypted:开头），则解密
+            if (is_string($value) && str_starts_with($value, 'encrypted:')) {
+                try {
+                    $encryptedValue = substr($value, 10); // 移除 'encrypted:' 前缀
+                    $decryptedParams[$key] = decrypt($encryptedValue);
+                } catch (\Exception $e) {
+                    // 解密失败，使用原值
+                    $decryptedParams[$key] = $value;
+                }
+            } else {
+                $decryptedParams[$key] = $value;
+            }
+        }
+        
+        return $decryptedParams;
+    }
+
+    /**
+     * 判断参数名是否为敏感参数（需要加密）
+     */
+    protected function isSensitiveParam(string $paramName): bool
+    {
+        $sensitiveKeywords = ['password', 'pwd', 'secret', 'key', 'token', 'auth'];
+        $paramNameLower = strtolower($paramName);
+        
+        foreach ($sensitiveKeywords as $keyword) {
+            if (str_contains($paramNameLower, $keyword)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * 加密参数值
+     */
+    protected function encryptParamValue(string $value): string
+    {
+        return 'encrypted:' . encrypt($value);
+    }
+
+    /**
      * 获取 AppKey
      */
     public function getAppKey(): ?string
@@ -136,6 +220,7 @@ class ResourceConfig extends Model
 
     /**
      * 获取认证配置（用于创建客户端）
+     * 支持自定义参数名和参数值
      */
     public function getAuthConfig(): array
     {
@@ -143,7 +228,7 @@ class ResourceConfig extends Model
         
         $config = [
             'type' => $authType,
-            'api_url' => $this->api_url,
+            'api_url' => $this->api_url, // 使用访问器，自动从服务商获取
         ];
 
         return match($authType) {
@@ -157,6 +242,10 @@ class ResourceConfig extends Model
             ]),
             'token' => array_merge($config, [
                 'token' => $this->getToken(),
+            ]),
+            'custom' => array_merge($config, [
+                // 自定义参数：返回解密后的参数
+                'params' => $this->getCustomParams(),
             ]),
             default => array_merge($config, [
                 'username' => $this->username,

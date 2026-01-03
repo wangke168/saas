@@ -14,7 +14,7 @@ class SoftwareProviderController extends Controller
     public function index(Request $request): JsonResponse
     {
         $this->authorize('viewAny', SoftwareProvider::class);
-        $query = SoftwareProvider::withCount('scenicSpots');
+        $query = SoftwareProvider::withCount('scenicSpotsOld');
 
         if ($request->has('is_active')) {
             $query->where('is_active', $request->boolean('is_active'));
@@ -58,6 +58,7 @@ class SoftwareProviderController extends Controller
             'code' => 'required|string|max:255|unique:software_providers,code',
             'description' => 'nullable|string',
             'api_type' => 'nullable|string|max:50',
+            'api_url' => 'required|url|max:255',
             'is_active' => 'boolean',
         ]);
 
@@ -80,6 +81,7 @@ class SoftwareProviderController extends Controller
             'code' => 'sometimes|required|string|max:255|unique:software_providers,code,' . $softwareProvider->id,
             'description' => 'nullable|string',
             'api_type' => 'nullable|string|max:50',
+            'api_url' => 'sometimes|required|url|max:255',
             'is_active' => 'boolean',
         ]);
 
@@ -101,6 +103,13 @@ class SoftwareProviderController extends Controller
         if ($softwareProvider->scenicSpots()->count() > 0) {
             return response()->json([
                 'message' => '无法删除：该系统服务商下还有关联的景区',
+            ], 422);
+        }
+        
+        // 检查是否有关联的产品
+        if ($softwareProvider->resourceConfigs()->count() > 0) {
+            return response()->json([
+                'message' => '无法删除：该系统服务商下还有关联的资源配置',
             ], 422);
         }
 

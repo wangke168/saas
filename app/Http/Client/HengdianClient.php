@@ -27,14 +27,19 @@ class HengdianClient
 
     /**
      * 获取认证信息（根据OTA平台选择）
+     * 支持多种认证类型：username_password、appkey_secret、token、custom
      */
     protected function getCredentials(): array
     {
         Log::info('HengdianClient::getCredentials 开始', [
             'ota_platform_code' => $this->otaPlatformCode,
+            'auth_type' => $this->config->getAuthType(),
         ]);
         
-        // 如果有指定OTA平台，且配置中有该平台的认证信息，使用平台专用认证
+        // 获取认证配置（支持所有认证类型）
+        $authConfig = $this->config->getAuthConfig();
+        
+        // 如果有指定OTA平台，且配置中有该平台的认证信息，优先使用平台专用认证
         if ($this->otaPlatformCode) {
             $extraConfig = $this->config->extra_config ?? [];
             $credentials = $extraConfig['credentials'][$this->otaPlatformCode] ?? null;
@@ -59,15 +64,39 @@ class HengdianClient
             }
         }
 
-        // 否则使用默认认证信息
-        Log::info('HengdianClient::getCredentials: 使用默认认证', [
-            'username' => $this->config->username,
-        ]);
+        // 根据认证类型返回对应的认证信息
+        // 注意：HengdianClient 需要 username 和 password，所以需要从认证配置中提取
+        $authType = $authConfig['type'] ?? 'username_password';
         
-        return [
-            'username' => $this->config->username,
-            'password' => $this->config->password,
-        ];
+        return match($authType) {
+            'username_password' => [
+                'username' => $authConfig['username'] ?? $this->config->username,
+                'password' => $authConfig['password'] ?? $this->config->password,
+            ],
+            'custom' => [
+                // 自定义参数：尝试从params中提取username和password（支持不同的参数名）
+                'username' => $this->extractCustomParam($authConfig['params'] ?? [], ['username', 'user', 'account', 'login']),
+                'password' => $this->extractCustomParam($authConfig['params'] ?? [], ['password', 'pwd', 'pass']),
+            ],
+            default => [
+                // 其他认证类型（appkey_secret、token）暂不支持，使用默认值
+                'username' => $this->config->username,
+                'password' => $this->config->password,
+            ],
+        };
+    }
+
+    /**
+     * 从自定义参数中提取指定参数（支持多个可能的参数名）
+     */
+    protected function extractCustomParam(array $params, array $possibleNames): ?string
+    {
+        foreach ($possibleNames as $name) {
+            if (isset($params[$name])) {
+                return $params[$name];
+            }
+        }
+        return null;
     }
 
     /**

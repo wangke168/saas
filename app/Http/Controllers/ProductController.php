@@ -23,7 +23,7 @@ class ProductController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Product::with(['scenicSpot']);
+        $query = Product::with(['scenicSpot', 'softwareProvider']);
 
         // 权限控制：运营只能查看所属资源方下的所有景区下的产品
         if ($request->user()->isOperator()) {
@@ -71,7 +71,7 @@ class ProductController extends Controller
         // 加载关联数据，使用 try-catch 处理可能的关联缺失问题
         try {
             // 先加载基本关联
-            $product->load('scenicSpot');
+            $product->load(['scenicSpot', 'softwareProvider']);
             
             // 加载价格及其关联（如果存在）
             $product->load(['prices' => function ($query) {
@@ -99,7 +99,7 @@ class ProductController extends Controller
             ]);
             
             // 尝试只加载基本关联
-            $product->load(['scenicSpot', 'prices', 'priceRules', 'otaProducts']);
+            $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules', 'otaProducts']);
         }
         
         return response()->json([
@@ -114,6 +114,23 @@ class ProductController extends Controller
     {
         $validated = $request->validate([
             'scenic_spot_id' => 'required|exists:scenic_spots,id',
+            'software_provider_id' => [
+                'required',
+                'exists:software_providers,id',
+                function ($attribute, $value, $fail) use ($request) {
+                    // 验证服务商必须属于产品所在景区的服务商列表
+                    $scenicSpotId = $request->input('scenic_spot_id');
+                    if ($scenicSpotId) {
+                        $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
+                        if ($scenicSpot) {
+                            $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
+                            if (!in_array($value, $providerIds)) {
+                                $fail('选择的服务商不属于该景区的服务商列表');
+                            }
+                        }
+                    }
+                },
+            ],
             'name' => 'required|string|max:255',
             'code' => 'nullable|string|max:255|unique:products,code', // 改为可空，自动生成
             'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
@@ -156,6 +173,24 @@ class ProductController extends Controller
     {
         $validated = $request->validate([
             'scenic_spot_id' => 'sometimes|required|exists:scenic_spots,id',
+            'software_provider_id' => [
+                'sometimes',
+                'required',
+                'exists:software_providers,id',
+                function ($attribute, $value, $fail) use ($request, $product) {
+                    // 验证服务商必须属于产品所在景区的服务商列表
+                    $scenicSpotId = $request->input('scenic_spot_id', $product->scenic_spot_id);
+                    if ($scenicSpotId) {
+                        $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
+                        if ($scenicSpot) {
+                            $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
+                            if (!in_array($value, $providerIds)) {
+                                $fail('选择的服务商不属于该景区的服务商列表');
+                            }
+                        }
+                    }
+                },
+            ],
             'name' => 'sometimes|required|string|max:255',
             'code' => ['sometimes', 'nullable', 'string', 'max:255', 'unique:products,code,' . $product->id], // code 不可修改，但允许为空（自动生成）
             'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）

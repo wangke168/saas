@@ -25,6 +25,11 @@ class Product extends Model
             if (empty($product->code)) {
                 $product->code = static::generateUniqueCode();
             }
+            
+            // 验证软件服务商必填
+            if (empty($product->software_provider_id)) {
+                throw new \Exception('产品必须选择软件服务商');
+            }
         });
     }
 
@@ -43,6 +48,7 @@ class Product extends Model
 
     protected $fillable = [
         'scenic_spot_id',
+        'software_provider_id',
         'name',
         'code',
         'external_code',
@@ -65,11 +71,27 @@ class Product extends Model
     }
 
     /**
+     * 序列化日期格式为 Y-m-d（与前端日期选择器的 value-format 一致）
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d');
+    }
+
+    /**
      * 所属景区
      */
     public function scenicSpot(): BelongsTo
     {
         return $this->belongsTo(ScenicSpot::class);
+    }
+
+    /**
+     * 软件服务商（必填）
+     */
+    public function softwareProvider(): BelongsTo
+    {
+        return $this->belongsTo(SoftwareProvider::class);
     }
 
     /**

@@ -118,7 +118,10 @@
                     <el-input v-model="form.name" placeholder="请输入酒店名称" />
                 </el-form-item>
                 <el-form-item label="酒店编码" prop="code">
-                    <el-input v-model="form.code" placeholder="请输入酒店编码" :disabled="isEdit" />
+                    <el-input v-model="form.code" placeholder="系统自动生成" :disabled="true" />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        酒店编码由系统自动生成，格式：H + 5位数字（如 H00001）
+                    </div>
                 </el-form-item>
                 <el-form-item label="外部酒店编号" prop="external_code">
                     <el-input v-model="form.external_code" placeholder="用于资源方系统对接的酒店编号（可选）" />
@@ -201,7 +204,10 @@
                         <el-input v-model="roomTypeForm.name" placeholder="请输入房型名称" />
                     </el-form-item>
                     <el-form-item label="房型编码" prop="code">
-                        <el-input v-model="roomTypeForm.code" placeholder="请输入房型编码" :disabled="isEditRoomType" />
+                        <el-input v-model="roomTypeForm.code" placeholder="系统自动生成" :disabled="true" />
+                        <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                            房型编码由系统自动生成，格式：R + 5位数字（如 R00001）
+                        </div>
                     </el-form-item>
                     <el-form-item label="外部房型标识" prop="external_code">
                         <el-input v-model="roomTypeForm.external_code" placeholder="用于资源方系统对接的房型标识（可选）" />
@@ -483,7 +489,7 @@ const rules = {
         { max: 255, message: '酒店名称不能超过255个字符', trigger: 'blur' }
     ],
     code: [
-        { required: true, message: '请输入酒店编码', trigger: 'blur' },
+        // 创建时不需要验证，系统自动生成；编辑时保留验证（虽然字段已禁用）
         { pattern: /^[a-zA-Z0-9_-]+$/, message: '酒店编码只能包含字母、数字、下划线和连字符', trigger: 'blur' }
     ],
     contact_phone: [
@@ -496,7 +502,7 @@ const roomTypeRules = {
         { required: true, message: '请输入房型名称', trigger: 'blur' }
     ],
     code: [
-        { required: true, message: '请输入房型编码', trigger: 'blur' },
+        // 创建时不需要验证，系统自动生成；编辑时保留验证（虽然字段已禁用）
         { pattern: /^[a-zA-Z0-9_-]+$/, message: '房型编码只能包含字母、数字、下划线和连字符', trigger: 'blur' }
     ],
     max_occupancy: [

@@ -114,6 +114,7 @@
                         placeholder="请选择景区"
                         style="width: 100%"
                         :disabled="isEdit"
+                        @change="handleScenicSpotChange"
                     >
                         <el-option
                             v-for="spot in scenicSpots"
@@ -122,6 +123,30 @@
                             :value="spot.id"
                         />
                     </el-select>
+                </el-form-item>
+                <el-form-item label="软件服务商" prop="software_provider_id" required>
+                    <el-select
+                        v-model="form.software_provider_id"
+                        placeholder="请先选择景区"
+                        style="width: 100%"
+                        :disabled="!form.scenic_spot_id"
+                    >
+                        <el-option
+                            v-for="provider in availableSoftwareProviders"
+                            :key="provider.id"
+                            :label="`${provider.name} (${provider.api_type || '无类型'})`"
+                            :value="provider.id"
+                        />
+                    </el-select>
+                    <div v-if="!form.scenic_spot_id" style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        请先选择景区，然后选择该景区下的服务商
+                    </div>
+                    <div v-else-if="availableSoftwareProviders.length === 0" style="font-size: 12px; color: #f56c6c; margin-top: 5px;">
+                        该景区尚未配置服务商，请先在景区管理页面添加服务商
+                    </div>
+                    <div v-else style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        选择产品使用的软件服务商（必填）
+                    </div>
                 </el-form-item>
                 <el-form-item label="产品名称" prop="name">
                     <el-input v-model="form.name" placeholder="请输入产品名称" />
@@ -224,6 +249,7 @@ const router = useRouter();
 
 const products = ref([]);
 const scenicSpots = ref([]);
+const availableSoftwareProviders = ref([]);
 const loading = ref(false);
 const submitting = ref(false);
 const exporting = ref({}); // 改为对象，记录每个产品的导出状态
@@ -242,6 +268,7 @@ const dialogTitle = computed(() => isEdit.value ? '编辑产品' : '创建产品
 
 const form = ref({
     scenic_spot_id: null,
+    software_provider_id: null,
     name: '',
     code: '',
     description: '',
@@ -265,6 +292,9 @@ const validateSaleEndDate = (rule, value, callback) => {
 const rules = {
     scenic_spot_id: [
         { required: true, message: '请选择所属景区', trigger: 'change' }
+    ],
+    software_provider_id: [
+        { required: true, message: '请选择软件服务商', trigger: 'change' }
     ],
     name: [
         { required: true, message: '请输入产品名称', trigger: 'blur' },
@@ -393,20 +423,82 @@ const handleViewDetail = (row) => {
     router.push(`/products/${row.id}/detail`);
 };
 
-const handleEdit = (row) => {
+const handleScenicSpotChange = async (scenicSpotId, preserveProviderId = false) => {
+    // 保存当前的服务商ID（如果是编辑模式，需要保留）
+    const currentProviderId = preserveProviderId ? form.value.software_provider_id : null;
+    
+    // 清空服务商选择
+    form.value.software_provider_id = null;
+    availableSoftwareProviders.value = [];
+    
+    if (scenicSpotId) {
+        // 加载该景区的服务商列表
+        try {
+            const response = await axios.get(`/scenic-spots/${scenicSpotId}`);
+            const scenicSpot = response.data.data;
+            availableSoftwareProviders.value = scenicSpot.software_providers || [];
+            
+            // 如果是编辑模式且之前有服务商ID，尝试恢复
+            if (preserveProviderId && currentProviderId) {
+                // 检查该服务商是否在新的服务商列表中
+                const providerExists = availableSoftwareProviders.value.some(
+                    provider => provider.id === currentProviderId
+                );
+                if (providerExists) {
+                    form.value.software_provider_id = currentProviderId;
+                } else {
+                    // 如果服务商不在列表中，清空选择并提示
+                    form.value.software_provider_id = null;
+                    ElMessage.warning('该产品配置的服务商不属于当前景区的服务商列表，请重新选择');
+                }
+            }
+            
+            if (availableSoftwareProviders.value.length === 0) {
+                ElMessage.warning('该景区尚未配置服务商，请先在景区管理页面添加服务商');
+            }
+        } catch (error) {
+            ElMessage.error('获取景区服务商列表失败');
+            console.error(error);
+        }
+    }
+};
+
+// 格式化日期为 YYYY-MM-DD 格式（兼容多种输入格式）
+const formatDateForPicker = (dateString) => {
+    if (!dateString) return null;
+    // 如果是 ISO 8601 格式（包含 T），提取日期部分
+    if (typeof dateString === 'string' && dateString.includes('T')) {
+        return dateString.split('T')[0];
+    }
+    // 如果已经是 YYYY-MM-DD 格式，直接返回
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        return dateString;
+    }
+    // 其他情况返回原值
+    return dateString;
+};
+
+const handleEdit = async (row) => {
     editingId.value = row.id;
     form.value = {
         scenic_spot_id: row.scenic_spot_id,
+        software_provider_id: row.software_provider_id || null,
         name: row.name,
         code: row.code, // 只读显示，不可修改
         external_code: row.external_code || '',
         description: row.description || '',
         price_source: row.price_source || 'manual',
         stay_days: row.stay_days || 1, // 默认值为1，必填
-        sale_start_date: row.sale_start_date || null,
-        sale_end_date: row.sale_end_date || null,
+        sale_start_date: formatDateForPicker(row.sale_start_date),
+        sale_end_date: formatDateForPicker(row.sale_end_date),
         is_active: row.is_active,
     };
+    
+    // 加载该景区的服务商列表（编辑模式下保留当前的服务商ID）
+    if (row.scenic_spot_id) {
+        await handleScenicSpotChange(row.scenic_spot_id, true);
+    }
+    
     dialogVisible.value = true;
 };
 
@@ -483,6 +575,7 @@ const resetForm = () => {
     editingId.value = null;
     form.value = {
         scenic_spot_id: null,
+        software_provider_id: null,
         name: '',
         code: '', // 创建时为空，系统自动生成
         external_code: '',
@@ -493,6 +586,7 @@ const resetForm = () => {
         sale_end_date: null,
         is_active: true,
     };
+    availableSoftwareProviders.value = [];
     if (formRef.value) {
         formRef.value.clearValidate();
     }

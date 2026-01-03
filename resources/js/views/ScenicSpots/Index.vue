@@ -22,9 +22,16 @@
                 <el-table-column prop="code" label="景区编码" width="150" />
                 <el-table-column prop="address" label="地址" show-overflow-tooltip />
                 <el-table-column prop="contact_phone" label="联系电话" width="150" />
-                <el-table-column label="软件服务商" width="150">
+                <el-table-column label="软件服务商" width="200">
                     <template #default="{ row }">
-                        {{ row.software_provider?.name || '-' }}
+                        <el-tag
+                            v-for="provider in row.software_providers || []"
+                            :key="provider.id"
+                            style="margin-right: 5px; margin-bottom: 5px;"
+                        >
+                            {{ provider.name }}
+                        </el-tag>
+                        <span v-if="!row.software_providers || row.software_providers.length === 0">-</span>
                     </template>
                 </el-table-column>
                 <el-table-column prop="is_active" label="状态" width="100">
@@ -92,20 +99,24 @@
                 <el-form-item label="联系电话" prop="contact_phone">
                     <el-input v-model="form.contact_phone" placeholder="请输入联系电话" />
                 </el-form-item>
-                <el-form-item label="软件服务商" prop="software_provider_id">
+                <el-form-item label="软件服务商" prop="software_provider_ids">
                     <el-select
-                        v-model="form.software_provider_id"
-                        placeholder="请选择软件服务商"
+                        v-model="form.software_provider_ids"
+                        placeholder="请选择软件服务商（可多选）"
+                        multiple
                         clearable
                         style="width: 100%"
                     >
                         <el-option
                             v-for="provider in softwareProviders"
                             :key="provider.id"
-                            :label="provider.name"
+                            :label="`${provider.name} (${provider.api_type || '无类型'})`"
                             :value="provider.id"
                         />
                     </el-select>
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        一个景区可以选择多个软件服务商，不同产品可以使用不同的服务商
+                    </div>
                 </el-form-item>
                 <el-form-item label="描述" prop="description">
                     <el-input
@@ -129,31 +140,141 @@
         <el-dialog
             v-model="resourceConfigDialogVisible"
             title="资源配置"
-            width="800px"
+            width="900px"
             @close="resetResourceConfigForm"
         >
             <el-alert
                 title="重要提示"
                 type="warning"
-                description="不同OTA平台的订单需要使用不同的用户名和密码。请为每个OTA平台配置对应的认证信息。"
+                description="一个景区可以有多个软件服务商，请为每个服务商单独配置参数。不同OTA平台的订单需要使用不同的用户名和密码。"
                 :closable="false"
                 style="margin-bottom: 20px;"
             />
+            
+            <!-- 服务商选择器（如果景区有多个服务商） -->
+            <div v-if="currentScenicSpotProviders && currentScenicSpotProviders.length > 1" style="margin-bottom: 20px;">
+                <el-select
+                    v-model="selectedProviderId"
+                    placeholder="请选择要配置的服务商"
+                    style="width: 100%"
+                    @change="handleProviderChange"
+                >
+                    <el-option
+                        v-for="provider in currentScenicSpotProviders"
+                        :key="provider.id"
+                        :label="`${provider.name} (${provider.api_type || '无类型'})`"
+                        :value="provider.id"
+                    />
+                </el-select>
+            </div>
+            
+            <!-- 如果只有一个服务商，直接显示配置 -->
+            <div v-else-if="currentScenicSpotProviders && currentScenicSpotProviders.length === 1" style="margin-bottom: 20px;">
+                <el-alert
+                    :title="`正在配置服务商：${currentScenicSpotProviders[0].name}`"
+                    type="info"
+                    :closable="false"
+                />
+            </div>
+            
+            <!-- 如果景区没有服务商，提示先添加 -->
+            <el-alert
+                v-else
+                title="该景区尚未配置软件服务商"
+                type="warning"
+                description="请先在景区编辑页面添加软件服务商，然后再配置参数。"
+                :closable="false"
+                style="margin-bottom: 20px;"
+            />
+            
             <el-form
                 ref="resourceConfigFormRef"
                 :model="resourceConfigForm"
                 :rules="resourceConfigRules"
                 label-width="140px"
             >
-                <el-form-item label="接口地址" prop="api_url">
-                    <el-input v-model="resourceConfigForm.api_url" placeholder="例如：https://e.hengdianworld.com/Interface/hotel_order.aspx" />
+                <el-form-item label="认证类型" prop="auth.type">
+                    <el-select v-model="resourceConfigForm.auth.type" style="width: 100%" @change="handleAuthTypeChange">
+                        <el-option label="用户名密码" value="username_password" />
+                        <el-option label="AppKey/Secret" value="appkey_secret" />
+                        <el-option label="Token" value="token" />
+                        <el-option label="自定义参数" value="custom" />
+                    </el-select>
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        选择认证方式，如果接口使用非标准参数名，请选择"自定义参数"
+                    </div>
                 </el-form-item>
-                <el-form-item label="默认用户名" prop="username">
-                    <el-input v-model="resourceConfigForm.username" placeholder="用于库存推送订阅等非订单场景" />
-                </el-form-item>
-                <el-form-item label="默认密码" prop="password">
-                    <el-input v-model="resourceConfigForm.password" type="password" show-password placeholder="用于库存推送订阅等非订单场景" />
-                </el-form-item>
+
+                <!-- 用户名密码认证 -->
+                <template v-if="resourceConfigForm.auth.type === 'username_password'">
+                    <el-form-item label="默认用户名" prop="username">
+                        <el-input v-model="resourceConfigForm.username" placeholder="用于库存推送订阅等非订单场景" />
+                    </el-form-item>
+                    <el-form-item label="默认密码" prop="password">
+                        <el-input v-model="resourceConfigForm.password" type="password" show-password placeholder="用于库存推送订阅等非订单场景" />
+                    </el-form-item>
+                </template>
+
+                <!-- AppKey/Secret认证 -->
+                <template v-if="resourceConfigForm.auth.type === 'appkey_secret'">
+                    <el-form-item label="AppKey" prop="auth.appkey">
+                        <el-input v-model="resourceConfigForm.auth.appkey" placeholder="请输入AppKey" />
+                    </el-form-item>
+                    <el-form-item label="AppSecret" prop="auth.appsecret">
+                        <el-input v-model="resourceConfigForm.auth.appsecret" type="password" show-password placeholder="请输入AppSecret" />
+                    </el-form-item>
+                </template>
+
+                <!-- Token认证 -->
+                <template v-if="resourceConfigForm.auth.type === 'token'">
+                    <el-form-item label="Token" prop="auth.token">
+                        <el-input v-model="resourceConfigForm.auth.token" type="password" show-password placeholder="请输入Token" />
+                    </el-form-item>
+                </template>
+
+                <!-- 自定义参数认证 -->
+                <template v-if="resourceConfigForm.auth.type === 'custom'">
+                    <el-form-item label="参数模板">
+                        <el-select v-model="selectedParamTemplate" placeholder="选择参数模板（可选）" clearable style="width: 100%" @change="handleTemplateChange">
+                            <el-option label="用户名密码（自定义参数名）" value="username_password_custom" />
+                            <el-option label="AppKey/Secret（自定义参数名）" value="appkey_secret_custom" />
+                            <el-option label="Token（自定义参数名）" value="token_custom" />
+                            <el-option label="空模板" value="empty" />
+                        </el-select>
+                        <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                            选择模板可以快速填充常用参数，也可以手动添加参数
+                        </div>
+                    </el-form-item>
+                    <el-form-item label="自定义参数">
+                        <el-table :data="resourceConfigForm.auth.params" border style="width: 100%">
+                            <el-table-column label="参数名" width="200">
+                                <template #default="{ row, $index }">
+                                    <el-input v-model="row.key" placeholder="参数名" />
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="参数值" min-width="300">
+                                <template #default="{ row, $index }">
+                                    <el-input 
+                                        v-model="row.value" 
+                                        :type="isSensitiveParam(row.key) ? 'password' : 'text'"
+                                        :show-password="isSensitiveParam(row.key)"
+                                        placeholder="参数值"
+                                    />
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="100" fixed="right">
+                                <template #default="{ $index }">
+                                    <el-button size="small" type="danger" @click="removeCustomParam($index)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        <el-button type="primary" size="small" style="margin-top: 10px;" @click="addCustomParam">添加参数</el-button>
+                        <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                            敏感参数（包含password、secret、key、token等关键词）将自动加密存储
+                        </div>
+                    </el-form-item>
+                </template>
+
                 <el-form-item label="环境" prop="environment">
                     <el-select v-model="resourceConfigForm.environment" style="width: 100%">
                         <el-option label="生产环境" value="production" />
@@ -270,8 +391,10 @@ const resourceConfigDialogVisible = ref(false);
 const resourceConfigFormRef = ref(null);
 const resourceConfigSubmitting = ref(false);
 const currentScenicSpotId = ref(null);
+const currentScenicSpotProviders = ref([]);
+const selectedProviderId = ref(null);
+const selectedParamTemplate = ref(null);
 const resourceConfigForm = ref({
-    api_url: '',
     username: '',
     password: '',
     environment: 'production',
@@ -286,6 +409,15 @@ const resourceConfigForm = ref({
         meituan: { username: '', password: '' },
         fliggy: { username: '', password: '' },
     },
+    auth: {
+        type: 'username_password',
+        appkey: '',
+        appsecret: '',
+        app_id: '',
+        token: '',
+        access_token: '',
+        params: [], // 自定义参数数组，格式：[{key: 'param_name', value: 'param_value'}]
+    },
     is_active: true,
 });
 
@@ -298,7 +430,7 @@ const form = ref({
     address: '',
     contact_phone: '',
     description: '',
-    software_provider_id: null,
+    software_provider_ids: [],
     is_active: true,
 });
 
@@ -317,9 +449,8 @@ const rules = {
 };
 
 const resourceConfigRules = {
-    api_url: [
-        { required: true, message: '请输入接口地址', trigger: 'blur' },
-        { type: 'url', message: '请输入有效的URL', trigger: ['blur', 'change'] }
+    'auth.type': [
+        { required: true, message: '请选择认证类型', trigger: 'change' }
     ],
     username: [
         { required: true, message: '请输入默认用户名', trigger: 'blur' }
@@ -403,7 +534,7 @@ const handleEdit = (row) => {
         address: row.address || '',
         contact_phone: row.contact_phone || '',
         description: row.description || '',
-        software_provider_id: row.software_provider_id,
+        software_provider_ids: row.software_providers ? row.software_providers.map(p => p.id) : [],
         is_active: row.is_active,
     };
     dialogVisible.value = true;
@@ -467,7 +598,7 @@ const resetForm = () => {
         address: '',
         contact_phone: '',
         description: '',
-        software_provider_id: null,
+        software_provider_ids: [],
         is_active: true,
     };
     formRef.value?.clearValidate();
@@ -477,15 +608,70 @@ const handleConfigResource = async (row) => {
     currentScenicSpotId.value = row.id;
     // 先重置表单，确保没有残留数据
     resetResourceConfigForm();
+    
+    // 获取景区的服务商列表
+    try {
+        const scenicSpotResponse = await axios.get(`/scenic-spots/${row.id}`);
+        const scenicSpot = scenicSpotResponse.data.data;
+        currentScenicSpotProviders.value = scenicSpot.software_providers || [];
+        
+        // 如果只有一个服务商，自动选择
+        if (currentScenicSpotProviders.value.length === 1) {
+            selectedProviderId.value = currentScenicSpotProviders.value[0].id;
+        } else if (currentScenicSpotProviders.value.length > 1) {
+            // 如果有多个服务商，默认选择第一个
+            selectedProviderId.value = currentScenicSpotProviders.value[0].id;
+        } else {
+            // 没有服务商，提示用户先添加
+            selectedProviderId.value = null;
+        }
+    } catch (error) {
+        ElMessage.error('获取景区信息失败');
+        console.error(error);
+        return;
+    }
+    
     resourceConfigDialogVisible.value = true;
     
+    // 如果有选中的服务商，加载配置
+    if (selectedProviderId.value) {
+        await loadResourceConfig(selectedProviderId.value);
+    }
+};
+
+const handleProviderChange = async (providerId) => {
+    if (providerId) {
+        await loadResourceConfig(providerId);
+    } else {
+        resetResourceConfigForm();
+    }
+};
+
+const loadResourceConfig = async (providerId) => {
     try {
-        // 获取现有配置
-        const response = await axios.get(`/scenic-spots/${row.id}/resource-config`);
+        // 获取现有配置（传递 service_provider_id 参数）
+        const response = await axios.get(`/scenic-spots/${currentScenicSpotId.value}/resource-config`, {
+            params: {
+                software_provider_id: providerId
+            }
+        });
         if (response.data.success && response.data.data) {
             const config = response.data.data;
+            const authConfig = config.extra_config?.auth || {};
+            
+            // 处理自定义参数：如果是加密的，显示为已存在标记
+            let customParams = [];
+            if (authConfig.type === 'custom' && authConfig.params) {
+                customParams = Object.entries(authConfig.params).map(([key, value]) => {
+                    // 如果值是加密的（以encrypted:开头），显示为已存在标记
+                    if (typeof value === 'string' && value.startsWith('encrypted:')) {
+                        return { key, value: '***EXISTS***' };
+                    }
+                    return { key, value };
+                });
+            }
+            
             resourceConfigForm.value = {
-                api_url: config.api_url || '',
                 username: config.username || '',
                 // 如果后端返回 '***EXISTS***'，表示密码已存在，保持为空（用户不修改则不更新）
                 // 如果为空字符串，表示没有密码
@@ -518,6 +704,15 @@ const handleConfigResource = async (row) => {
                             : (config.extra_config?.credentials?.fliggy?.password || ''),
                     },
                 },
+                auth: {
+                    type: authConfig.type || 'username_password',
+                    appkey: authConfig.appkey || '',
+                    appsecret: authConfig.appsecret === '***EXISTS***' ? '' : (authConfig.appsecret || ''),
+                    app_id: authConfig.app_id || '',
+                    token: authConfig.token === '***EXISTS***' ? '' : (authConfig.token || ''),
+                    access_token: authConfig.access_token === '***EXISTS***' ? '' : (authConfig.access_token || ''),
+                    params: Array.isArray(customParams) ? customParams : [],
+                },
                 is_active: config.is_active ?? true,
             };
         } else {
@@ -535,6 +730,22 @@ const handleConfigResource = async (row) => {
 
 const handleSubmitResourceConfig = async () => {
     if (!resourceConfigFormRef.value) return;
+    
+    // 验证自定义参数
+    if (resourceConfigForm.value.auth.type === 'custom') {
+        const params = resourceConfigForm.value.auth.params || [];
+        for (let i = 0; i < params.length; i++) {
+            const param = params[i];
+            if (!param.key || param.key.trim() === '') {
+                ElMessage.warning(`第 ${i + 1} 个参数的参数名不能为空`);
+                return;
+            }
+            if (!param.value || param.value.trim() === '' || param.value === '***EXISTS***') {
+                // 允许空值或已存在标记，跳过验证
+                continue;
+            }
+        }
+    }
     
     await resourceConfigFormRef.value.validate(async (valid) => {
         if (valid) {
@@ -556,8 +767,30 @@ const handleSubmitResourceConfig = async () => {
                     }
                 }
                 
+                // 验证是否选择了服务商
+                if (!selectedProviderId.value) {
+                    ElMessage.warning('请先选择要配置的服务商');
+                    return;
+                }
+                
+                // 处理自定义参数：转换为键值对对象
+                let authConfig = { ...resourceConfigForm.value.auth };
+                if (authConfig.type === 'custom' && authConfig.params) {
+                    // 将数组格式转换为对象格式，过滤掉空值
+                    const paramsObj = {};
+                    authConfig.params.forEach(param => {
+                        if (param.key && param.value && param.value !== '***EXISTS***') {
+                            paramsObj[param.key] = param.value;
+                        }
+                    });
+                    authConfig.params = paramsObj;
+                } else {
+                    // 非自定义类型，移除params
+                    delete authConfig.params;
+                }
+                
                 const submitData = {
-                    api_url: resourceConfigForm.value.api_url,
+                    software_provider_id: selectedProviderId.value,
                     username: resourceConfigForm.value.username,
                     // 如果密码是 '***EXISTS***' 或空，不发送 password 字段，让后端从现有配置中获取
                     // 否则确保是字符串类型
@@ -570,6 +803,8 @@ const handleSubmitResourceConfig = async () => {
                     order_provider: resourceConfigForm.value.order_provider || null,
                     // 即使 credentials 为空对象，也要发送，确保后端知道要保留现有值
                     credentials: Object.keys(credentials).length > 0 ? credentials : {},
+                    // 认证配置
+                    auth: authConfig,
                 };
                 
                 await axios.post(`/scenic-spots/${currentScenicSpotId.value}/resource-config`, submitData);
@@ -597,7 +832,6 @@ const handleSubmitResourceConfig = async () => {
 
 const resetResourceConfigForm = () => {
     resourceConfigForm.value = {
-        api_url: '',
         username: '',
         password: '',
         environment: 'production', // 只有一个选项，保持默认值
@@ -612,9 +846,76 @@ const resetResourceConfigForm = () => {
             meituan: { username: '', password: '' },
             fliggy: { username: '', password: '' },
         },
+        auth: {
+            type: 'username_password',
+            appkey: '',
+            appsecret: '',
+            app_id: '',
+            token: '',
+            access_token: '',
+            params: [],
+        },
         is_active: true, // 保持默认启用状态
     };
+    selectedProviderId.value = null;
+    selectedParamTemplate.value = null;
+    currentScenicSpotProviders.value = [];
     resourceConfigFormRef.value?.clearValidate();
+};
+
+// 自定义参数相关方法
+const addCustomParam = () => {
+    resourceConfigForm.value.auth.params.push({ key: '', value: '' });
+};
+
+const removeCustomParam = (index) => {
+    resourceConfigForm.value.auth.params.splice(index, 1);
+};
+
+const isSensitiveParam = (paramName) => {
+    if (!paramName) return false;
+    const sensitiveKeywords = ['password', 'pwd', 'secret', 'key', 'token', 'auth'];
+    const paramNameLower = paramName.toLowerCase();
+    return sensitiveKeywords.some(keyword => paramNameLower.includes(keyword));
+};
+
+const handleAuthTypeChange = (authType) => {
+    // 切换认证类型时，清空自定义参数
+    if (authType !== 'custom') {
+        resourceConfigForm.value.auth.params = [];
+        selectedParamTemplate.value = null;
+    }
+};
+
+const handleTemplateChange = (template) => {
+    if (!template) return;
+    
+    // 清空现有参数
+    resourceConfigForm.value.auth.params = [];
+    
+    // 根据模板填充参数
+    switch (template) {
+        case 'username_password_custom':
+            resourceConfigForm.value.auth.params = [
+                { key: 'user', value: '' },
+                { key: 'pwd', value: '' },
+            ];
+            break;
+        case 'appkey_secret_custom':
+            resourceConfigForm.value.auth.params = [
+                { key: 'api_key', value: '' },
+                { key: 'api_secret', value: '' },
+            ];
+            break;
+        case 'token_custom':
+            resourceConfigForm.value.auth.params = [
+                { key: 'access_token', value: '' },
+            ];
+            break;
+        case 'empty':
+            resourceConfigForm.value.auth.params = [];
+            break;
+    }
 };
 
 onMounted(() => {

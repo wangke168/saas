@@ -14,9 +14,19 @@ class ResourceConfigController extends Controller
     /**
      * 获取景区的资源配置
      */
-    public function show(ScenicSpot $scenicSpot): JsonResponse
+    public function show(ScenicSpot $scenicSpot, Request $request): JsonResponse
     {
-        $config = $scenicSpot->resourceConfig;
+        // 如果提供了 software_provider_id，返回对应服务商的配置
+        $softwareProviderId = $request->input('software_provider_id');
+        
+        if ($softwareProviderId) {
+            $config = ResourceConfig::where('scenic_spot_id', $scenicSpot->id)
+                ->where('software_provider_id', $softwareProviderId)
+                ->first();
+        } else {
+            // 如果没有提供，返回第一个配置（向后兼容）
+            $config = $scenicSpot->resourceConfigs()->first();
+        }
 
         if (!$config) {
             // 如果没有配置，返回 null，让前端知道没有配置过
@@ -60,7 +70,20 @@ class ResourceConfigController extends Controller
             if (isset($configData['extra_config']['auth']['access_token']) && !empty($configData['extra_config']['auth']['access_token'])) {
                 $configData['extra_config']['auth']['access_token'] = '***EXISTS***';
             }
+            
+            // 处理自定义参数中的敏感信息
+            if (isset($configData['extra_config']['auth']['params']) && is_array($configData['extra_config']['auth']['params'])) {
+                foreach ($configData['extra_config']['auth']['params'] as $paramName => $paramValue) {
+                    // 如果是加密的值（以encrypted:开头），标记为已存在
+                    if (is_string($paramValue) && str_starts_with($paramValue, 'encrypted:')) {
+                        $configData['extra_config']['auth']['params'][$paramName] = '***EXISTS***';
+                    }
+                }
+            }
         }
+        
+        // 确保api_url字段存在（通过访问器获取）
+        $configData['api_url'] = $config->api_url;
 
         return response()->json([
             'success' => true,
@@ -74,16 +97,28 @@ class ResourceConfigController extends Controller
     public function store(Request $request, ScenicSpot $scenicSpot): JsonResponse
     {
         $validated = $request->validate([
+            'software_provider_id' => [
+                'required',
+                'exists:software_providers,id',
+                function ($attribute, $value, $fail) use ($scenicSpot) {
+                    // 验证服务商必须属于景区的服务商列表
+                    $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
+                    if (!in_array($value, $providerIds)) {
+                        $fail('选择的服务商不属于该景区的服务商列表');
+                    }
+                },
+            ],
             'username' => [
                 'sometimes',
                 'string',
                 'max:255',
-                function ($attribute, $value, $fail) use ($scenicSpot) {
-                    if ($value && $scenicSpot->software_provider_id) {
+                function ($attribute, $value, $fail) use ($request, $scenicSpot) {
+                    $softwareProviderId = $request->input('software_provider_id');
+                    if ($value && $softwareProviderId) {
                         // 检查同一软件服务商下，username 是否已被其他景区使用
-                        $exists = ResourceConfig::where('software_provider_id', $scenicSpot->software_provider_id)
+                        $exists = ResourceConfig::where('software_provider_id', $softwareProviderId)
                             ->where('username', $value)
-                            ->where('id', '!=', $scenicSpot->resource_config_id)
+                            ->where('scenic_spot_id', '!=', $scenicSpot->id)
                             ->exists();
                         
                         if ($exists) {
@@ -93,7 +128,6 @@ class ResourceConfigController extends Controller
                 },
             ],
             'password' => 'nullable|string|max:255', // 改为 nullable，允许不发送或发送 null
-            'api_url' => 'sometimes|url|max:255',
             'environment' => 'sometimes|string|in:production',
             'is_active' => 'sometimes|boolean',
             'sync_mode' => 'required|array',
@@ -111,12 +145,13 @@ class ResourceConfigController extends Controller
                 'nullable',
                 'string',
                 'max:255',
-                function ($attribute, $value, $fail) use ($scenicSpot) {
-                    if ($value && $scenicSpot->software_provider_id) {
+                function ($attribute, $value, $fail) use ($request, $scenicSpot) {
+                    $softwareProviderId = $request->input('software_provider_id');
+                    if ($value && $softwareProviderId) {
                         // 检查同一软件服务商下，appkey 是否已被其他景区使用
-                        $exists = ResourceConfig::where('software_provider_id', $scenicSpot->software_provider_id)
+                        $exists = ResourceConfig::where('software_provider_id', $softwareProviderId)
                             ->whereJsonContains('extra_config->auth->appkey', $value)
-                            ->where('id', '!=', $scenicSpot->resource_config_id)
+                            ->where('scenic_spot_id', '!=', $scenicSpot->id)
                             ->exists();
                         
                         if ($exists) {
@@ -130,12 +165,13 @@ class ResourceConfigController extends Controller
                 'nullable',
                 'string',
                 'max:255',
-                function ($attribute, $value, $fail) use ($scenicSpot) {
-                    if ($value && $scenicSpot->software_provider_id) {
+                function ($attribute, $value, $fail) use ($request, $scenicSpot) {
+                    $softwareProviderId = $request->input('software_provider_id');
+                    if ($value && $softwareProviderId) {
                         // 检查同一软件服务商下，app_id 是否已被其他景区使用
-                        $exists = ResourceConfig::where('software_provider_id', $scenicSpot->software_provider_id)
+                        $exists = ResourceConfig::where('software_provider_id', $softwareProviderId)
                             ->whereJsonContains('extra_config->auth->app_id', $value)
-                            ->where('id', '!=', $scenicSpot->resource_config_id)
+                            ->where('scenic_spot_id', '!=', $scenicSpot->id)
                             ->exists();
                         
                         if ($exists) {
@@ -148,15 +184,16 @@ class ResourceConfigController extends Controller
                 'nullable',
                 'string',
                 'max:255',
-                function ($attribute, $value, $fail) use ($scenicSpot) {
-                    if ($value && $scenicSpot->software_provider_id) {
+                function ($attribute, $value, $fail) use ($request, $scenicSpot) {
+                    $softwareProviderId = $request->input('software_provider_id');
+                    if ($value && $softwareProviderId) {
                         // 检查同一软件服务商下，token 是否已被其他景区使用
-                        $exists = ResourceConfig::where('software_provider_id', $scenicSpot->software_provider_id)
+                        $exists = ResourceConfig::where('software_provider_id', $softwareProviderId)
                             ->where(function($query) use ($value) {
                                 $query->whereJsonContains('extra_config->auth->token', $value)
                                       ->orWhereJsonContains('extra_config->auth->access_token', $value);
                             })
-                            ->where('id', '!=', $scenicSpot->resource_config_id)
+                            ->where('scenic_spot_id', '!=', $scenicSpot->id)
                             ->exists();
                         
                         if ($exists) {
@@ -166,13 +203,40 @@ class ResourceConfigController extends Controller
                 },
             ],
             'auth.access_token' => 'nullable|string|max:255',
-            'auth.custom_params' => 'nullable|array',
+            // 自定义参数：参数名-参数值的键值对
+            'auth.params' => [
+                'nullable',
+                'array',
+                function ($attribute, $value, $fail) {
+                    if (is_array($value)) {
+                        foreach ($value as $paramName => $paramValue) {
+                            // 参数名不能为空
+                            if (empty($paramName)) {
+                                $fail('自定义参数的参数名不能为空');
+                                return;
+                            }
+                            // 参数值不能为空（除非是已存在的加密值标记）
+                            if ($paramValue === null || $paramValue === '' || $paramValue === '***EXISTS***') {
+                                // 允许空值或已存在标记，跳过验证
+                                continue;
+                            }
+                            // 参数值必须是字符串
+                            if (!is_string($paramValue)) {
+                                $fail("参数 \"{$paramName}\" 的值必须是字符串");
+                                return;
+                            }
+                            // 参数值长度限制
+                            if (strlen($paramValue) > 500) {
+                                $fail("参数 \"{$paramName}\" 的值不能超过500个字符");
+                                return;
+                            }
+                        }
+                    }
+                },
+            ],
         ]);
 
-        // 如果某些字段为空，从.env读取默认值
-        if (empty($validated['api_url'])) {
-            $validated['api_url'] = env('HENGDIAN_API_URL', '');
-        }
+        // 如果某些字段为空，从.env读取默认值（api_url已移除，从服务商获取）
         if (empty($validated['username'])) {
             $validated['username'] = env('HENGDIAN_USERNAME', '');
         }
@@ -193,8 +257,12 @@ class ResourceConfigController extends Controller
         try {
             DB::beginTransaction();
 
-            // 获取或创建配置
-            $config = $scenicSpot->resourceConfig;
+            // 获取或创建配置（根据服务商ID）
+            $softwareProviderId = $validated['software_provider_id'];
+            $config = ResourceConfig::where('scenic_spot_id', $scenicSpot->id)
+                ->where('software_provider_id', $softwareProviderId)
+                ->first();
+            
             if (!$config) {
                 // 创建新配置
                 // 确保 credentials 正确初始化
@@ -217,25 +285,33 @@ class ResourceConfigController extends Controller
                 
                 // 如果有认证配置，添加到 extra_config
                 if (isset($validated['auth']) && !empty($validated['auth'])) {
-                    $extraConfig['auth'] = $validated['auth'];
+                    $authConfig = $validated['auth'];
+                    
+                    // 如果是自定义参数，加密敏感参数
+                    if (isset($authConfig['type']) && $authConfig['type'] === 'custom' && isset($authConfig['params'])) {
+                        $authConfig['params'] = $this->encryptCustomParams($authConfig['params']);
+                    }
+                    
+                    $extraConfig['auth'] = $authConfig;
                 }
                 
                 $config = ResourceConfig::create([
-                    'software_provider_id' => $scenicSpot->software_provider_id,
+                    'software_provider_id' => $softwareProviderId,
                     'scenic_spot_id' => $scenicSpot->id,
                     'username' => $validated['username'] ?? '',
                     'password' => $validated['password'] ?? '',
-                    'api_url' => $validated['api_url'] ?? '',
                     'environment' => $validated['environment'] ?? 'production',
                     'is_active' => $validated['is_active'] ?? true,
                     'extra_config' => $extraConfig,
                 ]);
 
-                // 更新景区的 resource_config_id
-                $scenicSpot->update([
-                    'resource_config_id' => $config->id,
-                    'is_system_connected' => $validated['sync_mode']['order'] === 'auto',
-                ]);
+                // 不再更新景区的 resource_config_id（因为一个景区可以有多个配置）
+                // 只更新 is_system_connected（如果该服务商的订单模式为 auto）
+                if ($validated['sync_mode']['order'] === 'auto') {
+                    $scenicSpot->update([
+                        'is_system_connected' => true,
+                    ]);
+                }
             } else {
                 // 更新现有配置
                 // 合并 credentials（保留现有值，只更新有值的字段）
@@ -270,10 +346,25 @@ class ResourceConfigController extends Controller
                 
                 // 如果有认证配置，合并到 extra_config
                 if (isset($validated['auth']) && !empty($validated['auth'])) {
-                    $updatedExtraConfig['auth'] = array_merge(
+                    $authConfig = array_merge(
                         $existingExtraConfig['auth'] ?? [],
                         $validated['auth']
                     );
+                    
+                    // 如果是自定义参数，加密敏感参数
+                    if (isset($authConfig['type']) && $authConfig['type'] === 'custom' && isset($authConfig['params'])) {
+                        // 合并现有参数（保留未修改的参数）
+                        $existingParams = $existingExtraConfig['auth']['params'] ?? [];
+                        $newParams = $authConfig['params'];
+                        
+                        // 合并参数：新参数覆盖旧参数
+                        $mergedParams = array_merge($existingParams, $newParams);
+                        
+                        // 加密敏感参数
+                        $authConfig['params'] = $this->encryptCustomParams($mergedParams);
+                    }
+                    
+                    $updatedExtraConfig['auth'] = $authConfig;
                 }
                 
                 $config->update([
@@ -282,7 +373,6 @@ class ResourceConfigController extends Controller
                     'password' => (!empty($validated['password']) && $validated['password'] !== '***EXISTS***') 
                         ? $validated['password'] 
                         : $config->password,
-                    'api_url' => $validated['api_url'] ?? $config->api_url,
                     'environment' => $validated['environment'] ?? $config->environment,
                     'is_active' => $validated['is_active'] ?? $config->is_active,
                     'extra_config' => $updatedExtraConfig,
@@ -509,5 +599,72 @@ class ResourceConfigController extends Controller
                 'message' => '订阅失败：' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * 加密自定义参数中的敏感参数
+     * 
+     * @param array $params 参数数组，键为参数名，值为参数值
+     * @return array 加密后的参数数组
+     */
+    protected function encryptCustomParams(array $params): array
+    {
+        $encryptedParams = [];
+        
+        foreach ($params as $paramName => $paramValue) {
+            if (empty($paramValue)) {
+                // 空值不加密，直接保存
+                $encryptedParams[$paramName] = $paramValue;
+                continue;
+            }
+            
+            // 判断是否为敏感参数
+            $isSensitive = $this->isSensitiveParam($paramName);
+            
+            if ($isSensitive) {
+                // 如果已经是加密格式，不重复加密
+                if (is_string($paramValue) && str_starts_with($paramValue, 'encrypted:')) {
+                    $encryptedParams[$paramName] = $paramValue;
+                } else {
+                    // 加密参数值
+                    try {
+                        $encryptedParams[$paramName] = 'encrypted:' . encrypt($paramValue);
+                    } catch (\Exception $e) {
+                        // 加密失败，记录日志但不中断流程
+                        Log::warning('加密自定义参数失败', [
+                            'param_name' => $paramName,
+                            'error' => $e->getMessage(),
+                        ]);
+                        // 如果加密失败，保存原值（不推荐，但至少不会丢失数据）
+                        $encryptedParams[$paramName] = $paramValue;
+                    }
+                }
+            } else {
+                // 非敏感参数，直接保存
+                $encryptedParams[$paramName] = $paramValue;
+            }
+        }
+        
+        return $encryptedParams;
+    }
+
+    /**
+     * 判断参数名是否为敏感参数（需要加密）
+     * 
+     * @param string $paramName 参数名
+     * @return bool
+     */
+    protected function isSensitiveParam(string $paramName): bool
+    {
+        $sensitiveKeywords = ['password', 'pwd', 'secret', 'key', 'token', 'auth'];
+        $paramNameLower = strtolower($paramName);
+        
+        foreach ($sensitiveKeywords as $keyword) {
+            if (str_contains($paramNameLower, $keyword)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 }

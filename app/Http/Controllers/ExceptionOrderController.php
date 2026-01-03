@@ -14,7 +14,22 @@ class ExceptionOrderController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $this->authorize('viewAny', ExceptionOrder::class);
+
         $query = ExceptionOrder::with(['order.product', 'order.hotel', 'order.otaPlatform', 'handler']);
+
+        // 权限过滤：非管理员只能查看所属资源方下的所有景区下的异常订单
+        if (!$request->user()->isAdmin()) {
+            $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
+            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+                $query->whereIn('resource_providers.id', $resourceProviderIds);
+            })->pluck('id');
+            
+            // 通过订单的产品关联找到景区进行过滤
+            $query->whereHas('order.product', function ($q) use ($scenicSpotIds) {
+                $q->whereIn('scenic_spot_id', $scenicSpotIds);
+            });
+        }
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -40,6 +55,8 @@ class ExceptionOrderController extends Controller
      */
     public function show(ExceptionOrder $exceptionOrder): JsonResponse
     {
+        $this->authorize('view', $exceptionOrder);
+
         $exceptionOrder->load([
             'order.product',
             'order.hotel',
@@ -57,6 +74,8 @@ class ExceptionOrderController extends Controller
      */
     public function startProcessing(Request $request, ExceptionOrder $exceptionOrder): JsonResponse
     {
+        $this->authorize('process', $exceptionOrder);
+
         $exceptionOrder->update([
             'status' => ExceptionOrderStatus::PROCESSING,
             'handler_id' => $request->user()->id,
@@ -73,6 +92,8 @@ class ExceptionOrderController extends Controller
      */
     public function resolve(Request $request, ExceptionOrder $exceptionOrder): JsonResponse
     {
+        $this->authorize('process', $exceptionOrder);
+
         $validated = $request->validate([
             'remark' => 'nullable|string',
         ]);

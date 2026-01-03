@@ -15,10 +15,27 @@ use Illuminate\Support\Facades\Log;
 class HengdianService implements ResourceServiceInterface
 {
     protected ?HengdianClient $client = null;
+    protected ?ResourceConfig $config = null;
+
+    /**
+     * 设置资源配置（由 ResourceServiceFactory 调用）
+     */
+    public function setConfig(ResourceConfig $config): self
+    {
+        // 确保 softwareProvider 关系已加载（解决队列序列化后关系丢失的问题）
+        if (!$config->relationLoaded('softwareProvider') && $config->software_provider_id) {
+            $config->load('softwareProvider');
+        }
+        
+        $this->config = $config;
+        // 重置客户端，以便使用新配置
+        $this->client = null;
+        return $this;
+    }
 
     /**
      * 根据订单获取对应的客户端
-     * 现在配置是景区级别的，需要根据订单的景区来获取配置
+     * 优先使用 setConfig() 设置的配置，如果没有则使用旧的逻辑（向后兼容）
      */
     protected function getClient(?Order $order = null): HengdianClient
     {
@@ -26,75 +43,109 @@ class HengdianService implements ResourceServiceInterface
             Log::info('HengdianService::getClient 开始获取配置', [
                 'order_id' => $order?->id,
                 'has_order' => $order !== null,
-                'order_hotel_id' => $order?->hotel_id,
+                'has_config' => $this->config !== null,
+                'config_id' => $this->config?->id,
             ]);
             
-            $config = null;
+            $config = $this->config;
             
-            // 如果提供了订单，根据订单的景区获取配置
-            if ($order) {
-                $scenicSpot = $order->hotel->scenicSpot ?? null;
-                Log::info('HengdianService::getClient: 尝试从订单景区获取配置', [
-                    'order_id' => $order->id,
-                    'has_scenic_spot' => $scenicSpot !== null,
-                    'scenic_spot_id' => $scenicSpot?->id,
-                    'resource_config_id' => $scenicSpot?->resource_config_id,
+            // 如果已经通过 setConfig() 设置了配置，直接使用
+            if ($config) {
+                Log::info('HengdianService::getClient: 使用 ResourceServiceFactory 传递的配置', [
+                    'order_id' => $order?->id,
+                    'config_id' => $config->id,
+                    'scenic_spot_id' => $config->scenic_spot_id,
+                    'software_provider_id' => $config->software_provider_id,
+                    'config_api_url' => $config->api_url,
+                ]);
+            } else {
+                // 向后兼容：如果没有设置配置，使用旧的逻辑
+                Log::info('HengdianService::getClient: 使用向后兼容逻辑获取配置', [
+                    'order_id' => $order?->id,
                 ]);
                 
-                if ($scenicSpot && $scenicSpot->resource_config_id) {
-                    $config = ResourceConfig::find($scenicSpot->resource_config_id);
-                    Log::info('HengdianService::getClient: 从景区配置获取成功', [
-                        'order_id' => $order->id,
-                        'config_id' => $config?->id,
-                        'config_api_url' => $config?->api_url,
+                // 如果提供了订单，根据订单的景区获取配置
+                if ($order) {
+                    $scenicSpot = $order->hotel->scenicSpot ?? null;
+                    if ($scenicSpot) {
+                        // 尝试从产品的服务商获取配置
+                        $order->loadMissing('product.softwareProvider');
+                        $product = $order->product;
+                        if ($product && $product->softwareProvider) {
+                            $config = ResourceConfig::with('softwareProvider')
+                                ->where('scenic_spot_id', $scenicSpot->id)
+                                ->where('software_provider_id', $product->softwareProvider->id)
+                                ->first();
+                            
+                            if ($config) {
+                                Log::info('HengdianService::getClient: 从产品服务商配置获取成功', [
+                                    'order_id' => $order->id,
+                                    'config_id' => $config->id,
+                                    'config_api_url' => $config->api_url,
+                                ]);
+                            }
+                        }
+                    }
+                }
+                
+                // 如果还是没有配置，尝试使用第一个配置（向后兼容）
+                if (!$config) {
+                    $provider = SoftwareProvider::where('api_type', 'hengdian')->first();
+                    $config = $provider?->resourceConfigs()->with('softwareProvider')->first();
+                }
+                
+                // 如果还是没有配置，尝试从.env创建临时配置
+                if (!$config) {
+                    $config = $this->createConfigFromEnv();
+                }
+                
+                if (!$config) {
+                    Log::error('HengdianService::getClient: 配置不存在', [
+                        'order_id' => $order?->id,
+                        'error' => '资源方配置不存在，请检查数据库配置或环境变量',
                     ]);
+                    throw new \Exception('资源方配置不存在，请检查数据库配置或环境变量');
                 }
             }
             
-            // 如果没有找到配置，尝试使用第一个配置（向后兼容）
-            if (!$config) {
-                Log::info('HengdianService::getClient: 尝试从软件服务商获取配置', [
-                    'order_id' => $order?->id,
-                ]);
-                
-                $provider = SoftwareProvider::where('api_type', 'hengdian')->first();
-                Log::info('HengdianService::getClient: 软件服务商查询结果', [
-                    'order_id' => $order?->id,
-                    'provider_id' => $provider?->id,
-                    'provider_name' => $provider?->name,
-                ]);
-                
-                $config = $provider?->resourceConfigs()->first();
-                Log::info('HengdianService::getClient: 从软件服务商配置获取结果', [
-                    'order_id' => $order?->id,
-                    'config_id' => $config?->id,
-                    'config_api_url' => $config?->api_url,
-                ]);
+            // 确保 config 的 softwareProvider 关系已加载（防止队列序列化后丢失）
+            if ($config && !$config->relationLoaded('softwareProvider') && $config->software_provider_id) {
+                $config->load('softwareProvider');
             }
             
-            // 如果还是没有配置，尝试从.env创建临时配置
-            if (!$config) {
-                Log::info('HengdianService::getClient: 尝试从环境变量创建配置', [
+            // 验证 api_url 是否存在（在访问 api_url 之前先确保关系已加载）
+            if ($config) {
+                // 再次确保关系已加载（访问器可能已经加载，但这里确保一下）
+                if (!$config->relationLoaded('softwareProvider') && $config->software_provider_id) {
+                    $config->load('softwareProvider');
+                }
+                
+                // 获取 api_url（访问器会自动处理）
+                $apiUrl = $config->api_url;
+                
+                // 详细日志用于调试
+                Log::info('HengdianService::getClient: 验证 api_url', [
                     'order_id' => $order?->id,
-                    'has_api_url' => !empty(env('HENGDIAN_API_URL')),
-                    'has_username' => !empty(env('HENGDIAN_USERNAME')),
-                    'has_password' => !empty(env('HENGDIAN_PASSWORD')),
+                    'config_id' => $config->id ?? 'from_env',
+                    'software_provider_id' => $config->software_provider_id ?? null,
+                    'has_software_provider' => $config->softwareProvider !== null,
+                    'software_provider_id_from_relation' => $config->softwareProvider?->id,
+                    'software_provider_name' => $config->softwareProvider?->name,
+                    'software_provider_api_url' => $config->softwareProvider?->api_url,
+                    'config_api_url' => $apiUrl,
+                    'api_url_empty' => empty($apiUrl),
                 ]);
                 
-                $config = $this->createConfigFromEnv();
-                Log::info('HengdianService::getClient: 从环境变量创建配置结果', [
-                    'order_id' => $order?->id,
-                    'config_created' => $config !== null,
-                    'config_api_url' => $config?->api_url,
-                ]);
-            }
-            
-            if (!$config) {
-                Log::error('HengdianService::getClient: 配置不存在', [
-                    'order_id' => $order?->id,
-                    'error' => '资源方配置不存在，请检查数据库配置或环境变量',
-                ]);
-                throw new \Exception('资源方配置不存在，请检查数据库配置或环境变量');
+                if (empty($apiUrl)) {
+                    Log::error('HengdianService::getClient: 服务商API地址未配置', [
+                        'order_id' => $order?->id,
+                        'config_id' => $config->id ?? 'from_env',
+                        'software_provider_id' => $config->software_provider_id ?? null,
+                        'has_software_provider' => $config->softwareProvider !== null,
+                        'software_provider_api_url' => $config->softwareProvider?->api_url,
+                    ]);
+                    throw new \Exception('服务商API地址未配置，无法处理订单。请在软件服务商管理页面配置API地址。');
+                }
             }
             
             // 获取订单的OTA平台代码
@@ -103,7 +154,7 @@ class HengdianService implements ResourceServiceInterface
             Log::info('HengdianService::getClient: 准备创建 HengdianClient', [
                 'order_id' => $order?->id,
                 'config_id' => $config->id ?? 'from_env',
-                'config_api_url' => $config->api_url,
+                'config_api_url' => $config->api_url ?? null,
                 'ota_platform_code' => $otaPlatformCode,
             ]);
             
@@ -127,12 +178,13 @@ class HengdianService implements ResourceServiceInterface
         }
 
         $config = new ResourceConfig();
-        $config->api_url = env('HENGDIAN_API_URL');
+        // 临时配置：将api_url存储在extra_config中（因为临时配置没有softwareProvider）
         $config->username = env('HENGDIAN_USERNAME');
         $config->password = env('HENGDIAN_PASSWORD');
         $config->environment = 'production';
         $config->is_active = true;
         $config->extra_config = [
+            'api_url_override' => env('HENGDIAN_API_URL'), // 临时配置的API地址
             'sync_mode' => [
                 'inventory' => 'manual',
                 'price' => 'manual',
@@ -826,7 +878,7 @@ class HengdianService implements ResourceServiceInterface
             } else {
                 // 否则获取第一个配置
                 $provider = SoftwareProvider::where('api_type', 'hengdian')->first();
-                $config = $provider?->resourceConfigs()->first();
+                $config = $provider?->resourceConfigs()->with('softwareProvider')->first();
             }
 
             // 如果还是没有配置，尝试从.env创建临时配置

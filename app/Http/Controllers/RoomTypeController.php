@@ -57,7 +57,7 @@ class RoomTypeController extends Controller
         $validated = $request->validate([
             'hotel_id' => 'required|exists:hotels,id',
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:255',
+            'code' => 'nullable|string|max:255', // 改为可空，自动生成
             'max_occupancy' => 'required|integer|min:1',
             'description' => 'nullable|string',
             'external_id' => 'nullable|string|max:255',
@@ -110,7 +110,7 @@ class RoomTypeController extends Controller
 
         $validated = $request->validate([
             'name' => 'sometimes|required|string|max:255',
-            'code' => 'sometimes|required|string|max:255',
+            'code' => 'nullable|string|max:255', // 改为可空，编辑时不允许修改
             'max_occupancy' => 'sometimes|required|integer|min:1',
             'description' => 'nullable|string',
             'external_id' => 'nullable|string|max:255',
@@ -118,6 +118,11 @@ class RoomTypeController extends Controller
             'is_active' => 'sometimes|boolean',
         ]);
 
+        // 更新时不允许修改 code 字段（如果为空则不更新）
+        if (isset($validated['code']) && empty($validated['code'])) {
+            unset($validated['code']);
+        }
+        
         $roomType->update($validated);
         $roomType->load('hotel');
 

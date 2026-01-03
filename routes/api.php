@@ -71,7 +71,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('scenic-spots')->middleware('role:admin')->group(function () {
         Route::get('/', [\App\Http\Controllers\ScenicSpotController::class, 'index']);
         Route::post('/', [\App\Http\Controllers\ScenicSpotController::class, 'store']);
-        Route::get('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'show']);
         Route::put('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'update']);
         Route::delete('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'destroy']);
         
@@ -79,6 +78,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'show']);
         Route::post('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'store']);
         Route::post('/{scenicSpot}/resource-config/subscribe-inventory', [\App\Http\Controllers\ResourceConfigController::class, 'subscribeInventory']);
+    });
+
+    // 景区详情（所有已认证用户可访问，但需要权限检查）
+    Route::prefix('scenic-spots')->group(function () {
+        Route::get('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'show']);
     });
 
     // 软件商管理（仅超级管理员）

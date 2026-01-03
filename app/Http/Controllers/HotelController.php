@@ -59,7 +59,7 @@ class HotelController extends Controller
         $validated = $request->validate([
             'scenic_spot_id' => 'required|exists:scenic_spots,id',
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:255',
+            'code' => 'nullable|string|max:255', // 改为可空，自动生成
             'address' => 'nullable|string|max:255',
             'contact_phone' => 'nullable|string|max:20',
             'external_id' => 'nullable|string|max:255',
@@ -139,7 +139,7 @@ class HotelController extends Controller
         $validated = $request->validate([
             'scenic_spot_id' => 'sometimes|required|exists:scenic_spots,id',
             'name' => 'sometimes|required|string|max:255',
-            'code' => 'sometimes|required|string|max:255',
+            'code' => 'nullable|string|max:255', // 改为可空，编辑时不允许修改
             'address' => 'nullable|string|max:255',
             'contact_phone' => 'nullable|string|max:20',
             'external_id' => 'nullable|string|max:255',
@@ -162,6 +162,11 @@ class HotelController extends Controller
             }
         }
 
+        // 更新时不允许修改 code 字段（如果为空则不更新）
+        if (isset($validated['code']) && empty($validated['code'])) {
+            unset($validated['code']);
+        }
+        
         $hotel->update($validated);
         $hotel->load(['scenicSpot', 'scenicSpot.softwareProvider', 'scenicSpot.resourceConfig']);
 

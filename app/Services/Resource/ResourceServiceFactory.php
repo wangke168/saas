@@ -3,6 +3,7 @@
 namespace App\Services\Resource;
 
 use App\Models\Order;
+use App\Models\ResourceConfig;
 use App\Services\Resource\HengdianService;
 use Illuminate\Support\Facades\Log;
 
@@ -21,26 +22,69 @@ class ResourceServiceFactory
      */
     public static function getService(Order $order, string $operation = 'order'): ?ResourceServiceInterface
     {
-        // 获取订单关联的景区
-        $scenicSpot = $order->hotel->scenicSpot ?? null;
+        // 重新查询产品并预加载所需的关系（避免队列序列化导致的关系丢失）
+        $product = \App\Models\Product::with(['softwareProvider', 'scenicSpot'])
+            ->find($order->product_id);
         
-        if (!$scenicSpot) {
-            Log::warning('ResourceServiceFactory: 景区不存在', [
+        if (!$product) {
+            Log::warning('ResourceServiceFactory: 产品不存在', [
                 'order_id' => $order->id,
-                'hotel_id' => $order->hotel_id,
+                'product_id' => $order->product_id,
             ]);
             return null;
         }
 
-        // 获取资源配置
-        $config = $scenicSpot->resourceConfig;
-        if (!$config) {
-            Log::warning('ResourceServiceFactory: 资源配置不存在', [
+        // 获取产品的服务商（必填）- 关系已预加载
+        $softwareProvider = $product->softwareProvider;
+        if (!$softwareProvider) {
+            Log::error('ResourceServiceFactory: 产品未配置服务商', [
                 'order_id' => $order->id,
-                'scenic_spot_id' => $scenicSpot->id,
-                'resource_config_id' => $scenicSpot->resource_config_id,
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+            ]);
+            throw new \Exception('产品未配置服务商，无法处理订单');
+        }
+
+        // 获取景区 - 关系已预加载
+        $scenicSpot = $product->scenicSpot;
+        if (!$scenicSpot) {
+            Log::warning('ResourceServiceFactory: 景区不存在', [
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'scenic_spot_id' => $product->scenic_spot_id,
             ]);
             return null;
+        }
+
+        // 获取对应服务商的资源配置，并预加载服务商关系（用于获取api_url）
+        $config = ResourceConfig::with('softwareProvider')
+            ->where('scenic_spot_id', $scenicSpot->id)
+            ->where('software_provider_id', $softwareProvider->id)
+            ->first();
+            
+        if (!$config) {
+            Log::error('ResourceServiceFactory: 景区未配置该服务商的参数', [
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'scenic_spot_id' => $scenicSpot->id,
+                'software_provider_id' => $softwareProvider->id,
+                'software_provider_name' => $softwareProvider->name,
+            ]);
+            throw new \Exception('景区未配置该服务商的参数，无法处理订单');
+        }
+        
+        // 验证 api_url 是否存在
+        if (empty($config->api_url)) {
+            Log::error('ResourceServiceFactory: 服务商API地址未配置', [
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'scenic_spot_id' => $scenicSpot->id,
+                'software_provider_id' => $softwareProvider->id,
+                'software_provider_name' => $softwareProvider->name,
+                'has_software_provider' => $config->softwareProvider !== null,
+                'software_provider_api_url' => $config->softwareProvider?->api_url,
+            ]);
+            throw new \Exception('服务商API地址未配置，无法处理订单。请在软件服务商管理页面配置API地址。');
         }
 
         // 根据操作类型判断是否系统直连（方案A）
@@ -71,20 +115,10 @@ class ResourceServiceFactory
             }
         }
 
-        // 获取软件服务商
-        $softwareProvider = $scenicSpot->softwareProvider;
-        if (!$softwareProvider) {
-            Log::warning('ResourceServiceFactory: 软件服务商不存在', [
-                'order_id' => $order->id,
-                'scenic_spot_id' => $scenicSpot->id,
-                'software_provider_id' => $scenicSpot->software_provider_id,
-            ]);
-            return null;
-        }
-
-        // 根据软件服务商类型返回对应的服务
+        // 根据软件服务商类型返回对应的服务，并设置配置
+        // 注意：$softwareProvider 已经在上面获取过了（第38行）
         $service = match($softwareProvider->api_type) {
-            'hengdian' => app(HengdianService::class),
+            'hengdian' => app(HengdianService::class)->setConfig($config),
             // 未来可以扩展其他资源方
             default => null,
         };
@@ -98,6 +132,14 @@ class ResourceServiceFactory
             ]);
         }
 
+        Log::info('ResourceServiceFactory: 服务创建成功', [
+            'order_id' => $order->id,
+            'api_type' => $softwareProvider->api_type,
+            'config_id' => $config->id,
+            'scenic_spot_id' => $config->scenic_spot_id,
+            'software_provider_id' => $config->software_provider_id,
+        ]);
+
         return $service;
     }
 
@@ -110,23 +152,54 @@ class ResourceServiceFactory
      */
     public static function isSystemConnected(Order $order, string $operation = 'order'): bool
     {
-        $scenicSpot = $order->hotel->scenicSpot ?? null;
+        // 重新查询产品并预加载所需的关系（避免队列序列化导致的关系丢失）
+        $product = \App\Models\Product::with(['softwareProvider', 'scenicSpot'])
+            ->find($order->product_id);
         
-        if (!$scenicSpot) {
-            Log::info('ResourceServiceFactory::isSystemConnected: 景区不存在', [
+        if (!$product) {
+            Log::info('ResourceServiceFactory::isSystemConnected: 产品不存在', [
                 'order_id' => $order->id,
-                'hotel_id' => $order->hotel_id,
+                'product_id' => $order->product_id,
                 'operation' => $operation,
             ]);
             return false;
         }
 
-        $config = $scenicSpot->resourceConfig;
-        if (!$config) {
-            Log::info('ResourceServiceFactory::isSystemConnected: 资源配置不存在', [
+        // 获取产品的服务商（必填）- 关系已预加载
+        $softwareProvider = $product->softwareProvider;
+        if (!$softwareProvider) {
+            Log::info('ResourceServiceFactory::isSystemConnected: 产品未配置服务商', [
                 'order_id' => $order->id,
+                'product_id' => $product->id,
+                'operation' => $operation,
+            ]);
+            return false;
+        }
+
+        // 获取景区
+        $scenicSpot = $product->scenicSpot;
+        if (!$scenicSpot) {
+            Log::info('ResourceServiceFactory::isSystemConnected: 景区不存在', [
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'scenic_spot_id' => $product->scenic_spot_id,
+                'operation' => $operation,
+            ]);
+            return false;
+        }
+
+        // 获取对应服务商的资源配置，并预加载服务商关系（用于获取api_url）
+        $config = ResourceConfig::with('softwareProvider')
+            ->where('scenic_spot_id', $scenicSpot->id)
+            ->where('software_provider_id', $softwareProvider->id)
+            ->first();
+            
+        if (!$config) {
+            Log::info('ResourceServiceFactory::isSystemConnected: 景区未配置该服务商的参数', [
+                'order_id' => $order->id,
+                'product_id' => $product->id,
                 'scenic_spot_id' => $scenicSpot->id,
-                'resource_config_id' => $scenicSpot->resource_config_id,
+                'software_provider_id' => $softwareProvider->id,
                 'operation' => $operation,
             ]);
             return false;

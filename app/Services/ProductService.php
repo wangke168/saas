@@ -26,7 +26,7 @@ class ProductService
                 }
             }
             
-            return $product->load(['scenicSpot', 'prices', 'priceRules']);
+            return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules']);
         });
     }
 
@@ -43,7 +43,7 @@ class ProductService
             // - 更新关联数据
             // - 发送通知等
             
-            return $product->load(['scenicSpot', 'prices', 'priceRules']);
+            return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules']);
         });
     }
 

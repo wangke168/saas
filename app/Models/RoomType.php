@@ -12,6 +12,20 @@ class RoomType extends Model
 {
     use HasFactory, SoftDeletes;
 
+    /**
+     * 模型启动方法
+     */
+    protected static function boot()
+    {
+        parent::boot();
+        
+        static::creating(function ($roomType) {
+            if (empty($roomType->code)) {
+                $roomType->code = static::generateUniqueCode();
+            }
+        });
+    }
+
     protected $fillable = [
         'hotel_id',
         'name',
@@ -28,6 +42,43 @@ class RoomType extends Model
         return [
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * 生成唯一的房型编码（6位：R + 5位数字）
+     */
+    protected static function generateUniqueCode(): string
+    {
+        // 查找当前最大编号（以R开头，长度为6位）
+        $maxCode = static::where('code', 'like', 'R%')
+            ->whereRaw('LENGTH(code) = 6')
+            ->orderByRaw('CAST(SUBSTRING(code, 2) AS UNSIGNED) DESC')
+            ->value('code');
+        
+        if ($maxCode) {
+            $nextNumber = (int)substr($maxCode, 1) + 1;
+        } else {
+            $nextNumber = 1;
+        }
+        
+        // 确保不超过5位数
+        if ($nextNumber > 99999) {
+            throw new \Exception('房型编号已达到上限（99999）');
+        }
+        
+        // 如果生成的编号已存在，继续递增（处理并发情况）
+        do {
+            $code = 'R' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
+            $exists = static::where('code', $code)->exists();
+            if ($exists) {
+                $nextNumber++;
+                if ($nextNumber > 99999) {
+                    throw new \Exception('房型编号已达到上限（99999）');
+                }
+            }
+        } while ($exists);
+        
+        return $code;
     }
 
     /**
