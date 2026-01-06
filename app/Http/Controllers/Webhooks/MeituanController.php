@@ -266,14 +266,17 @@ class MeituanController extends Controller
     }
 
     /**
-     * 返回成功响应（全局加密）
-     * 美团要求全局加密，整个响应体都需要加密
+     * 返回成功响应（支持加密/不加密）
+     * 根据接口类型决定是否加密：
+     * - 订单创建V2：全局加密
+     * - 其他接口：不加密
      * 
      * @param array $body 响应体数据（不应该包含code和describe字段）
      * @param int|null $partnerId 合作方ID（可选，如果提供会添加到响应中）
      * @param string|null $partnerDealId 产品ID（可选，如果提供会添加到响应中）
      * @param int $code 响应码（默认200，出票中时传入598）
      * @param string $describe 响应描述（默认"success"，出票中时传入"出票中"）
+     * @param bool $encrypt 是否加密（默认false，订单创建V2需要传入true）
      * @return \Illuminate\Http\Response
      */
     protected function successResponse(
@@ -281,7 +284,8 @@ class MeituanController extends Controller
         ?int $partnerId = null, 
         ?string $partnerDealId = null,
         int $code = 200,
-        string $describe = 'success'
+        string $describe = 'success',
+        bool $encrypt = false
     ): Response {
         $client = $this->getClient();
         
