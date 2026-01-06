@@ -4,10 +4,12 @@ namespace App\Jobs;
 
 use App\Enums\ExceptionOrderStatus;
 use App\Enums\ExceptionOrderType;
+use App\Enums\OtaPlatform;
 use App\Enums\OrderStatus;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Services\InventoryService;
+use App\Services\OTA\NotificationFactory;
 use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -191,16 +193,57 @@ class ProcessResourceOrderJob implements ShouldQueue
                 'result_data_type' => gettype($result['data'] ?? null),
             ]);
 
-            // 通知OTA平台订单确认（异步）
+            // 通知OTA平台订单确认
+            // 注意：NotifyOtaOrderStatusJob 现在支持携程和美团
             try {
-                \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order);
+                // 重新加载订单关联数据，确保 otaPlatform 已加载
+                $this->order->load(['otaPlatform']);
                 
-                Log::info('ProcessResourceOrderJob: 已派发 NotifyOtaOrderStatusJob', [
-                    'order_id' => $this->order->id,
-                ]);
+                // 如果是美团订单，同步通知以确保及时性（美团对响应时间要求较高）
+                // 其他平台使用异步通知
+                if ($this->order->otaPlatform?->code === OtaPlatform::MEITUAN) {
+                    Log::info('ProcessResourceOrderJob: 美团订单，同步通知', [
+                        'order_id' => $this->order->id,
+                    ]);
+                    
+                    try {
+                        $notification = NotificationFactory::create($this->order);
+                        if ($notification) {
+                            $notification->notifyOrderConfirmed($this->order);
+                            Log::info('ProcessResourceOrderJob: 美团订单同步通知成功', [
+                                'order_id' => $this->order->id,
+                            ]);
+                        } else {
+                            Log::warning('ProcessResourceOrderJob: 无法创建美团通知服务', [
+                                'order_id' => $this->order->id,
+                            ]);
+                        }
+                    } catch (\Exception $e) {
+                        Log::error('ProcessResourceOrderJob: 美团订单同步通知失败', [
+                            'order_id' => $this->order->id,
+                            'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
+                        ]);
+                        // 同步通知失败不影响主流程，继续派发异步Job作为备份
+                        \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order)
+                            ->onQueue('ota-notification');
+                    }
+                } else {
+                    // 其他平台使用异步通知
+                    \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order)
+                        ->onQueue('ota-notification');
+                    
+                    Log::info('ProcessResourceOrderJob: 已派发 NotifyOtaOrderStatusJob', [
+                        'order_id' => $this->order->id,
+                        'ota_platform' => $this->order->otaPlatform?->code?->value,
+                        'order_status' => $this->order->status->value,
+                        'queue' => 'ota-notification',
+                    ]);
+                }
             } catch (\Exception $e) {
-                Log::warning('ProcessResourceOrderJob: 派发 NotifyOtaOrderStatusJob 失败', [
+                Log::warning('ProcessResourceOrderJob: 派发通知任务失败', [
                     'order_id' => $this->order->id,
+                    'ota_platform' => $this->order->otaPlatform?->code?->value,
                     'error' => $e->getMessage(),
                 ]);
             }

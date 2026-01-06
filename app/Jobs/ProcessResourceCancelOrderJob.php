@@ -256,12 +256,22 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
             return;
         }
 
-        if ($platform->code->value === \App\Enums\OtaPlatform::CTRIP->value) {
-            // 携程：使用NotifyOtaOrderStatusJob
+        // 统一使用 NotifyOtaOrderStatusJob（现在支持携程和美团）
+        // 注意：订单状态必须是 cancel_approved，NotifyOtaOrderStatusJob 才会通知退款
+        try {
             \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
-        } elseif ($platform->code->value === \App\Enums\OtaPlatform::MEITUAN->value) {
-            // 美团：使用NotifyMeituanOrderRefundJob
-            \App\Jobs\NotifyMeituanOrderRefundJob::dispatch($order, '资源方取消成功');
+            
+            Log::info('ProcessResourceCancelOrderJob: 已派发 NotifyOtaOrderStatusJob', [
+                'order_id' => $order->id,
+                'ota_platform' => $platform->code->value,
+                'order_status' => $order->status->value,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('ProcessResourceCancelOrderJob: 派发 NotifyOtaOrderStatusJob 失败', [
+                'order_id' => $order->id,
+                'ota_platform' => $platform->code->value,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

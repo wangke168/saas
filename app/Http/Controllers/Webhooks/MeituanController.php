@@ -488,6 +488,78 @@ class MeituanController extends Controller
                 }
             }
 
+            // 构建 guest_info，确保包含 name 和 idCode（横店服务需要）
+            // 横店服务期望的格式：[{name: "xxx", idCode: "xxx", cardNo: "xxx"}]
+            $guestInfo = [];
+            
+            // 优先从 visitors 中构建客人信息（美团可能使用 visitors 字段）
+            if (!empty($contacts) && is_array($contacts)) {
+                foreach ($contacts as $contact) {
+                    $guestName = $contact['name'] ?? $contactName;
+                    $guestIdCode = '';
+                    
+                    // 从 contact 的 credentials 中获取证件号
+                    if (!empty($contact['credentials']) && is_array($contact['credentials'])) {
+                        // credentials 可能是数组，取第一个证件号
+                        $guestIdCode = reset($contact['credentials']) ?: '';
+                    }
+                    
+                    // 如果 credentials 中没有，尝试从 credentialList 中匹配
+                    if (empty($guestIdCode) && !empty($credentialList)) {
+                        // 如果只有一个证件，直接使用
+                        if (count($credentialList) === 1) {
+                            $guestIdCode = $credentialList[0]['credentialNo'] ?? '';
+                        }
+                    }
+                    
+                    // 只有当姓名或证件号至少有一个时才添加
+                    if (!empty($guestName) || !empty($guestIdCode)) {
+                        $guestInfo[] = [
+                            'name' => $guestName,
+                            'idCode' => $guestIdCode,
+                            'cardNo' => $guestIdCode, // 兼容携程格式
+                            'credentialType' => 0, // 默认身份证
+                            'credentialNo' => $guestIdCode,
+                        ];
+                    }
+                }
+            }
+            
+            // 如果没有从 visitors 中获取到信息，尝试从 credentialList 构建
+            if (empty($guestInfo) && !empty($credentialList)) {
+                foreach ($credentialList as $credential) {
+                    $credentialNo = $credential['credentialNo'] ?? '';
+                    $guestName = $contactName; // 使用联系人姓名
+                    
+                    if (!empty($credentialNo) || !empty($guestName)) {
+                        $guestInfo[] = [
+                            'name' => $guestName,
+                            'idCode' => $credentialNo,
+                            'cardNo' => $credentialNo, // 兼容携程格式
+                            'credentialType' => $credential['credentialType'] ?? 0,
+                            'credentialNo' => $credentialNo,
+                        ];
+                    }
+                }
+            }
+            
+            // 如果还是没有信息，至少保存联系人信息
+            if (empty($guestInfo) && !empty($contactName)) {
+                $guestInfo[] = [
+                    'name' => $contactName,
+                    'idCode' => '',
+                    'cardNo' => '',
+                ];
+            }
+
+            Log::info('美团订单创建V2：构建客人信息', [
+                'order_id' => $orderId,
+                'contact_name' => $contactName,
+                'credential_list_count' => count($credentialList),
+                'guest_info_count' => count($guestInfo),
+                'guest_info' => $guestInfo,
+            ]);
+
             // 计算离店日期（根据产品入住天数）
             $stayDays = $product->stay_days ?: 1;
             $checkOutDate = \Carbon\Carbon::parse($useDate)->addDays($stayDays)->format('Y-m-d');
@@ -514,7 +586,7 @@ class MeituanController extends Controller
                 'contact_name' => $contactName,
                 'contact_phone' => $contactPhone,
                 'contact_email' => $contactEmail,
-                'guest_info' => $credentialList ?? [],
+                'guest_info' => $guestInfo, // 使用构建好的 guest_info，包含 name 和 idCode
                 'real_name_type' => $realNameType,
                 'credential_list' => $credentialListData,
                 'total_amount' => intval($salePrice * $quantity * 100), // 转换为分

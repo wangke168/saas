@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Enums\ExceptionOrderStatus;
+use App\Enums\OtaPlatform;
 use App\Enums\OrderStatus;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Services\OTA\CtripService;
+use App\Services\OTA\NotificationFactory;
 use App\Services\Resource\ResourceServiceFactory;
 use App\Services\Resource\ResourceServiceInterface;
 use Illuminate\Support\Facades\DB;
@@ -132,14 +134,50 @@ class OrderOperationService
 
             DB::commit();
 
-            // 5. 通知携程平台（异步）
-            try {
-                \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
-            } catch (\Exception $e) {
-                Log::warning('通知携程订单确认失败', [
+            // 5. 通知OTA平台
+            // 重新加载订单关联数据，确保 otaPlatform 已加载
+            $order->load(['otaPlatform']);
+            
+            // 如果是美团订单，同步通知以确保及时性（美团对响应时间要求较高）
+            // 其他平台使用异步通知
+            if ($order->otaPlatform?->code === OtaPlatform::MEITUAN) {
+                Log::info('OrderOperationService::confirmOrderWithResource: 美团订单，同步通知', [
                     'order_id' => $order->id,
-                    'error' => $e->getMessage(),
                 ]);
+                
+                try {
+                    $notification = NotificationFactory::create($order);
+                    if ($notification) {
+                        $notification->notifyOrderConfirmed($order);
+                        Log::info('OrderOperationService::confirmOrderWithResource: 美团订单同步通知成功', [
+                            'order_id' => $order->id,
+                        ]);
+                    } else {
+                        Log::warning('OrderOperationService::confirmOrderWithResource: 无法创建美团通知服务', [
+                            'order_id' => $order->id,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('OrderOperationService::confirmOrderWithResource: 美团订单同步通知失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    // 同步通知失败不影响主流程，继续派发异步Job作为备份
+                    \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order)
+                        ->onQueue('ota-notification');
+                }
+            } else {
+                // 其他平台使用异步通知
+                try {
+                    \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order)
+                        ->onQueue('ota-notification');
+                } catch (\Exception $e) {
+                    Log::warning('通知OTA订单确认失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             return [
@@ -198,25 +236,61 @@ class OrderOperationService
 
             DB::commit();
 
-            // 3. 通知OTA平台（异步）
-            try {
-                Log::info('准备派发 NotifyOtaOrderStatusJob', [
+            // 3. 通知OTA平台
+            // 重新加载订单关联数据，确保 otaPlatform 已加载
+            $order->load(['otaPlatform']);
+            
+            // 如果是美团订单，同步通知以确保及时性（美团对响应时间要求较高）
+            // 其他平台使用异步通知
+            if ($order->otaPlatform?->code === OtaPlatform::MEITUAN) {
+                Log::info('OrderOperationService::confirmOrderManually: 美团订单，同步通知', [
                     'order_id' => $order->id,
-                    'order_status' => $order->status->value,
-                    'queue_connection' => config('queue.default'),
                 ]);
                 
-                \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
-                
-                Log::info('NotifyOtaOrderStatusJob 派发成功', [
-                    'order_id' => $order->id,
-                ]);
-            } catch (\Exception $e) {
-                Log::error('通知OTA订单确认失败', [
-                    'order_id' => $order->id,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
+                try {
+                    $notification = NotificationFactory::create($order);
+                    if ($notification) {
+                        $notification->notifyOrderConfirmed($order);
+                        Log::info('OrderOperationService::confirmOrderManually: 美团订单同步通知成功', [
+                            'order_id' => $order->id,
+                        ]);
+                    } else {
+                        Log::warning('OrderOperationService::confirmOrderManually: 无法创建美团通知服务', [
+                            'order_id' => $order->id,
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::error('OrderOperationService::confirmOrderManually: 美团订单同步通知失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    // 同步通知失败不影响主流程，继续派发异步Job作为备份
+                    \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order)
+                        ->onQueue('ota-notification');
+                }
+            } else {
+                // 其他平台使用异步通知
+                try {
+                    Log::info('准备派发 NotifyOtaOrderStatusJob', [
+                        'order_id' => $order->id,
+                        'order_status' => $order->status->value,
+                        'queue_connection' => config('queue.default'),
+                    ]);
+                    
+                    \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order)
+                        ->onQueue('ota-notification');
+                    
+                    Log::info('NotifyOtaOrderStatusJob 派发成功', [
+                        'order_id' => $order->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('通知OTA订单确认失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                }
             }
 
             return [
