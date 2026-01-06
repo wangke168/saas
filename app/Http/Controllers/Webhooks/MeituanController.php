@@ -732,14 +732,33 @@ class MeituanController extends Controller
         $responseBody['voucherAdditionalList'] = [];
 
         // 如果是实名制订单，返回credentialList
+        // 注意：voucherType=0 时，不需要传递voucher字段
+        // credentialList的数量应该与订单数量（room_count）一致
         if ($order->real_name_type === 1 && !empty($order->credential_list)) {
             $responseBody['credentialList'] = [];
-            foreach ($order->credential_list as $credential) {
-                $responseBody['credentialList'][] = [
-                    'credentialType' => $credential['credentialType'] ?? 0,
-                    'credentialNo' => $credential['credentialNo'] ?? '',
-                    'voucher' => $credential['voucher'] ?? '',
-                ];
+            $roomCount = $order->room_count ?? 1;
+            $credentialList = $order->credential_list;
+            
+            // 确保credentialList的数量与订单数量一致
+            // 如果credentialList数量少于订单数量，使用第一个证件信息填充
+            // 如果credentialList数量多于订单数量，只取前roomCount个
+            for ($i = 0; $i < $roomCount; $i++) {
+                $credential = $credentialList[$i] ?? $credentialList[0] ?? null;
+                if ($credential) {
+                    $credentialItem = [
+                        'credentialType' => $credential['credentialType'] ?? 0,
+                        'credentialNo' => $credential['credentialNo'] ?? '',
+                    ];
+                    
+                    // 只有当voucherType=1（一码一验）时才传递voucher字段
+                    // voucherType=0时，不传递voucher字段（即使有值也不传）
+                    // 如果voucher为空字符串，也不传递该字段
+                    if (!empty($credential['voucher'])) {
+                        $credentialItem['voucher'] = $credential['voucher'];
+                    }
+                    
+                    $responseBody['credentialList'][] = $credentialItem;
+                }
             }
         }
 
