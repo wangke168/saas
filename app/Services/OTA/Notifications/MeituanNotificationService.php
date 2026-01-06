@@ -22,15 +22,49 @@ class MeituanNotificationService implements OtaNotificationInterface
     protected function getClient(): MeituanClient
     {
         if ($this->client === null) {
-            $platform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
-            if (!$platform || !$platform->config) {
-                throw new \Exception('美团配置不存在');
+            // 优先使用环境变量配置（如果存在）
+            $config = $this->createConfigFromEnv();
+            
+            // 如果环境变量配置不存在，尝试从数据库读取
+            if (!$config) {
+                $platform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
+                $config = $platform?->config;
             }
 
-            $this->client = new MeituanClient($platform->config);
+            if (!$config) {
+                throw new \Exception('美团配置不存在，请检查数据库配置或环境变量');
+            }
+
+            $this->client = new MeituanClient($config);
         }
 
         return $this->client;
+    }
+
+    /**
+     * 从环境变量创建配置对象
+     */
+    protected function createConfigFromEnv(): ?\App\Models\OtaConfig
+    {
+        // 检查环境变量是否存在
+        if (!env('MEITUAN_PARTNER_ID') || !env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
+            return null;
+        }
+
+        // 创建临时配置对象（不保存到数据库）
+        $config = new \App\Models\OtaConfig();
+        $config->account = env('MEITUAN_PARTNER_ID'); // PartnerId存储在account字段
+        $config->secret_key = env('MEITUAN_APP_KEY'); // AppKey存储在secret_key字段
+        $config->aes_key = env('MEITUAN_APP_SECRET'); // AppSecret存储在aes_key字段
+        $config->aes_iv = env('MEITUAN_AES_KEY', ''); // AES密钥存储在aes_iv字段
+        
+        // API URL 配置
+        $config->api_url = env('MEITUAN_API_URL', 'https://openapi.meituan.com');
+        $config->callback_url = env('MEITUAN_WEBHOOK_URL', '');
+        $config->environment = 'production';
+        $config->is_active = true;
+
+        return $config;
     }
 
     /**
