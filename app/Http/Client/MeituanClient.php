@@ -158,10 +158,13 @@ class MeituanClient
 
         $iv = $this->generateIV($key);
 
-        $encryptedBytes = base64_decode($encryptedBody);
+        // Base64解码，使用strict模式确保只接受有效的Base64字符
+        $encryptedBytes = base64_decode($encryptedBody, true);
 
         if ($encryptedBytes === false) {
-            throw new \Exception('Base64解码失败');
+            // 提供更详细的错误信息
+            $preview = substr($encryptedBody, 0, 50);
+            throw new \Exception('Base64解码失败：响应体可能不是有效的Base64编码字符串。预览：' . $preview);
         }
 
         $decrypted = openssl_decrypt($encryptedBytes, 'AES-128-CBC', $key, OPENSSL_RAW_DATA, $iv);
