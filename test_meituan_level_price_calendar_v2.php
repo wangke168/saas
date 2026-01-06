@@ -171,13 +171,37 @@ try {
     $method->setAccessible(true);
 
     $response = $method->invoke($controller, $request);
-    $responseData = json_decode($response->getContent(), true);
+    
+    // 获取响应体（现在是加密的Base64字符串）
+    $encryptedBody = $response->getContent();
+    
+    // 解密响应体
+    try {
+        $decryptedBody = $client->decryptBody($encryptedBody);
+        $responseData = json_decode($decryptedBody, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            echo "❌ 响应解密后JSON解析失败: " . json_last_error_msg() . "\n";
+            echo "解密后的内容: " . substr($decryptedBody, 0, 200) . "\n";
+            exit(1);
+        }
+    } catch (\Exception $e) {
+        echo "❌ 响应解密失败: " . $e->getMessage() . "\n";
+        echo "加密的响应体（前200字符）: " . substr($encryptedBody, 0, 200) . "\n";
+        exit(1);
+    }
 
     if ($responseData['code'] == 200) {
         echo "✅ 接口调用成功\n";
         echo "响应数据:\n";
         echo "  - code: {$responseData['code']}\n";
         echo "  - describe: {$responseData['describe']}\n";
+        if (isset($responseData['partnerId'])) {
+            echo "  - partnerId: {$responseData['partnerId']}\n";
+        }
+        if (isset($responseData['partnerDealId'])) {
+            echo "  - partnerDealId: {$responseData['partnerDealId']}\n";
+        }
         if (isset($responseData['body']) && is_array($responseData['body'])) {
             echo "  - body数量: " . count($responseData['body']) . "\n";
             if (count($responseData['body']) > 0) {
@@ -217,14 +241,28 @@ try {
     ]);
 
     $asyncResponse = $method->invoke($controller, $asyncRequest);
-    $asyncResponseData = json_decode($asyncResponse->getContent(), true);
-
-    if ($asyncResponseData['code'] == 999) {
-        echo "✅ 异步模式响应正确 (code=999)\n";
-        echo "  - describe: {$asyncResponseData['describe']}\n";
-        echo "  ⚠️  注意: 异步推送任务需要手动实现\n";
-    } else {
-        echo "⚠️  异步模式响应异常: code={$asyncResponseData['code']}\n";
+    
+    // 获取响应体（现在是加密的Base64字符串）
+    $asyncEncryptedBody = $asyncResponse->getContent();
+    
+    // 解密响应体
+    try {
+        $asyncDecryptedBody = $client->decryptBody($asyncEncryptedBody);
+        $asyncResponseData = json_decode($asyncDecryptedBody, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            echo "⚠️  异步模式响应解密后JSON解析失败: " . json_last_error_msg() . "\n";
+        } else {
+            if ($asyncResponseData['code'] == 999) {
+                echo "✅ 异步模式响应正确 (code=999)\n";
+                echo "  - describe: {$asyncResponseData['describe']}\n";
+                echo "  ⚠️  注意: 异步推送任务需要手动实现\n";
+            } else {
+                echo "⚠️  异步模式响应异常: code={$asyncResponseData['code']}\n";
+            }
+        }
+    } catch (\Exception $e) {
+        echo "⚠️  异步模式响应解密失败: " . $e->getMessage() . "\n";
     }
 } catch (\Exception $e) {
     echo "❌ 异步模式测试异常: " . $e->getMessage() . "\n";

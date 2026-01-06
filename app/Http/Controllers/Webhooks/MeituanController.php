@@ -16,6 +16,7 @@ use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -181,62 +182,140 @@ class MeituanController extends Controller
     }
 
     /**
-     * 返回错误响应
+     * 返回错误响应（全局加密）
+     * 美团要求全局加密，整个响应体都需要加密
      */
-    protected function errorResponse(int $code, string $message): JsonResponse
+    protected function errorResponse(int $code, string $message, ?int $partnerId = null): Response
     {
         $client = $this->getClient();
-        $encryptedBody = '';
-
-        if ($client) {
-            try {
-                $body = [
-                    'code' => $code,
-                    'describe' => $message,
-                ];
-                $encryptedBody = $client->encryptBody(json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-            } catch (\Exception $e) {
-                Log::error('美团响应加密失败', [
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        
+        if (!$client) {
+            // 如果没有客户端，返回未加密的响应（仅用于调试）
+            Log::warning('美团响应：客户端不存在，返回未加密响应', [
+                'code' => $code,
+                'message' => $message,
+            ]);
+            $responseData = [
+                'code' => $code,
+                'describe' => $message,
+            ];
+            return response(json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 200)
+                ->header('Content-Type', 'application/json; charset=utf-8');
         }
 
-        return response()->json([
-            'code' => $code,
-            'describe' => $message,
-            'body' => $encryptedBody,
-        ]);
+        try {
+            // 构建完整的响应数据
+            $responseData = [
+                'code' => $code,
+                'describe' => $message,
+            ];
+            
+            // 如果有partnerId，添加到响应中
+            if ($partnerId !== null) {
+                $responseData['partnerId'] = $partnerId;
+            }
+
+            // 将整个响应体JSON进行AES加密
+            $jsonString = json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $encryptedBody = $client->encryptBody($jsonString);
+
+            // 返回加密后的Base64字符串（作为响应体）
+            // 注意：响应体是字符串，不是JSON对象
+            return response($encryptedBody, 200)
+                ->header('Content-Type', 'application/json; charset=utf-8');
+        } catch (\Exception $e) {
+            Log::error('美团响应加密失败', [
+                'error' => $e->getMessage(),
+                'code' => $code,
+                'message' => $message,
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            // 加密失败时，返回未加密的响应（仅用于调试）
+            $responseData = [
+                'code' => $code,
+                'describe' => $message,
+                'error' => '响应加密失败',
+            ];
+            return response(json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 200)
+                ->header('Content-Type', 'application/json; charset=utf-8');
+        }
     }
 
     /**
-     * 返回成功响应
+     * 返回成功响应（全局加密）
+     * 美团要求全局加密，整个响应体都需要加密
+     * 
+     * @param array $body 响应体数据
+     * @param int|null $partnerId 合作方ID（可选，如果提供会添加到响应中）
+     * @param string|null $partnerDealId 产品ID（可选，如果提供会添加到响应中）
+     * @return \Illuminate\Http\Response
      */
-    protected function successResponse(array $body = []): JsonResponse
+    protected function successResponse(array $body = [], ?int $partnerId = null, ?string $partnerDealId = null): Response
     {
         $client = $this->getClient();
-        $encryptedBody = '';
-
-        if ($client) {
-            try {
-                // 美团响应格式：body字段是加密的JSON字符串
-                // 如果body为空，返回空字符串
-                if (!empty($body)) {
-                    $encryptedBody = $client->encryptBody(json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-                }
-            } catch (\Exception $e) {
-                Log::error('美团响应加密失败', [
-                    'error' => $e->getMessage(),
-                    'body' => $body,
-                ]);
-            }
+        
+        if (!$client) {
+            // 如果没有客户端，返回未加密的响应（仅用于调试）
+            Log::warning('美团响应：客户端不存在，返回未加密响应', [
+                'body' => $body,
+            ]);
+            $responseData = [
+                'code' => 200,
+                'describe' => 'success',
+                'body' => $body,
+            ];
+            return response(json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 200)
+                ->header('Content-Type', 'application/json; charset=utf-8');
         }
 
-        return response()->json([
-            'code' => 200,
-            'describe' => 'success',
-            'body' => $encryptedBody,
-        ]);
+        try {
+            // 构建完整的响应数据
+            $responseData = [
+                'code' => 200,
+                'describe' => 'success',
+            ];
+            
+            // 如果有partnerId，添加到响应中
+            if ($partnerId !== null) {
+                $responseData['partnerId'] = $partnerId;
+            }
+            
+            // 如果有partnerDealId，添加到响应中
+            if ($partnerDealId !== null) {
+                $responseData['partnerDealId'] = $partnerDealId;
+            }
+            
+            // 添加body字段
+            if (!empty($body)) {
+                $responseData['body'] = $body;
+            }
+
+            // 将整个响应体JSON进行AES加密
+            $jsonString = json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $encryptedBody = $client->encryptBody($jsonString);
+
+            // 返回加密后的Base64字符串（作为响应体）
+            // 注意：响应体是字符串，不是JSON对象
+            return response($encryptedBody, 200)
+                ->header('Content-Type', 'application/json; charset=utf-8');
+        } catch (\Exception $e) {
+            Log::error('美团响应加密失败', [
+                'error' => $e->getMessage(),
+                'body' => $body,
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            // 加密失败时，返回未加密的响应（仅用于调试）
+            $responseData = [
+                'code' => 200,
+                'describe' => 'success',
+                'body' => $body,
+                'error' => '响应加密失败',
+            ];
+            return response(json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 200)
+                ->header('Content-Type', 'application/json; charset=utf-8');
+        }
     }
 
     /**
@@ -1075,25 +1154,28 @@ class MeituanController extends Controller
     /**
      * 处理拉取多层价格日历V2（美团主动拉取）
      */
-    public function handleProductLevelPriceCalendarV2(Request $request): JsonResponse
+    public function handleProductLevelPriceCalendarV2(Request $request): Response
     {
         try {
             $client = $this->getClient();
             if (!$client) {
-                return $this->errorResponse(500, '美团配置不存在');
+                return $this->errorResponse(500, '美团配置不存在', null);
             }
+
+            // 获取partnerId（用于错误响应）
+            $partnerId = $client->getPartnerId();
 
             // 解密请求体
             $encryptedBody = $request->input('body', '');
             if (empty($encryptedBody)) {
-                return $this->errorResponse(400, '请求体为空');
+                return $this->errorResponse(400, '请求体为空', $partnerId);
             }
 
             $decryptedBody = $client->decryptBody($encryptedBody);
             $data = json_decode($decryptedBody, true);
 
             if (json_last_error() !== JSON_ERROR_NONE) {
-                return $this->errorResponse(400, '请求数据格式错误');
+                return $this->errorResponse(400, '请求数据格式错误', $partnerId);
             }
 
             $body = $data['body'] ?? $data;
@@ -1103,22 +1185,22 @@ class MeituanController extends Controller
             $asyncType = intval($body['asyncType'] ?? 0); // 0=同步，1=异步
 
             if (empty($partnerDealId) || empty($startTime) || empty($endTime)) {
-                return $this->errorResponse(400, '参数不完整');
+                return $this->errorResponse(400, '参数不完整', $partnerId);
             }
 
             // 查找产品
             $product = \App\Models\Product::where('code', $partnerDealId)->first();
             if (!$product) {
-                return $this->errorResponse(505, '产品不存在');
+                return $this->errorResponse(505, '产品不存在', $partnerId);
             }
-
+            
             // 如果异步拉取，返回code=999，然后通过"多层价格日历变化通知V2"推送
             if ($asyncType === 1) {
                 // TODO: 触发异步推送任务
                 return $this->successResponse([
                     'code' => 999,
                     'describe' => '异步拉取，将通过通知接口推送',
-                ]);
+                ], $partnerId, $partnerDealId);
             }
 
             // 同步拉取：直接返回价格日历数据
@@ -1202,14 +1284,16 @@ class MeituanController extends Controller
                 ];
             }
 
-            return $this->successResponse($responseBody);
+            // 返回成功响应，传递 partnerId 和 partnerDealId
+            return $this->successResponse($responseBody, $partnerId, $partnerDealId);
         } catch (\Exception $e) {
             Log::error('美团拉取多层价格日历V2失败', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->errorResponse(599, '系统处理异常');
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(599, '系统处理异常', $partnerId);
         }
     }
 }
