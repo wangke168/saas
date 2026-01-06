@@ -14,7 +14,6 @@ use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\OrderOperationService;
 use App\Services\InventoryService;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -1088,8 +1087,6 @@ class MeituanController extends Controller
             // 幂等性检查：如果订单状态已经是CANCEL_APPROVED，直接返回成功
             if ($order->status === OrderStatus::CANCEL_APPROVED) {
                 return $this->successResponse([
-                    'code' => 200,
-                    'describe' => 'success',
                     'orderId' => intval($orderId),
                 ], $partnerId);
             }
@@ -1270,7 +1267,7 @@ class MeituanController extends Controller
     /**
      * 处理拉取价格日历（美团主动拉取）
      */
-    public function handleProductPriceCalendar(Request $request): JsonResponse
+    public function handleProductPriceCalendar(Request $request): Response
     {
         try {
             $client = $this->getClient();
