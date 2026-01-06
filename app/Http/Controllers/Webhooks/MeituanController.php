@@ -1294,8 +1294,8 @@ class MeituanController extends Controller
                 $responseBody[] = [
                     'partnerPrimaryKey' => $partnerPrimaryKey,
                     'skuInfo' => [
-                        'startTime' => null,
-                        'endTime' => null,
+                        'startTime' => '14:00',
+                        'endTime' => '16:00',
                         'levelInfoList' => [
                             [
                                 'levelNo' => 1,

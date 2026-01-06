@@ -149,8 +149,8 @@ class MeituanService
             $body[] = [
                 'partnerPrimaryKey' => $partnerPrimaryKey,
                 'skuInfo' => [
-                    'startTime' => null, // 不需要场次时间
-                    'endTime' => null,   // 不需要场次时间
+                    'startTime' => '14:00',
+                    'endTime' => '16:00',
                     'levelInfoList' => [
                         [
                             'levelNo' => 1,
