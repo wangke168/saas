@@ -171,6 +171,33 @@
                         <el-radio :label="0">禁用</el-radio>
                     </el-radio-group>
                 </el-form-item>
+                <el-form-item label="销售开始日期" prop="sale_start_date">
+                    <el-date-picker
+                        v-model="form.sale_start_date"
+                        type="date"
+                        placeholder="选择销售开始日期（可选）"
+                        format="YYYY-MM-DD"
+                        value-format="YYYY-MM-DD"
+                        style="width: 100%"
+                    />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        不设置表示不限制开始日期
+                    </div>
+                </el-form-item>
+                <el-form-item label="销售结束日期" prop="sale_end_date">
+                    <el-date-picker
+                        v-model="form.sale_end_date"
+                        type="date"
+                        placeholder="选择销售结束日期（可选）"
+                        format="YYYY-MM-DD"
+                        value-format="YYYY-MM-DD"
+                        :disabled-date="(date) => form.sale_start_date && date < new Date(form.sale_start_date)"
+                        style="width: 100%"
+                    />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        不设置表示不限制结束日期
+                    </div>
+                </el-form-item>
 
                 <!-- 关联门票 -->
                 <el-form-item label="关联门票" prop="bundle_items">
@@ -317,6 +344,8 @@ const form = ref({
     stay_days: 1,
     description: '',
     status: 1,
+    sale_start_date: null,
+    sale_end_date: null,
     bundle_items: [],
     hotel_room_types: [],
 });
@@ -374,6 +403,26 @@ const rules = {
                     } else {
                         callback();
                     }
+                }
+            },
+            trigger: 'change'
+        }
+    ],
+    sale_start_date: [
+        { type: 'date', message: '请选择有效的日期', trigger: 'change' }
+    ],
+    sale_end_date: [
+        { type: 'date', message: '请选择有效的日期', trigger: 'change' },
+        {
+            validator: (rule, value, callback) => {
+                if (value && form.value.sale_start_date) {
+                    if (new Date(value) < new Date(form.value.sale_start_date)) {
+                        callback(new Error('销售结束日期不能早于销售开始日期'));
+                    } else {
+                        callback();
+                    }
+                } else {
+                    callback();
                 }
             },
             trigger: 'change'
@@ -464,6 +513,8 @@ const handleEdit = async (row) => {
             stay_days: product.stay_days || 1,
             description: product.description || '',
             status: product.status,
+            sale_start_date: product.sale_start_date || null,
+            sale_end_date: product.sale_end_date || null,
             bundle_items: (product.bundle_items || []).map(item => ({
                 ticket_id: item.ticket_id,
                 quantity: item.quantity || 1,
@@ -643,6 +694,8 @@ const handleSubmit = async () => {
             stay_days: form.value.stay_days,
             description: form.value.description || '',
             status: form.value.status,
+            sale_start_date: form.value.sale_start_date || null,
+            sale_end_date: form.value.sale_end_date || null,
             bundle_items: form.value.bundle_items.map(item => ({
                 ticket_id: item.ticket_id,
                 quantity: item.quantity || 1,
@@ -682,6 +735,8 @@ const resetForm = () => {
         stay_days: 1,
         description: '',
         status: 1,
+        sale_start_date: null,
+        sale_end_date: null,
         bundle_items: [],
         hotel_room_types: [],
     };

@@ -44,9 +44,21 @@ class PkgProductPriceService
                 return;
             }
 
-            // 计算未来60天的价格
-            $startDate = Carbon::today();
-            $endDate = Carbon::today()->addDays(60);
+            // 获取有效的销售日期范围（考虑销售开始和结束日期）
+            $dateRange = $product->getEffectiveSaleDateRange();
+            
+            if (!$dateRange['start'] || !$dateRange['end']) {
+                Log::warning('打包产品销售日期范围无效，跳过价格计算', [
+                    'product_id' => $product->id,
+                    'sale_start_date' => $product->sale_start_date,
+                    'sale_end_date' => $product->sale_end_date,
+                ]);
+                DB::rollBack();
+                return;
+            }
+
+            $startDate = $dateRange['start'];
+            $endDate = $dateRange['end'];
             $pricesToInsert = [];
 
             // 遍历每个房型组合

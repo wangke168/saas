@@ -5,7 +5,7 @@ namespace App\Jobs\Pkg;
 use App\Enums\OtaPlatform;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Models\Pkg\PkgProduct;
-use App\Services\OTA\PkgProductPriceService;
+use App\Services\Pkg\PkgProductOtaSyncService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -44,7 +44,7 @@ class SyncPkgProductPriceJob implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(PkgProductPriceService $priceService): void
+    public function handle(PkgProductOtaSyncService $syncService): void
     {
         try {
             // 加载数据
@@ -82,31 +82,49 @@ class SyncPkgProductPriceJob implements ShouldQueue
                 'ota_platform_code' => $platform->code->value,
             ]);
 
-            // 根据平台类型选择推送方法
-            $result = null;
-            if ($platform->code->value === OtaPlatform::CTRIP->value) {
-                $result = $priceService->syncToCtrip(
-                    $pkgProduct,
-                    $this->hotelId,
-                    $this->roomTypeId,
-                    $this->dates
-                );
-            } elseif ($platform->code->value === OtaPlatform::MEITUAN->value) {
-                $startDate = $this->dates ? (min($this->dates) ?? null) : null;
-                $endDate = $this->dates ? (max($this->dates) ?? null) : null;
-                $result = $priceService->syncToMeituan(
-                    $pkgProduct,
-                    $this->hotelId,
-                    $this->roomTypeId,
-                    $startDate,
-                    $endDate
-                );
-            } else {
-                Log::warning('打包产品价格推送任务：不支持的平台', [
-                    'ota_platform_id' => $this->otaPlatformId,
-                    'platform_code' => $platform->code->value,
+            // 加载酒店和房型
+            $hotel = \App\Models\Res\ResHotel::find($this->hotelId);
+            $roomType = \App\Models\Res\ResRoomType::find($this->roomTypeId);
+            
+            if (!$hotel || !$roomType) {
+                Log::warning('打包产品价格推送任务：酒店或房型不存在', [
+                    'hotel_id' => $this->hotelId,
+                    'room_type_id' => $this->roomTypeId,
                 ]);
                 return;
+            }
+            
+            // 使用新的同步服务推送单个房型的价格
+            // 注意：syncProductPricesToOta 会推送所有房型，但我们可以通过检查结果来确认目标房型是否成功
+            $result = $syncService->syncProductPricesToOta(
+                $pkgProduct,
+                $platform->code->value,
+                $this->dates
+            );
+            
+            // 从结果中提取目标房型的推送结果
+            $targetResult = null;
+            if (isset($result['details']) && is_array($result['details'])) {
+                $targetResult = collect($result['details'])->first(function ($detail) use ($hotel, $roomType) {
+                    return ($detail['hotel'] ?? '') === $hotel->name
+                        && ($detail['room_type'] ?? '') === $roomType->name;
+                });
+            }
+            
+            // 如果找到了目标房型的结果，使用它；否则使用整体结果
+            if ($targetResult) {
+                $result = $targetResult;
+            } else {
+                // 如果没有找到目标房型，说明该房型可能不在产品的关联列表中
+                Log::warning('打包产品价格推送任务：指定的房型不在产品关联列表中', [
+                    'pkg_product_id' => $this->pkgProductId,
+                    'hotel_id' => $this->hotelId,
+                    'room_type_id' => $this->roomTypeId,
+                ]);
+                $result = [
+                    'success' => false,
+                    'message' => '指定的房型不在产品关联列表中',
+                ];
             }
 
             if ($result && ($result['success'] ?? false)) {

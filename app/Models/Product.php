@@ -21,29 +21,37 @@ class Product extends Model
         parent::boot();
 
         static::creating(function ($product) {
-            // 如果 code 为空，自动生成唯一编码
-            if (empty($product->code)) {
-                $product->code = static::generateUniqueCode();
-            }
-            
             // 验证软件服务商必填
             if (empty($product->software_provider_id)) {
                 throw new \Exception('产品必须选择软件服务商');
             }
         });
+
+        static::created(function ($product) {
+            // 如果 code 为空，自动生成唯一编码（基于ID的36进制）
+            if (empty($product->code)) {
+                $product->code = static::generateUniqueCode($product->id);
+                // 使用 saveQuietly 避免触发事件循环
+                $product->saveQuietly();
+            }
+        });
     }
 
     /**
-     * 生成唯一的产品编码
-     * 格式：PRD + YYYYMMDD + 6位随机字符串（大写字母和数字）
+     * 生成唯一的产品编码（基于ID的36进制转换）
+     * 格式：6位36进制编码（0-9, A-Z），左侧补0
+     * 示例：ID=1 -> 000001, ID=100 -> 00002S, ID=1000 -> 000RS
+     * 
+     * @param int $id 产品ID
+     * @return string 6位编码
      */
-    public static function generateUniqueCode(): string
+    public static function generateUniqueCode(int $id): string
     {
-        do {
-            $code = 'PRD' . date('Ymd') . strtoupper(substr(md5(uniqid(rand(), true)), 0, 6));
-        } while (static::where('code', $code)->exists());
-
-        return $code;
+        // 将ID转换为36进制（0-9, A-Z）
+        $code = strtoupper(base_convert($id, 10, 36));
+        
+        // 左侧补0至6位
+        return str_pad($code, 6, '0', STR_PAD_LEFT);
     }
 
     protected $fillable = [

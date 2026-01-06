@@ -12,12 +12,6 @@ use Illuminate\Support\Facades\Log;
 
 class PkgProductPriceController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware('auth:sanctum');
-        // 权限控制：所有方法都需要操作员或管理员权限
-        $this->middleware('role:admin,operator');
-    }
 
     /**
      * 预计算产品价格
@@ -74,14 +68,33 @@ class PkgProductPriceController extends Controller
     {
         $validated = $request->validate([
             'platform_code' => 'required|string|in:ctrip,meituan',
+            'dates' => 'nullable|array',
+            'dates.*' => 'date_format:Y-m-d',
         ]);
 
-        // TODO: 实现OTA价格推送功能
-        // 这将在下一个任务中实现（PkgProductOtaSyncService）
+        try {
+            // 异步执行价格推送
+            SyncProductPricesToOtaJob::dispatch(
+                $pkgProduct->id,
+                $validated['platform_code'],
+                $validated['dates'] ?? null
+            );
 
-        return response()->json([
-            'message' => 'OTA价格推送功能待实现',
-        ], 501);
+            return response()->json([
+                'message' => '价格推送到OTA任务已提交，正在后台处理',
+                'platform' => $validated['platform_code'],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('提交价格推送任务失败', [
+                'product_id' => $pkgProduct->id,
+                'platform' => $validated['platform_code'],
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => '提交价格推送任务失败: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**
@@ -98,12 +111,19 @@ class PkgProductPriceController extends Controller
 
         $query = $pkgProduct->dailyPrices()->with(['hotel', 'roomType']);
 
+        // 如果没有指定日期范围，默认查询未来60天
         if (isset($validated['start_date'])) {
             $query->where('biz_date', '>=', $validated['start_date']);
+        } else {
+            // 默认从今天开始
+            $query->where('biz_date', '>=', now()->format('Y-m-d'));
         }
 
         if (isset($validated['end_date'])) {
             $query->where('biz_date', '<=', $validated['end_date']);
+        } else {
+            // 默认查询未来60天
+            $query->where('biz_date', '<=', now()->addDays(60)->format('Y-m-d'));
         }
 
         if (isset($validated['hotel_id'])) {
@@ -115,6 +135,13 @@ class PkgProductPriceController extends Controller
         }
 
         $prices = $query->orderBy('biz_date')->orderBy('hotel_id')->orderBy('room_type_id')->get();
+
+        // 确保日期格式正确序列化
+        $prices->each(function ($price) {
+            if ($price->biz_date) {
+                $price->biz_date = $price->biz_date->format('Y-m-d');
+            }
+        });
 
         return response()->json([
             'data' => $prices,

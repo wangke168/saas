@@ -86,47 +86,61 @@ class MeituanController extends Controller
      * 美团订单回调接口（统一入口）
      * 根据请求路径或参数判断具体接口类型
      */
-    public function handleOrder(Request $request): JsonResponse
+    public function handleOrder(Request $request): Response
     {
         try {
+            // 记录美团原始请求，便于排查请求格式和加密问题
+            Log::info('美团订单回调原始请求', [
+                'headers' => [
+                    'PartnerId' => $request->header('PartnerId'),
+                    'Authorization' => $request->header('Authorization'),
+                    'Date' => $request->header('Date'),
+                    'AppKey' => $request->header('AppKey'),
+                    'X-Encryption-Status' => $request->header('X-Encryption-Status'),
+                ],
+                'request_all' => $request->all(),
+                'raw_body' => $request->getContent(),
+                'path' => $request->path(),
+            ]);
+
             $client = $this->getClient();
             if (!$client) {
-                return $this->errorResponse(500, '美团配置不存在');
+                return $this->errorResponse(500, '美团配置不存在', null);
             }
 
-            // 美团请求格式：请求体是JSON，包含body字段（加密的字符串）
-            $requestData = $request->all();
-            $encryptedBody = $requestData['body'] ?? '';
+            // 获取partnerId（用于错误响应）
+            $partnerId = $client->getPartnerId();
 
-            if (empty($encryptedBody)) {
-                Log::error('美团订单回调：请求体为空', [
-                    'request_data' => $requestData,
-                ]);
-                return $this->errorResponse(400, '请求体为空');
+            // 获取原始请求体（美团发送的是加密的Base64字符串）
+            $rawBody = $request->getContent();
+            if (empty($rawBody)) {
+                Log::warning('美团订单回调：原始请求体为空');
+                return $this->errorResponse(400, '请求体为空', $partnerId);
             }
 
-            // 解密body字段
+            // 解密请求体
             try {
-                $decryptedBody = $client->decryptBody($encryptedBody);
-                $data = json_decode($decryptedBody, true);
-
-                if (json_last_error() !== JSON_ERROR_NONE) {
-                    Log::error('美团订单回调：JSON解析失败', [
-                        'error' => json_last_error_msg(),
-                        'decrypted_body' => $decryptedBody,
-                    ]);
-                    return $this->errorResponse(400, '请求数据格式错误');
-                }
-
+                $decryptedBody = $client->decryptBody($rawBody);
                 Log::info('美团订单回调解密后数据', [
-                    'data' => $data,
+                    'decrypted_body' => $decryptedBody,
                 ]);
             } catch (\Exception $e) {
                 Log::error('美团订单回调：解密失败', [
                     'error' => $e->getMessage(),
+                    'raw_body_preview' => substr($rawBody, 0, 100),
                     'trace' => $e->getTraceAsString(),
                 ]);
-                return $this->errorResponse(400, '请求数据解密失败');
+                return $this->errorResponse(400, '请求数据解密失败', $partnerId);
+            }
+
+            $data = json_decode($decryptedBody, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                Log::error('美团订单回调：JSON解析失败', [
+                    'error' => json_last_error_msg(),
+                    'decrypted_body' => $decryptedBody,
+                ]);
+                return $this->errorResponse(400, '请求数据格式错误', $partnerId);
             }
 
             // 根据请求路径判断接口类型
@@ -169,7 +183,7 @@ class MeituanController extends Controller
                         'path' => $path,
                         'data' => $data,
                     ]);
-                    return $this->errorResponse(400, '未知接口类型');
+                    return $this->errorResponse(400, '未知接口类型', $partnerId);
                 }
             }
         } catch (\Exception $e) {
@@ -177,7 +191,8 @@ class MeituanController extends Controller
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            return $this->errorResponse(500, '系统处理异常');
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(500, '系统处理异常', $partnerId);
         }
     }
 
@@ -322,15 +337,19 @@ class MeituanController extends Controller
      * 处理订单创建V2（对应携程的CreatePreOrder）
      * 需要锁定库存
      */
-    protected function handleOrderCreateV2(array $data): JsonResponse
+    protected function handleOrderCreateV2(array $data): Response
     {
         try {
+            // 获取partnerId（用于错误响应）
+            $client = $this->getClient();
+            $partnerId = $client ? $client->getPartnerId() : null;
+
             DB::beginTransaction();
 
             $otaPlatform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
             if (!$otaPlatform) {
                 DB::rollBack();
-                return $this->errorResponse(500, 'OTA平台配置不存在');
+                return $this->errorResponse(500, 'OTA平台配置不存在', $partnerId);
             }
 
             // 解析请求数据
@@ -347,17 +366,17 @@ class MeituanController extends Controller
             // 验证必要参数
             if (empty($orderId)) {
                 DB::rollBack();
-                return $this->errorResponse(400, '订单号(orderId)为空');
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
             if (empty($partnerDealId)) {
                 DB::rollBack();
-                return $this->errorResponse(400, '产品编码(partnerDealId)为空');
+                return $this->errorResponse(400, '产品编码(partnerDealId)为空', $partnerId);
             }
 
             if (empty($useDate)) {
                 DB::rollBack();
-                return $this->errorResponse(400, '使用日期(useDate)为空');
+                return $this->errorResponse(400, '使用日期(useDate)为空', $partnerId);
             }
 
             // 根据产品编码查找产品
@@ -367,7 +386,7 @@ class MeituanController extends Controller
                 Log::error('美团订单创建V2：产品不存在', [
                     'partner_deal_id' => $partnerDealId,
                 ]);
-                return $this->errorResponse(505, '产品不存在');
+                return $this->errorResponse(505, '产品不存在', $partnerId);
             }
 
             // 查找产品关联的酒店和房型（通过价格表）
@@ -378,7 +397,7 @@ class MeituanController extends Controller
                     'product_id' => $product->id,
                     'use_date' => $useDate,
                 ]);
-                return $this->errorResponse(400, '指定日期没有价格');
+                return $this->errorResponse(400, '指定日期没有价格', $partnerId);
             }
 
             $roomType = $price->roomType;
@@ -389,7 +408,7 @@ class MeituanController extends Controller
                 Log::error('美团订单创建V2：产品未关联酒店或房型', [
                     'product_id' => $product->id,
                 ]);
-                return $this->errorResponse(400, '产品未关联酒店或房型');
+                return $this->errorResponse(400, '产品未关联酒店或房型', $partnerId);
             }
 
             // 检查库存（考虑入住天数）
@@ -400,7 +419,7 @@ class MeituanController extends Controller
             $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
             if (!$inventoryCheck['success']) {
                 DB::rollBack();
-                return $this->errorResponse(503, $inventoryCheck['message']);
+                return $this->errorResponse(503, $inventoryCheck['message'], $partnerId);
             }
 
             // 检查是否已存在订单（防止重复）
@@ -418,7 +437,7 @@ class MeituanController extends Controller
                 return $this->successResponse([
                     'orderId' => intval($orderId),
                     'partnerOrderId' => $existingOrder->order_no,
-                ]);
+                ], $partnerId);
             }
 
             // 计算价格
@@ -491,7 +510,7 @@ class MeituanController extends Controller
                     'order_id' => $order->id,
                     'error' => $lockResult['message'],
                 ]);
-                return $this->errorResponse(503, '库存锁定失败：' . $lockResult['message']);
+                return $this->errorResponse(503, '库存锁定失败：' . $lockResult['message'], $partnerId);
             }
 
             DB::commit();
@@ -505,7 +524,7 @@ class MeituanController extends Controller
             return $this->successResponse([
                 'orderId' => intval($orderId),
                 'partnerOrderId' => $order->order_no,
-            ]);
+            ], $partnerId);
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -515,38 +534,43 @@ class MeituanController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->errorResponse(599, '系统处理异常：' . $e->getMessage());
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(599, '系统处理异常：' . $e->getMessage(), $partnerId);
         }
     }
 
     /**
      * 处理订单出票（对应携程的PayPreOrder）
      */
-    protected function handleOrderPay(array $data): JsonResponse
+    protected function handleOrderPay(array $data): Response
     {
         try {
+            // 获取partnerId（用于错误响应）
+            $client = $this->getClient();
+            $partnerId = $client ? $client->getPartnerId() : null;
+
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
             $partnerOrderId = $body['partnerOrderId'] ?? '';
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空');
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在');
+                return $this->errorResponse(400, '订单不存在', $partnerId);
             }
 
             // 如果订单已经是确认状态，直接返回成功（幂等性）
             if ($order->status === OrderStatus::CONFIRMED) {
-                return $this->buildOrderPaySuccessResponse($order, $orderId);
+                return $this->buildOrderPaySuccessResponse($order, $orderId, $partnerId);
             }
 
             // 检查订单状态（必须是PAID_PENDING）
             if ($order->status !== OrderStatus::PAID_PENDING) {
-                return $this->errorResponse(506, '订单状态不正确，当前状态：' . $order->status->label());
+                return $this->errorResponse(506, '订单状态不正确，当前状态：' . $order->status->label(), $partnerId);
             }
 
             // 更新支付时间
@@ -581,7 +605,7 @@ class MeituanController extends Controller
                 'describe' => '出票中',
                 'orderId' => intval($orderId),
                 'partnerOrderId' => $order->order_no,
-            ]);
+            ], $partnerId);
 
         } catch (\Exception $e) {
             Log::error('美团订单出票处理失败', [
@@ -590,14 +614,15 @@ class MeituanController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->errorResponse(599, '系统处理异常');
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(599, '系统处理异常', $partnerId);
         }
     }
 
     /**
      * 构建订单出票成功响应
      */
-    protected function buildOrderPaySuccessResponse(Order $order, string $orderId): JsonResponse
+    protected function buildOrderPaySuccessResponse(Order $order, string $orderId, ?int $partnerId = null): Response
     {
         // 构建响应数据
         $responseBody = [
@@ -626,20 +651,24 @@ class MeituanController extends Controller
             }
         }
 
-        return $this->successResponse($responseBody);
+        return $this->successResponse($responseBody, $partnerId);
     }
 
     /**
      * 处理订单查询（对应携程的QueryOrder）
      */
-    protected function handleOrderQuery(array $data): JsonResponse
+    protected function handleOrderQuery(array $data): Response
     {
         try {
+            // 获取partnerId（用于错误响应）
+            $client = $this->getClient();
+            $partnerId = $client ? $client->getPartnerId() : null;
+
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空');
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)
@@ -647,7 +676,7 @@ class MeituanController extends Controller
                 ->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在');
+                return $this->errorResponse(400, '订单不存在', $partnerId);
             }
 
             // 映射订单状态到美团状态
@@ -677,7 +706,7 @@ class MeituanController extends Controller
                 $responseBody['refundedQuantity'] = $order->room_count;
             }
 
-            return $this->successResponse($responseBody);
+            return $this->successResponse($responseBody, $partnerId);
         } catch (\Exception $e) {
             Log::error('美团订单查询失败', [
                 'error' => $e->getMessage(),
@@ -685,7 +714,8 @@ class MeituanController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->errorResponse(599, '系统处理异常');
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(599, '系统处理异常', $partnerId);
         }
     }
 
@@ -708,41 +738,45 @@ class MeituanController extends Controller
     /**
      * 处理订单退款（对应携程的CancelOrder）
      */
-    protected function handleOrderRefund(array $data): JsonResponse
+    protected function handleOrderRefund(array $data): Response
     {
         try {
+            // 获取partnerId（用于错误响应）
+            $client = $this->getClient();
+            $partnerId = $client ? $client->getPartnerId() : null;
+
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
             $refundQuantity = intval($body['refundQuantity'] ?? 0);
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空');
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在');
+                return $this->errorResponse(400, '订单不存在', $partnerId);
             }
 
             // 检查订单状态（必须是PAID_PENDING或CONFIRMED）
             if (!in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMED])) {
-                return $this->errorResponse(506, '订单状态不允许退款，当前状态：' . $order->status->label());
+                return $this->errorResponse(506, '订单状态不允许退款，当前状态：' . $order->status->label(), $partnerId);
             }
 
             // 如果订单已使用，不允许退款
             if ($order->status === OrderStatus::VERIFIED) {
-                return $this->errorResponse(506, '订单已使用，不允许退款');
+                return $this->errorResponse(506, '订单已使用，不允许退款', $partnerId);
             }
 
             // 如果订单已过期，不允许退款
             if ($order->check_in_date < now()->toDateString()) {
-                return $this->errorResponse(506, '订单已过期，不允许退款');
+                return $this->errorResponse(506, '订单已过期，不允许退款', $partnerId);
             }
 
             // 验证退款数量
             if ($refundQuantity <= 0 || $refundQuantity > $order->room_count) {
-                return $this->errorResponse(400, '退款数量不正确');
+                return $this->errorResponse(400, '退款数量不正确', $partnerId);
             }
 
             // 检查是否系统直连
@@ -772,7 +806,7 @@ class MeituanController extends Controller
                 'describe' => '退款审批中',
                 'orderId' => intval($orderId),
                 'partnerOrderId' => $order->order_no,
-            ]);
+            ], $partnerId);
 
         } catch (\Exception $e) {
             Log::error('美团订单退款处理失败', [
@@ -781,28 +815,33 @@ class MeituanController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->errorResponse(599, '系统处理异常');
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(599, '系统处理异常', $partnerId);
         }
     }
 
     /**
      * 处理已退款消息（新功能）
      */
-    protected function handleOrderRefunded(array $data): JsonResponse
+    protected function handleOrderRefunded(array $data): Response
     {
         try {
+            // 获取partnerId（用于错误响应）
+            $client = $this->getClient();
+            $partnerId = $client ? $client->getPartnerId() : null;
+
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
             $refundSerialNo = $body['refundSerialNo'] ?? '';
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空');
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在');
+                return $this->errorResponse(400, '订单不存在', $partnerId);
             }
 
             // 幂等性检查：如果订单已存在退款流水号且与请求中的相同，直接返回成功
@@ -811,7 +850,7 @@ class MeituanController extends Controller
                     'code' => 200,
                     'describe' => 'success',
                     'orderId' => intval($orderId),
-                ]);
+                ], $partnerId);
             }
 
             // 更新订单状态为CANCEL_APPROVED
@@ -837,7 +876,7 @@ class MeituanController extends Controller
                 'code' => 200,
                 'describe' => 'success',
                 'orderId' => intval($orderId),
-            ]);
+            ], $partnerId);
 
         } catch (\Exception $e) {
             Log::error('美团已退款消息处理失败', [
@@ -846,28 +885,33 @@ class MeituanController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->errorResponse(599, '系统处理异常');
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(599, '系统处理异常', $partnerId);
         }
     }
 
     /**
      * 处理订单关闭消息（新功能）
      */
-    protected function handleOrderClose(array $data): JsonResponse
+    protected function handleOrderClose(array $data): Response
     {
         try {
+            // 获取partnerId（用于错误响应）
+            $client = $this->getClient();
+            $partnerId = $client ? $client->getPartnerId() : null;
+
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
             $closeType = intval($body['closeType'] ?? 0);
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空');
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在');
+                return $this->errorResponse(400, '订单不存在', $partnerId);
             }
 
             // 幂等性检查：如果订单状态已经是CANCEL_APPROVED，直接返回成功
@@ -876,7 +920,7 @@ class MeituanController extends Controller
                     'code' => 200,
                     'describe' => 'success',
                     'orderId' => intval($orderId),
-                ]);
+                ], $partnerId);
             }
 
             // 更新订单状态为CANCEL_APPROVED
@@ -914,7 +958,7 @@ class MeituanController extends Controller
                 'code' => 200,
                 'describe' => 'success',
                 'orderId' => intval($orderId),
-            ]);
+            ], $partnerId);
 
         } catch (\Exception $e) {
             Log::error('美团订单关闭消息处理失败', [
@@ -923,7 +967,8 @@ class MeituanController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return $this->errorResponse(599, '系统处理异常');
+            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            return $this->errorResponse(599, '系统处理异常', $partnerId);
         }
     }
 

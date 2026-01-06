@@ -19,6 +19,12 @@
                             {{ product.status === 1 ? '启用' : '禁用' }}
                         </el-tag>
                     </el-descriptions-item>
+                    <el-descriptions-item label="销售开始日期">
+                        {{ product.sale_start_date || '不限制' }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="销售结束日期">
+                        {{ product.sale_end_date || '不限制' }}
+                    </el-descriptions-item>
                     <el-descriptions-item label="创建时间">{{ formatDate(product.created_at) }}</el-descriptions-item>
                     <el-descriptions-item label="描述" :span="2">
                         {{ product.description || '-' }}

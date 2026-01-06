@@ -221,8 +221,17 @@ class PkgProductOtaSyncService
         if ($dates !== null) {
             $query->whereIn('biz_date', $dates);
         } else {
-            // 默认推送未来60天
-            $query->where('biz_date', '<=', Carbon::today()->addDays(59));
+            // 使用销售日期范围限制（如果设置了销售日期）
+            $dateRange = $product->getEffectiveSaleDateRange();
+            if ($dateRange['start'] && $dateRange['end']) {
+                $query->whereBetween('biz_date', [
+                    $dateRange['start']->format('Y-m-d'),
+                    $dateRange['end']->format('Y-m-d')
+                ]);
+            } else {
+                // 如果没有有效的销售日期范围，默认推送未来60天
+                $query->where('biz_date', '<=', Carbon::today()->addDays(59));
+            }
         }
 
         $dailyPrices = $query->orderBy('biz_date')->get();

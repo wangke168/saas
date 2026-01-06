@@ -103,7 +103,11 @@
                     style="width: 100%"
                     max-height="600"
                 >
-                    <el-table-column prop="biz_date" label="日期" width="120" fixed="left" />
+                    <el-table-column prop="biz_date" label="日期" width="120" fixed="left">
+                        <template #default="{ row }">
+                            {{ formatDateOnly(row.biz_date) }}
+                        </template>
+                    </el-table-column>
                     <el-table-column prop="hotel.name" label="酒店" width="150" />
                     <el-table-column prop="room_type.name" label="房型" width="150" />
                     <el-table-column prop="composite_code" label="OTA编码" width="250" show-overflow-tooltip>
@@ -181,6 +185,15 @@ const formatDate = (dateString) => {
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}`;
+};
+
+const formatDateOnly = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 };
 
 const formatPrice = (price) => {

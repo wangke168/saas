@@ -255,8 +255,8 @@ Route::prefix('tickets')->group(function () {
         Route::put('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'update']);
         Route::delete('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'destroy']);
         
-        // 价格管理路由
-        Route::prefix('{pkgProduct}/prices')->group(function () {
+        // 价格管理路由（需要操作员或管理员权限）
+        Route::prefix('{pkgProduct}/prices')->middleware('role:admin,operator')->group(function () {
             Route::post('/calculate', [\App\Http\Controllers\PkgProductPriceController::class, 'calculate']);
             Route::post('/recalculate', [\App\Http\Controllers\PkgProductPriceController::class, 'recalculate']);
             Route::post('/sync-to-ota', [\App\Http\Controllers\PkgProductPriceController::class, 'syncToOta']);
