@@ -357,11 +357,31 @@ class MeituanController extends Controller
             $orderId = $body['orderId'] ?? '';
             $partnerDealId = $body['partnerDealId'] ?? '';
             $quantity = intval($body['quantity'] ?? 1);
-            $useDate = $body['useDate'] ?? '';
+            // 美团订单创建接口可能使用 travelDate 或 useDate
+            $useDate = $body['travelDate'] ?? $body['useDate'] ?? '';
             $realNameType = intval($body['realNameType'] ?? 0);
             $credentialList = $body['credentialList'] ?? [];
             $contacts = $body['contacts'] ?? [];
             $contactInfo = !empty($contacts) ? $contacts[0] : [];
+            
+            // 处理游客信息（美团可能使用 visitors 字段）
+            if (empty($contacts) && !empty($body['visitors'])) {
+                $contacts = $body['visitors'];
+                $contactInfo = !empty($contacts) ? $contacts[0] : [];
+            }
+            
+            // 处理游客信息中的证件信息（美团可能使用 credentials 字段）
+            if (empty($credentialList) && !empty($contactInfo['credentials'])) {
+                $credentials = $contactInfo['credentials'];
+                // 将 credentials 转换为 credentialList 格式
+                $credentialList = [];
+                foreach ($credentials as $key => $credentialNo) {
+                    $credentialList[] = [
+                        'credentialType' => 0, // 默认身份证
+                        'credentialNo' => $credentialNo,
+                    ];
+                }
+            }
 
             // 验证必要参数
             if (empty($orderId)) {
