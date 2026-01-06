@@ -58,6 +58,55 @@ class MeituanClient
     }
 
     /**
+     * 标准化AES密钥（确保是16字节）
+     * 支持多种密钥格式：
+     * 1. 十六进制字符串（16字符 = 8字节）→ 重复一次得到16字节
+     * 2. 十六进制字符串（32字符 = 16字节）→ 转换为16字节
+     * 3. 普通字符串（16字符 = 16字节）→ 直接使用
+     * 
+     * @param string $keyInput 原始密钥（可能是十六进制字符串或普通字符串）
+     * @return string 16字节的密钥
+     * @throws \Exception
+     */
+    protected function normalizeAESKey(string $keyInput): string
+    {
+        if (empty($keyInput)) {
+            throw new \Exception('AES密钥未配置');
+        }
+        
+        // 如果是十六进制字符串
+        if (ctype_xdigit($keyInput)) {
+            $hexLength = strlen($keyInput);
+            
+            if ($hexLength === 16) {
+                // 16个十六进制字符 = 8字节，重复一次得到16字节
+                $keyBytes = hex2bin($keyInput);
+                if ($keyBytes === false) {
+                    throw new \Exception('AES密钥格式错误：十六进制字符串转换失败');
+                }
+                return $keyBytes . $keyBytes;
+            } elseif ($hexLength === 32) {
+                // 32个十六进制字符 = 16字节
+                $keyBytes = hex2bin($keyInput);
+                if ($keyBytes === false) {
+                    throw new \Exception('AES密钥格式错误：十六进制字符串转换失败');
+                }
+                return $keyBytes;
+            } else {
+                throw new \Exception('AES密钥格式错误：十六进制字符串长度必须是16或32个字符，当前长度：' . $hexLength);
+            }
+        }
+        
+        // 如果是普通字符串，直接使用（假设是16字节）
+        $strLength = strlen($keyInput);
+        if ($strLength === 16) {
+            return $keyInput;
+        }
+        
+        throw new \Exception('AES密钥格式错误：密钥长度必须是16字节，当前长度：' . $strLength . '字节（如果是十六进制字符串，长度应为16或32个字符）');
+    }
+
+    /**
      * 生成IV（16位密钥右侧循环移动8位）
      * 
      * @param string $key 16字节密钥
@@ -82,10 +131,13 @@ class MeituanClient
      */
     public function encryptBody(string $body): string
     {
-        $key = $this->config->aes_iv ?? ''; // AES密钥存储在aes_iv字段（注意：这里aes_iv实际存储的是AES密钥）
+        $keyInput = $this->config->aes_iv ?? ''; // AES密钥存储在aes_iv字段（注意：这里aes_iv实际存储的是AES密钥）
+        
+        // 标准化密钥（自动处理十六进制字符串转换）
+        $key = $this->normalizeAESKey($keyInput);
         
         if (strlen($key) !== 16) {
-            throw new \Exception('AES密钥长度必须是16字节');
+            throw new \Exception('AES密钥长度必须是16字节，当前长度：' . strlen($key) . '字节');
         }
 
         $iv = $this->generateIV($key);
@@ -107,10 +159,13 @@ class MeituanClient
      */
     public function decryptBody(string $encryptedBody): string
     {
-        $key = $this->config->aes_iv ?? ''; // AES密钥存储在aes_iv字段
+        $keyInput = $this->config->aes_iv ?? ''; // AES密钥存储在aes_iv字段
+        
+        // 标准化密钥（自动处理十六进制字符串转换）
+        $key = $this->normalizeAESKey($keyInput);
         
         if (strlen($key) !== 16) {
-            throw new \Exception('AES密钥长度必须是16字节');
+            throw new \Exception('AES密钥长度必须是16字节，当前长度：' . strlen($key) . '字节');
         }
 
         $iv = $this->generateIV($key);
