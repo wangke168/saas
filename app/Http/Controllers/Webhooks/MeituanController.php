@@ -1178,16 +1178,34 @@ class MeituanController extends Controller
             // 获取partnerId（用于错误响应）
             $partnerId = $client->getPartnerId();
 
-            // 解密请求体
-            $encryptedBody = $request->input('body', '');
-            if (empty($encryptedBody)) {
+            // 获取原始请求体（美团发送的是加密的Base64字符串）
+            $rawBody = $request->getContent();
+            if (empty($rawBody)) {
+                Log::warning('美团拉取多层价格日历V2：原始请求体为空');
                 return $this->errorResponse(400, '请求体为空', $partnerId);
             }
 
-            $decryptedBody = $client->decryptBody($encryptedBody);
+            // 解密请求体
+            try {
+                $decryptedBody = $client->decryptBody($rawBody);
+                Log::info('美团拉取多层价格日历V2解密后数据', [
+                    'decrypted_body' => $decryptedBody,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('美团拉取多层价格日历V2解密失败', [
+                    'error' => $e->getMessage(),
+                    'raw_body_preview' => substr($rawBody, 0, 100),
+                ]);
+                return $this->errorResponse(400, '请求数据解密失败', $partnerId);
+            }
+
             $data = json_decode($decryptedBody, true);
 
             if (json_last_error() !== JSON_ERROR_NONE) {
+                Log::error('美团拉取多层价格日历V2：JSON解析失败', [
+                    'error' => json_last_error_msg(),
+                    'decrypted_body' => $decryptedBody,
+                ]);
                 return $this->errorResponse(400, '请求数据格式错误', $partnerId);
             }
 
