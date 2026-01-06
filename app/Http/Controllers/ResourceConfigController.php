@@ -281,6 +281,7 @@ class ResourceConfigController extends Controller
                     'sync_mode' => $validated['sync_mode'],
                     'order_provider' => $validated['order_provider'] ?? null,
                     'credentials' => $credentials,
+                    'webhook_base_url' => $validated['webhook_base_url'] ?? null,
                 ];
                 
                 // 如果有认证配置，添加到 extra_config

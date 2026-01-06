@@ -202,6 +202,68 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{exceptionOrder}/resolve', [\App\Http\Controllers\ExceptionOrderController::class, 'resolve']);
     });
 
+// 门票管理
+Route::prefix('tickets')->group(function () {
+    Route::get('/', [\App\Http\Controllers\TicketController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\TicketController::class, 'store']);
+    Route::get('/{ticket}', [\App\Http\Controllers\TicketController::class, 'show']);
+    Route::put('/{ticket}', [\App\Http\Controllers\TicketController::class, 'update']);
+    Route::delete('/{ticket}', [\App\Http\Controllers\TicketController::class, 'destroy']);
+});
+
+    // 门票价库管理
+    Route::prefix('ticket-prices')->middleware('role:admin,operator')->group(function () {
+        Route::get('/', [\App\Http\Controllers\TicketPriceController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\TicketPriceController::class, 'store']);
+        Route::post('/batch', [\App\Http\Controllers\TicketPriceController::class, 'batchStore']);
+        Route::put('/{ticketPrice}', [\App\Http\Controllers\TicketPriceController::class, 'update']);
+        Route::delete('/{ticketPrice}', [\App\Http\Controllers\TicketPriceController::class, 'destroy']);
+    });
+
+    // 打包酒店管理
+    Route::prefix('res-hotels')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ResHotelController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\ResHotelController::class, 'store']);
+        Route::get('/{resHotel}', [\App\Http\Controllers\ResHotelController::class, 'show']);
+        Route::put('/{resHotel}', [\App\Http\Controllers\ResHotelController::class, 'update']);
+        Route::delete('/{resHotel}', [\App\Http\Controllers\ResHotelController::class, 'destroy']);
+    });
+
+    // 打包房型管理
+    Route::prefix('res-room-types')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ResRoomTypeController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\ResRoomTypeController::class, 'store']);
+        Route::get('/{resRoomType}', [\App\Http\Controllers\ResRoomTypeController::class, 'show']);
+        Route::put('/{resRoomType}', [\App\Http\Controllers\ResRoomTypeController::class, 'update']);
+        Route::delete('/{resRoomType}', [\App\Http\Controllers\ResRoomTypeController::class, 'destroy']);
+    });
+
+    // 打包价库管理
+    Route::prefix('res-hotel-daily-stocks')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ResHotelDailyStockController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\ResHotelDailyStockController::class, 'store']);
+        Route::post('/batch', [\App\Http\Controllers\ResHotelDailyStockController::class, 'batchStore']); // 批量设置
+        Route::put('/{resHotelDailyStock}', [\App\Http\Controllers\ResHotelDailyStockController::class, 'update']);
+        Route::delete('/{resHotelDailyStock}', [\App\Http\Controllers\ResHotelDailyStockController::class, 'destroy']);
+    });
+
+    // 打包产品管理
+    Route::prefix('pkg-products')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PkgProductController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\PkgProductController::class, 'store']);
+        Route::get('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'show']);
+        Route::put('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'update']);
+        Route::delete('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'destroy']);
+        
+        // 价格管理路由
+        Route::prefix('{pkgProduct}/prices')->group(function () {
+            Route::post('/calculate', [\App\Http\Controllers\PkgProductPriceController::class, 'calculate']);
+            Route::post('/recalculate', [\App\Http\Controllers\PkgProductPriceController::class, 'recalculate']);
+            Route::post('/sync-to-ota', [\App\Http\Controllers\PkgProductPriceController::class, 'syncToOta']);
+            Route::get('/calendar', [\App\Http\Controllers\PkgProductPriceController::class, 'getPriceCalendar']);
+        });
+    });
+
     // OTA平台管理（只读）
     // OTA平台公开接口（用于产品绑定时的下拉选择）
     Route::prefix('ota-platforms')->group(function () {

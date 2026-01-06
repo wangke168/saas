@@ -30,6 +30,14 @@ class Kernel extends ConsoleKernel
                 ->whereIn('status', ['rejected', 'cancel_approved'])
                 ->delete();
         })->daily();
+        
+        // 每天更新打包产品价格日历（确保未来60天都有价格）
+        $schedule->call(function () {
+            $products = \App\Models\Pkg\PkgProduct::where('status', 1)->get();
+            foreach ($products as $product) {
+                \App\Jobs\Pkg\UpdatePkgProductPriceJob::dispatch($product->id);
+            }
+        })->dailyAt('02:00'); // 每天凌晨2点执行
     }
 
     /**
@@ -42,4 +50,3 @@ class Kernel extends ConsoleKernel
         require base_path('routes/console.php');
     }
 }
-

@@ -281,6 +281,43 @@
                     </el-select>
                 </el-form-item>
 
+                <el-divider>API地址配置</el-divider>
+
+                <el-form-item label="API地址（出站）">
+                    <el-input 
+                        :value="selectedSoftwareProvider?.api_url || '未配置'"
+                        disabled
+                        placeholder="API地址从软件服务商配置中获取"
+                    />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        用于系统主动调用第三方系统的API地址（从软件服务商配置中获取）
+                    </div>
+                    <div v-if="!selectedSoftwareProvider" style="font-size: 12px; color: #F56C6C; margin-top: 5px;">
+                        ⚠️ 请先选择软件服务商
+                    </div>
+                    <div v-else-if="!selectedSoftwareProvider.api_url" style="font-size: 12px; color: #E6A23C; margin-top: 5px;">
+                        ⚠️ 该服务商尚未配置API地址，请在"软件服务商管理"中配置
+                    </div>
+                </el-form-item>
+
+                <el-form-item label="Webhook基础地址（入站）" prop="webhook_base_url">
+                    <el-input 
+                        v-model="resourceConfigForm.webhook_base_url"
+                        placeholder="如：https://api.example.com（可选）"
+                        clearable
+                    />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        用于第三方系统推送数据到我方系统的回调地址基础URL（不含路径）。如果该景区的酒店不使用PMS推送价库，可以留空。
+                    </div>
+                    <div v-if="computedWebhookUrl" style="margin-top: 10px;">
+                        <el-alert
+                            :title="`完整Webhook地址：${computedWebhookUrl}`"
+                            type="info"
+                            :closable="false"
+                        />
+                    </div>
+                </el-form-item>
+
                 <el-divider>同步方式配置</el-divider>
 
                 <el-form-item label="库存同步方式" prop="sync_mode.inventory">
@@ -423,6 +460,34 @@ const resourceConfigForm = ref({
 
 const isEdit = computed(() => editingId.value !== null);
 const dialogTitle = computed(() => isEdit.value ? '编辑景区' : '创建景区');
+
+// 根据选中的服务商ID获取服务商对象
+const selectedSoftwareProvider = computed(() => {
+    if (!selectedProviderId.value || !currentScenicSpotProviders.value.length) {
+        return null;
+    }
+    return currentScenicSpotProviders.value.find(p => p.id === selectedProviderId.value) || null;
+});
+
+// 计算完整的Webhook URL
+const computedWebhookUrl = computed(() => {
+    if (!selectedSoftwareProvider.value || !resourceConfigForm.value.webhook_base_url) {
+        return null;
+    }
+    const baseUrl = resourceConfigForm.value.webhook_base_url.trim();
+    if (!baseUrl) {
+        return null;
+    }
+    // 确保基础地址不以 / 结尾
+    const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+    // 获取服务商编码
+    const providerCode = selectedSoftwareProvider.value.code;
+    if (!providerCode) {
+        return null;
+    }
+    // 拼接完整的Webhook路径
+    return `${cleanBaseUrl}/api/webhooks/res-hotel-stock/${providerCode}/push`;
+});
 
 const form = ref({
     name: '',
@@ -713,6 +778,7 @@ const loadResourceConfig = async (providerId) => {
                     access_token: authConfig.access_token === '***EXISTS***' ? '' : (authConfig.access_token || ''),
                     params: Array.isArray(customParams) ? customParams : [],
                 },
+                webhook_base_url: config.extra_config?.webhook_base_url || '',
                 is_active: config.is_active ?? true,
             };
         } else {
@@ -805,6 +871,8 @@ const handleSubmitResourceConfig = async () => {
                     credentials: Object.keys(credentials).length > 0 ? credentials : {},
                     // 认证配置
                     auth: authConfig,
+                    // Webhook基础地址
+                    webhook_base_url: resourceConfigForm.value.webhook_base_url || null,
                 };
                 
                 await axios.post(`/scenic-spots/${currentScenicSpotId.value}/resource-config`, submitData);
@@ -855,6 +923,7 @@ const resetResourceConfigForm = () => {
             access_token: '',
             params: [],
         },
+        webhook_base_url: '', // Webhook基础地址
         is_active: true, // 保持默认启用状态
     };
     selectedProviderId.value = null;

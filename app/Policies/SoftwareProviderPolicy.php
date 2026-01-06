@@ -8,11 +8,13 @@ use App\Models\User;
 class SoftwareProviderPolicy
 {
     /**
-     * 仅超级管理员可以查看系统服务商列表
+     * 所有已认证用户都可以查看系统服务商列表（用于下拉选择等场景）
+     * 但只有管理员可以进行创建、更新、删除操作
      */
     public function viewAny(User $user): bool
     {
-        return $user->isAdmin();
+        // 所有已认证用户都可以查看列表（用于下拉选择等场景）
+        return true;
     }
 
     /**

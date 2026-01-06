@@ -32,6 +32,18 @@
                         <el-icon><House /></el-icon>
                         <span>酒店管理</span>
                     </el-menu-item>
+                    <el-menu-item index="/tickets">
+                        <el-icon><Ticket /></el-icon>
+                        <span>门票管理</span>
+                    </el-menu-item>
+                    <el-menu-item index="/res-hotels">
+                        <el-icon><OfficeBuilding /></el-icon>
+                        <span>打包酒店管理</span>
+                    </el-menu-item>
+                    <el-menu-item index="/pkg-products">
+                        <el-icon><Goods /></el-icon>
+                        <span>打包产品管理</span>
+                    </el-menu-item>
                     <el-menu-item v-if="isAdmin" index="/resource-providers">
                         <el-icon><Connection /></el-icon>
                         <span>资源方管理</span>
@@ -72,7 +84,7 @@
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
-import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine } from '@element-plus/icons-vue';
+import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine, Ticket, OfficeBuilding, Goods } from '@element-plus/icons-vue';
 
 const router = useRouter();
 const authStore = useAuthStore();

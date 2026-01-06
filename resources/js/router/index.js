@@ -43,6 +43,48 @@ const routes = [
         meta: { requiresAuth: true }
     },
     {
+        path: '/tickets',
+        name: 'Tickets',
+        component: () => import('../views/Tickets/Index.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/tickets/:id',
+        name: 'TicketDetail',
+        component: () => import('../views/Tickets/Detail.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/res-hotels',
+        name: 'ResHotels',
+        component: () => import('../views/ResHotels/Index.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/res-hotels/:id',
+        name: 'ResHotelDetail',
+        component: () => import('../views/ResHotels/Detail.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/pkg-products',
+        name: 'PkgProducts',
+        component: () => import('../views/PkgProducts/Index.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/pkg-products/:id/detail',
+        name: 'PkgProductDetail',
+        component: () => import('../views/PkgProducts/Detail.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/pkg-products/:id/price-management',
+        name: 'PkgProductPriceManagement',
+        component: () => import('../views/PkgProducts/PriceManagement.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
         path: '/resource-providers',
         name: 'ResourceProviders',
         component: () => import('../views/ResourceProviders/Index.vue'),
