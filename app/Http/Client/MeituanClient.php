@@ -59,10 +59,10 @@ class MeituanClient
 
     /**
      * 标准化AES密钥（确保是16字节）
+     * 根据美团文档，密钥字符串直接作为字节使用（keyStr.getBytes()）
      * 支持多种密钥格式：
-     * 1. 十六进制字符串（16字符 = 8字节）→ 重复一次得到16字节
-     * 2. 十六进制字符串（32字符 = 16字节）→ 转换为16字节
-     * 3. 普通字符串（16字符 = 16字节）→ 直接使用
+     * 1. 16字符的字符串（无论是十六进制还是普通字符串）→ 直接作为16字节使用
+     * 2. 32字符的十六进制字符串 → 转换为16字节
      * 
      * @param string $keyInput 原始密钥（可能是十六进制字符串或普通字符串）
      * @return string 16字节的密钥
@@ -74,36 +74,24 @@ class MeituanClient
             throw new \Exception('AES密钥未配置');
         }
         
-        // 如果是十六进制字符串
-        if (ctype_xdigit($keyInput)) {
-            $hexLength = strlen($keyInput);
-            
-            if ($hexLength === 16) {
-                // 16个十六进制字符 = 8字节，重复一次得到16字节
-                $keyBytes = hex2bin($keyInput);
-                if ($keyBytes === false) {
-                    throw new \Exception('AES密钥格式错误：十六进制字符串转换失败');
-                }
-                return $keyBytes . $keyBytes;
-            } elseif ($hexLength === 32) {
-                // 32个十六进制字符 = 16字节
-                $keyBytes = hex2bin($keyInput);
-                if ($keyBytes === false) {
-                    throw new \Exception('AES密钥格式错误：十六进制字符串转换失败');
-                }
-                return $keyBytes;
-            } else {
-                throw new \Exception('AES密钥格式错误：十六进制字符串长度必须是16或32个字符，当前长度：' . $hexLength);
-            }
-        }
-        
-        // 如果是普通字符串，直接使用（假设是16字节）
         $strLength = strlen($keyInput);
+        
+        // 如果密钥长度是16字符，直接使用（美团文档：keyStr.getBytes()）
+        // 无论是十六进制字符串还是普通字符串，都直接作为16字节使用
         if ($strLength === 16) {
             return $keyInput;
         }
         
-        throw new \Exception('AES密钥格式错误：密钥长度必须是16字节，当前长度：' . $strLength . '字节（如果是十六进制字符串，长度应为16或32个字符）');
+        // 如果密钥长度是32字符且是十六进制字符串，转换为16字节
+        if ($strLength === 32 && ctype_xdigit($keyInput)) {
+            $keyBytes = hex2bin($keyInput);
+            if ($keyBytes === false) {
+                throw new \Exception('AES密钥格式错误：十六进制字符串转换失败');
+            }
+            return $keyBytes;
+        }
+        
+        throw new \Exception('AES密钥格式错误：密钥长度必须是16字节，当前长度：' . $strLength . '字符（16字符的字符串直接使用，32字符的十六进制字符串会转换为16字节）');
     }
 
     /**
