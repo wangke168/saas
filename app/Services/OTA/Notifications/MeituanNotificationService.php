@@ -79,18 +79,14 @@ class MeituanNotificationService implements OtaNotificationInterface
         ]);
 
         try {
-            $platform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
-            if (!$platform || !$platform->config) {
-                throw new \Exception('美团配置不存在');
-            }
-
             $client = $this->getClient();
-
+            
             // 根据文档，订单出票通知接口请求格式：
             // {issueType, describe, partnerId, body: {...}}
             // 注意：body 中不应该包含 code 和 describe（这些是响应字段）
+            // 使用客户端方法获取 partnerId，确保使用正确的配置
             $requestData = [
-                'partnerId' => intval($platform->config->account),
+                'partnerId' => $client->getPartnerId(),
                 'issueType' => 1,  // 1=出票成功, 2=出票失败
                 'describe' => 'success',
                 'body' => [

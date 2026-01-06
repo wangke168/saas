@@ -387,6 +387,8 @@ class MeituanClient
 
             // 构建BA认证Header
             $headers = $this->buildAuthHeaders($method, $uri);
+            // 移除 X-Encryption-Status，因为此接口不加密
+            unset($headers['X-Encryption-Status']);
             $headers['Content-Type'] = 'application/json; charset=utf-8';
 
             // 请求体不加密，直接JSON编码
