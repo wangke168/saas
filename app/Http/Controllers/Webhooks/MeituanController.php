@@ -1157,6 +1157,19 @@ class MeituanController extends Controller
     public function handleProductLevelPriceCalendarV2(Request $request): Response
     {
         try {
+            // 记录美团原始请求，便于排查请求格式和加密问题
+            Log::info('美团拉取多层价格日历V2原始请求', [
+                'headers' => [
+                    'PartnerId' => $request->header('PartnerId'),
+                    'Authorization' => $request->header('Authorization'),
+                    'Date' => $request->header('Date'),
+                    'AppKey' => $request->header('AppKey'),
+                    'X-Encryption-Status' => $request->header('X-Encryption-Status'),
+                ],
+                'request_all' => $request->all(),
+                'raw_body' => $request->getContent(),
+            ]);
+
             $client = $this->getClient();
             if (!$client) {
                 return $this->errorResponse(500, '美团配置不存在', null);
