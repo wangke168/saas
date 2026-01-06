@@ -486,18 +486,29 @@ class MeituanClient
     /**
      * 订单退款通知（商家调用美团）
      * 根据文档，此接口不加密
+     * 请求格式：{code, describe, partnerId, body: {...}}
      * 
-     * @param array $data 请求数据（包含partnerId、body等）
+     * @param array $data 请求数据（包含partnerId、code、describe、body等）
      * @return array
      */
     public function notifyOrderRefund(array $data): array
     {
         $url = $this->config->api_url . '/rhone/mtp/api/order/refund/notice';
         // 根据文档，订单退款通知接口不加密
+        // 请求格式：{code, describe, partnerId, body: {...}}
         $requestData = [
             'partnerId' => $data['partnerId'] ?? $this->getPartnerId(),
         ];
         
+        // 添加 code 和 describe（如果提供）
+        if (isset($data['code'])) {
+            $requestData['code'] = $data['code'];
+        }
+        if (isset($data['describe'])) {
+            $requestData['describe'] = $data['describe'];
+        }
+        
+        // body 字段
         if (isset($data['body'])) {
             $requestData['body'] = $data['body'];
         }

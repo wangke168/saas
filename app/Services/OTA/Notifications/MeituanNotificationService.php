@@ -172,6 +172,7 @@ class MeituanNotificationService implements OtaNotificationInterface
 
     /**
      * 通知订单退款（取消确认）
+     * 根据文档，订单退款通知接口需要 refundId（退款流水号）
      */
     public function notifyOrderRefunded(Order $order): void
     {
@@ -179,23 +180,39 @@ class MeituanNotificationService implements OtaNotificationInterface
             'order_id' => $order->id,
             'ota_order_no' => $order->ota_order_no,
             'order_no' => $order->order_no,
+            'refund_serial_no' => $order->refund_serial_no,
         ]);
 
         try {
-            $platform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
-            if (!$platform || !$platform->config) {
-                throw new \Exception('美团配置不存在');
+            $client = $this->getClient();
+            
+            // 获取退款流水号（refundId）
+            $refundId = $order->refund_serial_no;
+            
+            // 如果订单没有退款流水号，可能是订单关闭（不是退款申请）
+            // 根据文档，订单退款通知接口需要 refundId，如果没有则跳过通知
+            if (empty($refundId)) {
+                Log::warning('MeituanNotificationService: 订单没有退款流水号，跳过退款通知', [
+                    'order_id' => $order->id,
+                    'order_status' => $order->status->value,
+                ]);
+                // 订单关闭不需要退款通知（美团已经知道订单关闭）
+                return;
             }
 
-            $client = $this->getClient();
-
+            // 根据文档，订单退款通知接口请求格式：
+            // {code, describe, partnerId, body: {orderId, refundId, partnerOrderId, ...}}
+            // 注意：code 和 describe 在外层，不在 body 中
             $requestData = [
-                'partnerId' => intval($platform->config->account),
+                'partnerId' => $client->getPartnerId(),
+                'code' => 200,  // 退款成功
+                'describe' => 'success',
                 'body' => [
                     'orderId' => intval($order->ota_order_no),
+                    'refundId' => $refundId,  // 必填：美团退款流水号
                     'partnerOrderId' => $order->order_no,
-                    'code' => 200,
-                    'describe' => '退款成功',
+                    'requestTime' => $order->cancelled_at ? $order->cancelled_at->format('Y-m-d H:i:s') : now()->format('Y-m-d H:i:s'),
+                    'responseTime' => now()->format('Y-m-d H:i:s'),
                 ],
             ];
 
@@ -204,13 +221,25 @@ class MeituanNotificationService implements OtaNotificationInterface
             if (isset($result['code']) && $result['code'] == 200) {
                 Log::info('MeituanNotificationService: 美团订单退款通知成功', [
                     'order_id' => $order->id,
+                    'refund_id' => $refundId,
                 ]);
             } else {
+                // 构建详细的错误信息
+                $errorMessage = '美团订单退款通知失败';
+                if (isset($result['describe'])) {
+                    $errorMessage .= '：' . $result['describe'];
+                } elseif (isset($result['message'])) {
+                    $errorMessage .= '：' . $result['message'];
+                } else {
+                    $errorMessage .= '：未知错误';
+                }
+                
                 Log::error('MeituanNotificationService: 美团订单退款通知失败', [
                     'order_id' => $order->id,
+                    'refund_id' => $refundId,
                     'result' => $result,
                 ]);
-                throw new \Exception('美团订单退款通知失败：' . ($result['message'] ?? '未知错误'));
+                throw new \Exception($errorMessage);
             }
         } catch (\Exception $e) {
             Log::error('MeituanNotificationService: 美团订单退款通知异常', [
