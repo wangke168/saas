@@ -336,28 +336,154 @@ class MeituanClient
 
     /**
      * 订单出票通知（商家调用美团）
+     * 根据文档，此接口不加密
      * 
-     * @param array $data 请求数据（包含partnerId、body等）
+     * @param array $data 请求数据（包含partnerId、issueType、describe、body等）
      * @return array
      */
     public function notifyOrderPay(array $data): array
     {
         $url = $this->config->api_url . '/rhone/mtp/api/order/pay/notice';
-        // 美团请求格式：{partnerId, body: {加密的JSON字符串}}
+        // 根据文档，订单出票通知接口不加密
+        // 请求格式：{issueType, describe, partnerId, body: {...}}
         $requestData = [
             'partnerId' => $data['partnerId'] ?? $this->getPartnerId(),
         ];
         
-        if (isset($data['body'])) {
-            $bodyJson = json_encode($data['body'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $requestData['body'] = $this->encryptBody($bodyJson);
+        // 添加 issueType 和 describe（如果提供）
+        if (isset($data['issueType'])) {
+            $requestData['issueType'] = $data['issueType'];
+        }
+        if (isset($data['describe'])) {
+            $requestData['describe'] = $data['describe'];
         }
         
-        return $this->request('POST', $url, $requestData);
+        // body 字段不加密，直接使用
+        if (isset($data['body'])) {
+            $requestData['body'] = $data['body'];
+        }
+        
+        // 使用 requestUnencrypted() 方法发送不加密的请求
+        return $this->requestUnencrypted('POST', $url, $requestData);
+    }
+
+    /**
+     * 发送不加密的请求（用于订单出票通知等不加密接口）
+     * 
+     * @param string $method HTTP方法
+     * @param string $url 完整URL
+     * @param array $data 请求数据（不加密）
+     * @return array 响应数据
+     */
+    protected function requestUnencrypted(string $method, string $url, array $data = []): array
+    {
+        try {
+            // 解析URL获取URI路径
+            $parsedUrl = parse_url($url);
+            $uri = $parsedUrl['path'] ?? '/';
+            if (isset($parsedUrl['query'])) {
+                $uri .= '?' . $parsedUrl['query'];
+            }
+
+            // 构建BA认证Header
+            $headers = $this->buildAuthHeaders($method, $uri);
+            $headers['Content-Type'] = 'application/json; charset=utf-8';
+
+            // 请求体不加密，直接JSON编码
+            $requestBody = '';
+            if (!empty($data)) {
+                $requestBody = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                if ($requestBody === false) {
+                    throw new \Exception('JSON编码失败: ' . json_last_error_msg());
+                }
+            }
+
+            Log::info('美团API请求（不加密）', [
+                'url' => $url,
+                'method' => $method,
+                'uri' => $uri,
+                'headers' => $headers,
+                'body_length' => strlen($requestBody),
+                'body_preview' => substr($requestBody, 0, 200),
+            ]);
+
+            // 发送请求
+            if ($method === 'POST') {
+                $response = Http::timeout(30)
+                    ->withHeaders($headers)
+                    ->withBody($requestBody, 'application/json; charset=utf-8')
+                    ->post($url);
+            } else {
+                $response = Http::timeout(30)
+                    ->withHeaders($headers)
+                    ->send($method, $url);
+            }
+
+            $statusCode = $response->status();
+            $rawBody = $response->body();
+
+            Log::info('美团API响应（不加密）', [
+                'url' => $url,
+                'status' => $statusCode,
+                'body_length' => strlen($rawBody),
+                'body_preview' => substr($rawBody, 0, 200),
+            ]);
+
+            // 如果响应体为空，直接返回
+            if (empty($rawBody)) {
+                return [
+                    'code' => $statusCode,
+                    'describe' => $statusCode === 200 ? 'success' : 'error',
+                ];
+            }
+
+            // 响应不加密，直接解析JSON
+            $responseData = json_decode($rawBody, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                Log::warning('美团响应JSON解析失败', [
+                    'url' => $url,
+                    'error' => json_last_error_msg(),
+                    'raw_body' => $rawBody,
+                ]);
+                return [
+                    'success' => false,
+                    'message' => '响应解析失败',
+                    'raw' => $rawBody,
+                ];
+            }
+
+            Log::info('美团API响应（解析后）', [
+                'url' => $url,
+                'response_data' => $responseData,
+            ]);
+
+            return $responseData ?? [];
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('美团API请求连接异常', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+            ]);
+            return [
+                'success' => false,
+                'message' => '网络连接异常：' . $e->getMessage(),
+            ];
+        } catch (\Exception $e) {
+            Log::error('美团API请求异常', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return [
+                'success' => false,
+                'message' => '请求异常：' . $e->getMessage(),
+            ];
+        }
     }
 
     /**
      * 订单退款通知（商家调用美团）
+     * 根据文档，此接口不加密
      * 
      * @param array $data 请求数据（包含partnerId、body等）
      * @return array
@@ -365,21 +491,21 @@ class MeituanClient
     public function notifyOrderRefund(array $data): array
     {
         $url = $this->config->api_url . '/rhone/mtp/api/order/refund/notice';
-        // 美团请求格式：{partnerId, body: {加密的JSON字符串}}
+        // 根据文档，订单退款通知接口不加密
         $requestData = [
             'partnerId' => $data['partnerId'] ?? $this->getPartnerId(),
         ];
         
         if (isset($data['body'])) {
-            $bodyJson = json_encode($data['body'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $requestData['body'] = $this->encryptBody($bodyJson);
+            $requestData['body'] = $data['body'];
         }
         
-        return $this->request('POST', $url, $requestData);
+        return $this->requestUnencrypted('POST', $url, $requestData);
     }
 
     /**
      * 订单消费通知（商家调用美团）
+     * 根据文档，此接口不加密
      * 
      * @param array $data 请求数据（包含partnerId、body等）
      * @return array
@@ -387,17 +513,16 @@ class MeituanClient
     public function notifyOrderConsume(array $data): array
     {
         $url = $this->config->api_url . '/rhone/mtp/api/order/consume/notice';
-        // 美团请求格式：{partnerId, body: {加密的JSON字符串}}
+        // 根据文档，订单消费通知接口不加密
         $requestData = [
             'partnerId' => $data['partnerId'] ?? $this->getPartnerId(),
         ];
         
         if (isset($data['body'])) {
-            $bodyJson = json_encode($data['body'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $requestData['body'] = $this->encryptBody($bodyJson);
+            $requestData['body'] = $data['body'];
         }
         
-        return $this->request('POST', $url, $requestData);
+        return $this->requestUnencrypted('POST', $url, $requestData);
     }
 
     /**

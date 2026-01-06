@@ -86,13 +86,16 @@ class MeituanNotificationService implements OtaNotificationInterface
 
             $client = $this->getClient();
 
+            // 根据文档，订单出票通知接口请求格式：
+            // {issueType, describe, partnerId, body: {...}}
+            // 注意：body 中不应该包含 code 和 describe（这些是响应字段）
             $requestData = [
                 'partnerId' => intval($platform->config->account),
+                'issueType' => 1,  // 1=出票成功, 2=出票失败
+                'describe' => 'success',
                 'body' => [
                     'orderId' => intval($order->ota_order_no),
                     'partnerOrderId' => $order->order_no,
-                    'code' => 200,
-                    'describe' => '出票成功',
                     'voucherType' => 0, // 不需要支持一码一验，统一使用0
                     'realNameType' => $order->real_name_type ?? 0,
                 ],
