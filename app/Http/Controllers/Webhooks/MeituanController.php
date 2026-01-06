@@ -196,10 +196,12 @@ class MeituanController extends Controller
     }
 
     /**
-     * 返回错误响应（全局加密）
-     * 美团要求全局加密，整个响应体都需要加密
+     * 返回错误响应（支持加密/不加密）
+     * 根据接口类型决定是否加密：
+     * - 订单创建V2：全局加密
+     * - 其他接口：不加密
      */
-    protected function errorResponse(int $code, string $message, ?int $partnerId = null): Response
+    protected function errorResponse(int $code, string $message, ?int $partnerId = null, bool $encrypt = false): Response
     {
         $client = $this->getClient();
         
@@ -229,14 +231,21 @@ class MeituanController extends Controller
                 $responseData['partnerId'] = $partnerId;
             }
 
-            // 将整个响应体JSON进行AES加密
-            $jsonString = json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $encryptedBody = $client->encryptBody($jsonString);
+            // 根据 encrypt 参数决定是否加密
+            if ($encrypt) {
+                // 将整个响应体JSON进行AES加密
+                $jsonString = json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $encryptedBody = $client->encryptBody($jsonString);
 
-            // 返回加密后的Base64字符串（作为响应体）
-            // 注意：响应体是字符串，不是JSON对象
-            return response($encryptedBody, 200)
-                ->header('Content-Type', 'application/json; charset=utf-8');
+                // 返回加密后的Base64字符串（作为响应体）
+                // 注意：响应体是字符串，不是JSON对象
+                return response($encryptedBody, 200)
+                    ->header('Content-Type', 'application/json; charset=utf-8');
+            } else {
+                // 不加密，直接返回JSON
+                return response(json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 200)
+                    ->header('Content-Type', 'application/json; charset=utf-8');
+            }
         } catch (\Exception $e) {
             Log::error('美团响应加密失败', [
                 'error' => $e->getMessage(),
@@ -321,14 +330,21 @@ class MeituanController extends Controller
                 $responseData['body'] = $cleanBody;
             }
 
-            // 将整个响应体JSON进行AES加密
-            $jsonString = json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $encryptedBody = $client->encryptBody($jsonString);
+            // 根据 encrypt 参数决定是否加密
+            if ($encrypt) {
+                // 将整个响应体JSON进行AES加密
+                $jsonString = json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                $encryptedBody = $client->encryptBody($jsonString);
 
-            // 返回加密后的Base64字符串（作为响应体）
-            // 注意：响应体是字符串，不是JSON对象
-            return response($encryptedBody, 200)
-                ->header('Content-Type', 'application/json; charset=utf-8');
+                // 返回加密后的Base64字符串（作为响应体）
+                // 注意：响应体是字符串，不是JSON对象
+                return response($encryptedBody, 200)
+                    ->header('Content-Type', 'application/json; charset=utf-8');
+            } else {
+                // 不加密，直接返回JSON
+                return response(json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 200)
+                    ->header('Content-Type', 'application/json; charset=utf-8');
+            }
         } catch (\Exception $e) {
             Log::error('美团响应加密失败', [
                 'error' => $e->getMessage(),
@@ -364,7 +380,7 @@ class MeituanController extends Controller
             $otaPlatform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
             if (!$otaPlatform) {
                 DB::rollBack();
-                return $this->errorResponse(500, 'OTA平台配置不存在', $partnerId);
+                return $this->errorResponse(500, 'OTA平台配置不存在', $partnerId, true);  // 订单创建V2需要加密
             }
 
             // 解析请求数据
@@ -401,17 +417,17 @@ class MeituanController extends Controller
             // 验证必要参数
             if (empty($orderId)) {
                 DB::rollBack();
-                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, true);  // 订单创建V2需要加密
             }
 
             if (empty($partnerDealId)) {
                 DB::rollBack();
-                return $this->errorResponse(400, '产品编码(partnerDealId)为空', $partnerId);
+                return $this->errorResponse(400, '产品编码(partnerDealId)为空', $partnerId, true);  // 订单创建V2需要加密
             }
 
             if (empty($useDate)) {
                 DB::rollBack();
-                return $this->errorResponse(400, '使用日期(useDate)为空', $partnerId);
+                return $this->errorResponse(400, '使用日期(useDate)为空', $partnerId, true);  // 订单创建V2需要加密
             }
 
             // 根据产品编码查找产品
@@ -421,7 +437,7 @@ class MeituanController extends Controller
                 Log::error('美团订单创建V2：产品不存在', [
                     'partner_deal_id' => $partnerDealId,
                 ]);
-                return $this->errorResponse(505, '产品不存在', $partnerId);
+                return $this->errorResponse(505, '产品不存在', $partnerId, true);  // 订单创建V2需要加密
             }
 
             // 查找产品关联的酒店和房型（通过价格表）
@@ -432,7 +448,7 @@ class MeituanController extends Controller
                     'product_id' => $product->id,
                     'use_date' => $useDate,
                 ]);
-                return $this->errorResponse(400, '指定日期没有价格', $partnerId);
+                return $this->errorResponse(400, '指定日期没有价格', $partnerId, true);  // 订单创建V2需要加密
             }
 
             $roomType = $price->roomType;
@@ -472,7 +488,7 @@ class MeituanController extends Controller
                 return $this->successResponse([
                     'orderId' => intval($orderId),
                     'partnerOrderId' => $existingOrder->order_no,
-                ], $partnerId);
+                ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
             }
 
             // 计算价格
@@ -631,7 +647,7 @@ class MeituanController extends Controller
             return $this->successResponse([
                 'orderId' => intval($orderId),
                 'partnerOrderId' => $order->order_no,
-            ], $partnerId);
+            ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -642,7 +658,7 @@ class MeituanController extends Controller
             ]);
 
             $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
-            return $this->errorResponse(599, '系统处理异常：' . $e->getMessage(), $partnerId);
+            return $this->errorResponse(599, '系统处理异常：' . $e->getMessage(), $partnerId, true);  // 订单创建V2需要加密
         }
     }
 
@@ -1098,6 +1114,20 @@ class MeituanController extends Controller
                 3 => '合作方出票接口异常，美团出票失败且已退款',
             ];
             $closeReason = $closeTypeMap[$closeType] ?? '订单关闭';
+
+            // 对于 closeType=3，需要根据订单状态判断
+            if ($closeType === 3) {
+                // 合作方出票接口异常，美团出票失败且已退款
+                // 根据实际订单状态处理
+                if ($order->status === OrderStatus::CONFIRMED) {
+                    // 订单已出票，记录日志但直接关闭（美团已退款）
+                    Log::info('美团订单关闭：订单已出票，美团已退款', [
+                        'order_id' => $order->id,
+                        'close_type' => $closeType,
+                        'order_status' => $order->status->value,
+                    ]);
+                }
+            }
 
             $this->orderService->updateOrderStatus(
                 $order,
