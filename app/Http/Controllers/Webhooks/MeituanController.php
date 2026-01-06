@@ -261,25 +261,37 @@ class MeituanController extends Controller
      * 返回成功响应（全局加密）
      * 美团要求全局加密，整个响应体都需要加密
      * 
-     * @param array $body 响应体数据
+     * @param array $body 响应体数据（不应该包含code和describe字段）
      * @param int|null $partnerId 合作方ID（可选，如果提供会添加到响应中）
      * @param string|null $partnerDealId 产品ID（可选，如果提供会添加到响应中）
+     * @param int $code 响应码（默认200，出票中时传入598）
+     * @param string $describe 响应描述（默认"success"，出票中时传入"出票中"）
      * @return \Illuminate\Http\Response
      */
-    protected function successResponse(array $body = [], ?int $partnerId = null, ?string $partnerDealId = null): Response
-    {
+    protected function successResponse(
+        array $body = [], 
+        ?int $partnerId = null, 
+        ?string $partnerDealId = null,
+        int $code = 200,
+        string $describe = 'success'
+    ): Response {
         $client = $this->getClient();
         
         if (!$client) {
             // 如果没有客户端，返回未加密的响应（仅用于调试）
             Log::warning('美团响应：客户端不存在，返回未加密响应', [
                 'body' => $body,
+                'code' => $code,
+                'describe' => $describe,
             ]);
             $responseData = [
-                'code' => 200,
-                'describe' => 'success',
+                'code' => $code,
+                'describe' => $describe,
                 'body' => $body,
             ];
+            if ($partnerId !== null) {
+                $responseData['partnerId'] = $partnerId;
+            }
             return response(json_encode($responseData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 200)
                 ->header('Content-Type', 'application/json; charset=utf-8');
         }
@@ -287,8 +299,8 @@ class MeituanController extends Controller
         try {
             // 构建完整的响应数据
             $responseData = [
-                'code' => 200,
-                'describe' => 'success',
+                'code' => $code,
+                'describe' => $describe,
             ];
             
             // 如果有partnerId，添加到响应中
@@ -301,9 +313,13 @@ class MeituanController extends Controller
                 $responseData['partnerDealId'] = $partnerDealId;
             }
             
-            // 添加body字段
-            if (!empty($body)) {
-                $responseData['body'] = $body;
+            // 添加body字段（body中不应该包含code和describe）
+            // 过滤掉body中可能存在的code和describe字段
+            $cleanBody = $body;
+            unset($cleanBody['code'], $cleanBody['describe']);
+            
+            if (!empty($cleanBody)) {
+                $responseData['body'] = $cleanBody;
             }
 
             // 将整个响应体JSON进行AES加密
@@ -691,13 +707,18 @@ class MeituanController extends Controller
                 );
             }
 
-            // 返回出票中响应
-            return $this->successResponse([
-                'code' => $code,
-                'describe' => '出票中',
-                'orderId' => intval($orderId),
-                'partnerOrderId' => $order->order_no,
-            ], $partnerId);
+            // 返回出票中响应（code=598）
+            // 注意：根据美团文档，出票中时外层code应该是598，body中只包含orderId和partnerOrderId
+            return $this->successResponse(
+                [
+                    'orderId' => intval($orderId),
+                    'partnerOrderId' => $order->order_no,
+                ],
+                $partnerId,
+                null,
+                598,  // 外层code=598
+                '出票中'  // 外层describe='出票中'
+            );
 
         } catch (\Exception $e) {
             Log::error('美团订单出票处理失败', [
@@ -716,10 +737,8 @@ class MeituanController extends Controller
      */
     protected function buildOrderPaySuccessResponse(Order $order, string $orderId, ?int $partnerId = null): Response
     {
-        // 构建响应数据
+        // 构建响应数据（根据美团文档，出票成功时body中不包含code和describe）
         $responseBody = [
-            'code' => 200,
-            'describe' => 'success',
             'orderId' => intval($orderId),
             'partnerOrderId' => $order->order_no,
             'voucherType' => 0, // 不需要支持一码一验，统一使用0
@@ -793,19 +812,52 @@ class MeituanController extends Controller
             // 映射订单状态到美团状态
             $orderStatus = $this->mapOrderStatusToMeituan($order->status);
 
-            // 构建响应数据
+            // 构建响应数据（根据美团文档，订单查询响应body中不包含code和describe）
+            // 计算已使用数量和已退款数量
+            $usedQuantity = 0;
+            $refundedQuantity = 0;
+            if ($order->status === OrderStatus::VERIFIED) {
+                $usedQuantity = $order->room_count;
+            } elseif ($order->status === OrderStatus::CANCEL_APPROVED) {
+                $refundedQuantity = $order->room_count;
+            }
+            
             $responseBody = [
-                'code' => 200,
-                'describe' => 'success',
                 'orderId' => intval($orderId),
                 'partnerOrderId' => $order->order_no,
                 'orderStatus' => $orderStatus,
-                'partnerDealId' => $order->product->code ?? '',
-                'quantity' => $order->room_count,
-                'useDate' => $order->check_in_date->format('Y-m-d'),
-                'totalPrice' => floatval($order->total_amount) / 100, // 转换为元
-                'settlementPrice' => floatval($order->settlement_amount) / 100, // 转换为元
+                'orderQuantity' => $order->room_count,  // 订单总票数
+                'usedQuantity' => $usedQuantity,  // 已使用数量
+                'refundedQuantity' => $refundedQuantity,  // 已退款数量
+                'voucherType' => 0,  // 凭证码类型：0为不需要码核销
             ];
+            
+            // 如果是实名制订单，添加credentialList
+            if ($order->real_name_type === 1 && !empty($order->credential_list)) {
+                $responseBody['realNameType'] = 1;
+                $responseBody['credentialList'] = [];
+                $roomCount = $order->room_count ?? 1;
+                $credentialList = $order->credential_list;
+                
+                // 确保credentialList的数量与订单数量一致
+                for ($i = 0; $i < $roomCount; $i++) {
+                    $credential = $credentialList[$i] ?? $credentialList[0] ?? null;
+                    if ($credential) {
+                        $credentialItem = [
+                            'credentialType' => $credential['credentialType'] ?? 0,
+                            'credentialNo' => $credential['credentialNo'] ?? '',
+                            'status' => 0,  // 0为未使用，1为已使用，2为已退款
+                        ];
+                        
+                        // 只有当voucher不为空时才传递voucher字段
+                        if (!empty($credential['voucher'])) {
+                            $credentialItem['voucher'] = $credential['voucher'];
+                        }
+                        
+                        $responseBody['credentialList'][] = $credentialItem;
+                    }
+                }
+            }
 
             // 如果订单已核销，返回usedQuantity
             if ($order->status === OrderStatus::VERIFIED) {
@@ -911,13 +963,19 @@ class MeituanController extends Controller
                 );
             }
 
-            // 返回审批中响应
-            return $this->successResponse([
-                'code' => $code,
-                'describe' => '退款审批中',
-                'orderId' => intval($orderId),
-                'partnerOrderId' => $order->order_no,
-            ], $partnerId);
+            // 返回审批中响应（code=602）
+            // 根据美团文档，退款审批中时外层code应该是602，body中包含orderId、partnerOrderId、refundId
+            return $this->successResponse(
+                [
+                    'orderId' => intval($orderId),
+                    'partnerOrderId' => $order->order_no,
+                    'refundId' => $body['refundId'] ?? '',
+                ],
+                $partnerId,
+                null,
+                602,  // 外层code=602（审批中）
+                '退款审批中'  // 外层describe='退款审批中'
+            );
 
         } catch (\Exception $e) {
             Log::error('美团订单退款处理失败', [
@@ -957,11 +1015,12 @@ class MeituanController extends Controller
 
             // 幂等性检查：如果订单已存在退款流水号且与请求中的相同，直接返回成功
             if ($order->refund_serial_no && $order->refund_serial_no === $refundSerialNo) {
-                return $this->successResponse([
-                    'code' => 200,
-                    'describe' => 'success',
-                    'orderId' => intval($orderId),
-                ], $partnerId);
+                return $this->successResponse(
+                    [
+                        'orderId' => intval($orderId),
+                    ],
+                    $partnerId
+                );
             }
 
             // 更新订单状态为CANCEL_APPROVED
@@ -983,11 +1042,12 @@ class MeituanController extends Controller
                 ]);
             }
 
-            return $this->successResponse([
-                'code' => 200,
-                'describe' => 'success',
-                'orderId' => intval($orderId),
-            ], $partnerId);
+            return $this->successResponse(
+                [
+                    'orderId' => intval($orderId),
+                ],
+                $partnerId
+            );
 
         } catch (\Exception $e) {
             Log::error('美团已退款消息处理失败', [
@@ -1065,11 +1125,12 @@ class MeituanController extends Controller
                 ]);
             }
 
-            return $this->successResponse([
-                'code' => 200,
-                'describe' => 'success',
-                'orderId' => intval($orderId),
-            ], $partnerId);
+            return $this->successResponse(
+                [
+                    'orderId' => intval($orderId),
+                ],
+                $partnerId
+            );
 
         } catch (\Exception $e) {
             Log::error('美团订单关闭消息处理失败', [
@@ -1385,10 +1446,14 @@ class MeituanController extends Controller
             // 如果异步拉取，返回code=999，然后通过"多层价格日历变化通知V2"推送
             if ($asyncType === 1) {
                 // TODO: 触发异步推送任务
-                return $this->successResponse([
-                    'code' => 999,
-                    'describe' => '异步拉取，将通过通知接口推送',
-                ], $partnerId, $partnerDealId);
+                // 根据美团文档，异步拉取时外层code应该是999
+                return $this->successResponse(
+                    [],  // body为空
+                    $partnerId,
+                    $partnerDealId,
+                    999,  // 外层code=999
+                    '异步拉取，将通过通知接口推送'  // 外层describe
+                );
             }
 
             // 同步拉取：直接返回价格日历数据
