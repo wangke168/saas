@@ -973,6 +973,7 @@ class OrderOperationService
             $useQuantity = $data['use_quantity'] ?? $order->room_count;
 
             // 使用 client->getPartnerId() 获取 partnerId，确保使用正确的配置（环境变量优先）
+            // 注意：订单消费通知接口只在订单核销时调用，此时订单应该没有退款，所以 refundedQuantity 传递 0
             $requestData = [
                 'partnerId' => $client->getPartnerId(),
                 'body' => [
@@ -982,6 +983,7 @@ class OrderOperationService
                     'useEndDate' => $useEndDate,
                     'quantity' => $order->room_count,
                     'usedQuantity' => $useQuantity,
+                    'refundedQuantity' => 0,  // 必填字段：订单已退款门票总数量（消费通知时订单没有退款，传递0）
                 ],
             ];
 
