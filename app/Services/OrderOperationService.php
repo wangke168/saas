@@ -953,20 +953,28 @@ class OrderOperationService
     protected function notifyMeituanOrderConsumed(Order $order, array $data): void
     {
         try {
-            $platform = $order->otaPlatform;
-            if (!$platform || !$platform->config) {
-                Log::error('NotifyMeituanOrderConsumed: 美团配置不存在');
-                return;
+            // 优先使用环境变量配置（如果存在）
+            $config = $this->createMeituanConfigFromEnv();
+            
+            // 如果环境变量配置不存在，尝试从数据库读取
+            if (!$config) {
+                $platform = $order->otaPlatform;
+                if (!$platform || !$platform->config) {
+                    Log::error('NotifyMeituanOrderConsumed: 美团配置不存在');
+                    return;
+                }
+                $config = $platform->config;
             }
 
-            $client = new \App\Http\Client\MeituanClient($platform->config);
+            $client = new \App\Http\Client\MeituanClient($config);
 
             $useStartDate = $data['use_start_date'] ?? $order->check_in_date->format('Y-m-d');
             $useEndDate = $data['use_end_date'] ?? $order->check_out_date->format('Y-m-d');
             $useQuantity = $data['use_quantity'] ?? $order->room_count;
 
+            // 使用 client->getPartnerId() 获取 partnerId，确保使用正确的配置（环境变量优先）
             $requestData = [
-                'partnerId' => intval($platform->config->account),
+                'partnerId' => $client->getPartnerId(),
                 'body' => [
                     'orderId' => intval($order->ota_order_no),
                     'partnerOrderId' => $order->order_no,
@@ -1007,5 +1015,32 @@ class OrderOperationService
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * 从环境变量创建美团配置对象
+     */
+    protected function createMeituanConfigFromEnv(): ?\App\Models\OtaConfig
+    {
+        // 检查环境变量是否存在
+        if (!env('MEITUAN_PARTNER_ID') || !env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
+            return null;
+        }
+
+        // 创建临时配置对象（不保存到数据库）
+        $config = new \App\Models\OtaConfig();
+        $config->account = env('MEITUAN_PARTNER_ID'); // PartnerId存储在account字段
+        $config->secret_key = env('MEITUAN_APP_KEY'); // AppKey存储在secret_key字段
+        $config->aes_key = env('MEITUAN_APP_SECRET'); // AppSecret存储在aes_key字段
+        $config->aes_iv = env('MEITUAN_AES_KEY', ''); // AES密钥存储在aes_iv字段
+        
+        // API URL 配置
+        // 根据美团文档，正确的API地址是 https://connectivity-adapter.meituan.com
+        $config->api_url = env('MEITUAN_API_URL', 'https://connectivity-adapter.meituan.com');
+        $config->callback_url = env('MEITUAN_WEBHOOK_URL', '');
+        $config->environment = 'production';
+        $config->is_active = true;
+
+        return $config;
     }
 }
