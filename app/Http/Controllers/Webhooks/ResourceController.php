@@ -35,7 +35,7 @@ class ResourceController extends Controller
      * - true: 使用新的异步处理（Redis过滤 + 增量推送）
      * - false: 使用原有同步处理（默认，保持向后兼容）
      */
-    public function handleHengdianInventory(Request $request): JsonResponse
+    public function handleHengdianInventory(Request $request): \Illuminate\Http\Response
     {
         try {
             $rawBody = $request->getContent();
@@ -59,11 +59,14 @@ class ResourceController extends Controller
                 // 解析回调数据，提取业务标识
                 $xmlObj = new SimpleXMLElement($rawBody);
                 $roomQuotaMapJson = (string)$xmlObj->RoomQuotaMap;
+                
+                // 处理转义的JSON字符串
+                $roomQuotaMapJson = stripslashes($roomQuotaMapJson);
                 $roomQuotaMap = json_decode($roomQuotaMapJson, true);
                 
                 // 从第一个酒店数据中提取 hotelNo
                 $callbackData = [];
-                if (!empty($roomQuotaMap) && isset($roomQuotaMap[0]['hotelNo'])) {
+                if (is_array($roomQuotaMap) && !empty($roomQuotaMap) && isset($roomQuotaMap[0]['hotelNo'])) {
                     $callbackData['hotelNo'] = $roomQuotaMap[0]['hotelNo'];
                 }
                 
@@ -120,7 +123,7 @@ class ResourceController extends Controller
      * @param string $rawBody XML请求体
      * @param int $softwareProviderId 软件服务商ID，用于过滤酒店（避免不同服务商的酒店external_code冲突）
      */
-    protected function handleHengdianInventoryAsync(string $rawBody, int $softwareProviderId): JsonResponse
+    protected function handleHengdianInventoryAsync(string $rawBody, int $softwareProviderId): \Illuminate\Http\Response
     {
         try {
             // 将数据放入队列，立即返回响应给景区方
@@ -151,7 +154,7 @@ class ResourceController extends Controller
      * @param string $rawBody XML请求体
      * @param int $softwareProviderId 软件服务商ID，用于过滤酒店（避免不同服务商的酒店external_code冲突）
      */
-    protected function handleHengdianInventorySync(string $rawBody, int $softwareProviderId): JsonResponse
+    protected function handleHengdianInventorySync(string $rawBody, int $softwareProviderId): \Illuminate\Http\Response
     {
         // 解析XML请求
         $xmlObj = new SimpleXMLElement($rawBody);
@@ -162,14 +165,29 @@ class ResourceController extends Controller
             return $this->xmlResponse('0', '成功');
         }
 
-        // 解析JSON字符串
+        // 解析JSON字符串（可能需要先去除转义）
+        // 如果JSON字符串被转义了（如 \" 变成 \\\"），需要先处理
+        $roomQuotaMapJson = stripslashes($roomQuotaMapJson);
+        
         $roomQuotaMap = json_decode($roomQuotaMapJson, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             Log::error('资源方库存推送：JSON解析失败', [
                 'json' => $roomQuotaMapJson,
+                'json_length' => strlen($roomQuotaMapJson),
+                'json_preview' => substr($roomQuotaMapJson, 0, 200),
                 'error' => json_last_error_msg(),
             ]);
             return $this->xmlResponse('-1', 'JSON解析失败');
+        }
+        
+        // 确保解析结果是数组
+        if (!is_array($roomQuotaMap)) {
+            Log::error('资源方库存推送：JSON解析结果不是数组', [
+                'json' => $roomQuotaMapJson,
+                'parsed_type' => gettype($roomQuotaMap),
+                'parsed_value' => $roomQuotaMap,
+            ]);
+            return $this->xmlResponse('-1', '数据格式错误：期望数组');
         }
 
         try {
@@ -446,7 +464,7 @@ class ResourceController extends Controller
     /**
      * 返回XML响应
      */
-    protected function xmlResponse(string $resultCode, string $message): JsonResponse
+    protected function xmlResponse(string $resultCode, string $message): \Illuminate\Http\Response
     {
         $xml = new SimpleXMLElement('<Result></Result>');
         $xml->addChild('ResultCode', $resultCode);
