@@ -393,7 +393,7 @@ class CtripService
             'isCredentialVouchers' => 0, // 固定为0（非凭证类）
         ];
         
-        return $client->confirmOrder(
+        $result = $client->confirmOrder(
             $order->ota_order_no,      // otaOrderId
             $order->order_no,          // supplierOrderId
             '0000',                    // confirmResultCode（成功）
@@ -402,6 +402,13 @@ class CtripService
             $items,                    // items
             []                         // vouchers（可选）
         );
+        
+        // 检查返回值，如果失败则抛出异常
+        if (isset($result['success']) && $result['success'] === false) {
+            throw new \Exception('携程订单确认失败：' . ($result['message'] ?? '未知错误'));
+        }
+        
+        return $result;
     }
 
     /**

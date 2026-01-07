@@ -30,6 +30,17 @@ class CtripNotificationService implements OtaNotificationInterface
         try {
             $result = $this->ctripService->confirmOrder($order);
             
+            // 检查返回值，确保通知成功
+            if (isset($result['success']) && $result['success'] === false) {
+                $errorMessage = $result['message'] ?? '未知错误';
+                Log::error('CtripNotificationService: 携程订单确认通知失败（返回值检查）', [
+                    'order_id' => $order->id,
+                    'error' => $errorMessage,
+                    'result' => $result,
+                ]);
+                throw new \Exception('携程订单确认通知失败：' . $errorMessage);
+            }
+            
             Log::info('CtripNotificationService: 携程订单确认通知成功', [
                 'order_id' => $order->id,
                 'result' => $result,

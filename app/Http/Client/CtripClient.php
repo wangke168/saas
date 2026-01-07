@@ -168,6 +168,11 @@ class CtripClient
                     $responseData = [];
                 }
 
+                // 检查携程业务错误码（header.resultCode）
+                // '0000' 表示成功，其他值表示失败
+                $resultCode = $responseData['header']['resultCode'] ?? null;
+                $resultMessage = $responseData['header']['resultMessage'] ?? '未知错误';
+
                 // 解密响应体
                 if (isset($responseData['body']) && !empty($responseData['body'])) {
                     try {
@@ -190,6 +195,18 @@ class CtripClient
                     ]);
                 }
 
+                // 检查业务错误码，如果不是 '0000'，抛出异常
+                if ($resultCode !== '0000') {
+                    $errorMessage = "携程接口返回错误：错误码 {$resultCode}，错误信息：{$resultMessage}";
+                    Log::error('携程API业务错误', [
+                        'url' => $url,
+                        'result_code' => $resultCode,
+                        'result_message' => $resultMessage,
+                        'response_data' => $responseData,
+                    ]);
+                    throw new \Exception($errorMessage);
+                }
+
                 return $responseData;
             }
 
@@ -199,7 +216,7 @@ class CtripClient
                 'body' => $rawBody,
             ]);
 
-            return ['success' => false, 'message' => '请求失败'];
+            return ['success' => false, 'message' => '请求失败', 'status_code' => $statusCode];
         } catch (\Exception $e) {
             $errorMessage = $e->getMessage();
             
