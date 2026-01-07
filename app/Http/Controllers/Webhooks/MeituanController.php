@@ -151,7 +151,7 @@ class MeituanController extends Controller
             if (str_contains($path, 'order/create/v2')) {
                 return $this->handleOrderCreateV2($data);
             } elseif (str_contains($path, 'order/pay')) {
-                return $this->handleOrderPay($data);
+                return $this->handleOrderPay($data, $request);
             } elseif (str_contains($path, 'order/query')) {
                 return $this->handleOrderQuery($data);
             } elseif (str_contains($path, 'order/refund') && !str_contains($path, 'refunded')) {
@@ -169,7 +169,7 @@ class MeituanController extends Controller
                 } elseif (isset($body['refundSerialNo'])) {
                     return $this->handleOrderRefund($data);
                 } elseif (isset($body['orderId']) && isset($body['payTime'])) {
-                    return $this->handleOrderPay($data);
+                    return $this->handleOrderPay($data, $request);
                 } elseif (isset($body['orderId'])) {
                     // 可能是订单创建或订单查询，需要进一步判断
                     // 订单创建通常有partnerDealId和quantity
@@ -670,7 +670,7 @@ class MeituanController extends Controller
     /**
      * 处理订单出票（对应携程的PayPreOrder）
      */
-    protected function handleOrderPay(array $data): Response
+    protected function handleOrderPay(array $data, Request $request): Response
     {
         try {
             // 获取partnerId（用于错误响应）
@@ -745,8 +745,19 @@ class MeituanController extends Controller
                 ]);
             }
 
+            // 检查请求是否加密
+            // 如果请求头中有 X-Encryption-Status: encrypted，表示请求是加密的，响应也应该加密
+            $requestEncrypted = $request->header('X-Encryption-Status') === 'encrypted';
+            
+            Log::info('美团订单出票：检查请求加密状态', [
+                'order_id' => $order->id,
+                'request_encrypted' => $requestEncrypted,
+                'x_encryption_status' => $request->header('X-Encryption-Status'),
+            ]);
+
             // 返回出票中响应（code=598）
             // 注意：根据美团文档，出票中时外层code应该是598，body中只包含orderId和partnerOrderId
+            // 如果请求是加密的，响应也应该加密
             return $this->successResponse(
                 [
                     'orderId' => intval($orderId),
@@ -755,7 +766,8 @@ class MeituanController extends Controller
                 $partnerId,
                 null,
                 598,  // 外层code=598
-                '出票中'  // 外层describe='出票中'
+                '出票中',  // 外层describe='出票中'
+                $requestEncrypted  // 根据请求加密状态决定响应是否加密
             );
 
         } catch (\Exception $e) {
