@@ -33,7 +33,7 @@ class ScenicSpotIdentificationService
         ]);
 
         // 优先级1：通过业务标识识别（最可靠）
-        $result = self::identifyByBusinessData($callbackData);
+        $result = self::identifyByBusinessData($callbackData, $softwareProviderId);
         if ($result) {
             Log::info('景区识别服务：通过业务标识识别成功', [
                 'method' => $result['method'],
@@ -75,12 +75,15 @@ class ScenicSpotIdentificationService
 
     /**
      * 通过业务标识识别景区（优先级最高）
+     * 
+     * @param array $callbackData 回调数据
+     * @param int|null $softwareProviderId 软件服务商ID，用于过滤酒店（避免不同服务商的酒店external_code冲突）
      */
-    protected static function identifyByBusinessData(array $callbackData): ?array
+    protected static function identifyByBusinessData(array $callbackData, ?int $softwareProviderId = null): ?array
     {
         // 方法1：通过 hotelNo 识别
         if (isset($callbackData['hotelNo'])) {
-            $result = self::identifyByHotelNo($callbackData['hotelNo']);
+            $result = self::identifyByHotelNo($callbackData['hotelNo'], $softwareProviderId);
             if ($result) {
                 return $result;
             }
@@ -109,13 +112,33 @@ class ScenicSpotIdentificationService
 
     /**
      * 通过酒店编号识别景区
+     * 
+     * @param string $hotelNo 酒店编号
+     * @param int|null $softwareProviderId 软件服务商ID，用于过滤酒店（避免不同服务商的酒店external_code冲突）
      */
-    protected static function identifyByHotelNo(string $hotelNo): ?array
+    protected static function identifyByHotelNo(string $hotelNo, ?int $softwareProviderId = null): ?array
     {
-        $hotel = Hotel::where('external_code', $hotelNo)
-            ->orWhere('code', $hotelNo)
-            ->with(['scenicSpot.resourceConfig'])
-            ->first();
+        // 查找酒店（优先使用external_code，否则使用code）
+        // 同时通过软件服务商过滤，避免不同服务商的酒店external_code冲突
+        $hotelQuery = Hotel::where(function($query) use ($hotelNo) {
+            $query->where('external_code', $hotelNo)
+                  ->orWhere('code', $hotelNo);
+        });
+        
+        // 如果提供了软件服务商ID，则通过景区关联的软件服务商过滤
+        if ($softwareProviderId) {
+            $hotelQuery->whereHas('scenicSpot', function($query) use ($softwareProviderId) {
+                // 支持一对一关系（旧字段）和多对多关系
+                $query->where(function($q) use ($softwareProviderId) {
+                    $q->where('software_provider_id', $softwareProviderId)
+                      ->orWhereHas('softwareProviders', function($subQuery) use ($softwareProviderId) {
+                          $subQuery->where('software_providers.id', $softwareProviderId);
+                      });
+                });
+            });
+        }
+        
+        $hotel = $hotelQuery->with(['scenicSpot.resourceConfig'])->first();
 
         if ($hotel && $hotel->scenicSpot && $hotel->scenicSpot->resourceConfig) {
             return [

@@ -44,6 +44,15 @@ class ResourceController extends Controller
                 'body' => $rawBody,
             ]);
 
+            // 获取软件服务商ID（横店系统）
+            // 注意：这里通过URL路径识别软件服务商，未来可以扩展为通过路由参数识别
+            $softwareProviderId = SoftwareProvider::where('api_type', 'hengdian')->value('id');
+            
+            if (!$softwareProviderId) {
+                Log::error('资源方库存推送：未找到横店软件服务商配置');
+                return $this->xmlResponse('-1', '系统配置错误：未找到软件服务商');
+            }
+            
             // 尝试识别景区（用于日志记录和后续可能的验证）
             $identificationResult = null;
             try {
@@ -57,9 +66,6 @@ class ResourceController extends Controller
                 if (!empty($roomQuotaMap) && isset($roomQuotaMap[0]['hotelNo'])) {
                     $callbackData['hotelNo'] = $roomQuotaMap[0]['hotelNo'];
                 }
-                
-                // 获取软件服务商ID（横店系统）
-                $softwareProviderId = SoftwareProvider::where('api_type', 'hengdian')->value('id');
                 
                 // 使用识别服务识别景区
                 if (!empty($callbackData)) {
@@ -89,12 +95,12 @@ class ResourceController extends Controller
             $useAsync = env('ENABLE_INVENTORY_PUSH_ASYNC', false);
             
             if ($useAsync) {
-                // 使用新的异步处理方式
-                return $this->handleHengdianInventoryAsync($rawBody);
+                // 使用新的异步处理方式，传递软件服务商ID
+                return $this->handleHengdianInventoryAsync($rawBody, $softwareProviderId);
             }
 
-            // 使用原有的同步处理方式（保持向后兼容）
-            return $this->handleHengdianInventorySync($rawBody);
+            // 使用原有的同步处理方式（保持向后兼容），传递软件服务商ID
+            return $this->handleHengdianInventorySync($rawBody, $softwareProviderId);
 
         } catch (\Exception $e) {
             Log::error('资源方库存推送：处理异常', [
@@ -110,16 +116,21 @@ class ResourceController extends Controller
     /**
      * 异步处理方式（新功能）
      * 立即返回响应，后台异步处理，使用 Redis 快速过滤
+     * 
+     * @param string $rawBody XML请求体
+     * @param int $softwareProviderId 软件服务商ID，用于过滤酒店（避免不同服务商的酒店external_code冲突）
      */
-    protected function handleHengdianInventoryAsync(string $rawBody): JsonResponse
+    protected function handleHengdianInventoryAsync(string $rawBody, int $softwareProviderId): JsonResponse
     {
         try {
             // 将数据放入队列，立即返回响应给景区方
-            \App\Jobs\ProcessResourceInventoryPushJob::dispatch($rawBody)
+            // 注意：ProcessResourceInventoryPushJob 需要接收 softwareProviderId 参数
+            \App\Jobs\ProcessResourceInventoryPushJob::dispatch($rawBody, $softwareProviderId)
                 ->onQueue('resource-push'); // 使用专门的队列
             
             Log::info('资源方库存推送：已接收并放入队列（异步处理）', [
                 'body_length' => strlen($rawBody),
+                'software_provider_id' => $softwareProviderId,
             ]);
             
             // 立即返回，不等待处理完成
@@ -130,14 +141,17 @@ class ResourceController extends Controller
                 'error' => $e->getMessage(),
             ]);
             // 降级到同步处理
-            return $this->handleHengdianInventorySync($rawBody);
+            return $this->handleHengdianInventorySync($rawBody, $softwareProviderId);
         }
     }
 
     /**
      * 同步处理方式（原有逻辑，保持向后兼容）
+     * 
+     * @param string $rawBody XML请求体
+     * @param int $softwareProviderId 软件服务商ID，用于过滤酒店（避免不同服务商的酒店external_code冲突）
      */
-    protected function handleHengdianInventorySync(string $rawBody): JsonResponse
+    protected function handleHengdianInventorySync(string $rawBody, int $softwareProviderId): JsonResponse
     {
         // 解析XML请求
         $xmlObj = new SimpleXMLElement($rawBody);
@@ -177,14 +191,32 @@ class ResourceController extends Controller
 
                 try {
                     // 查找酒店（优先使用external_code，否则使用code）
-                    $hotel = Hotel::where('external_code', $hotelNo)
-                        ->orWhere('code', $hotelNo)
-                        ->first();
+                    // 同时通过软件服务商过滤，避免不同服务商的酒店external_code冲突
+                    $hotelQuery = Hotel::where(function($query) use ($hotelNo) {
+                        $query->where('external_code', $hotelNo)
+                              ->orWhere('code', $hotelNo);
+                    });
+                    
+                    // 通过景区关联的软件服务商过滤
+                    $hotelQuery->whereHas('scenicSpot', function($query) use ($softwareProviderId) {
+                        // 支持一对一关系（旧字段）和多对多关系
+                        $query->where(function($q) use ($softwareProviderId) {
+                            $q->where('software_provider_id', $softwareProviderId)
+                              ->orWhereHas('softwareProviders', function($subQuery) use ($softwareProviderId) {
+                                  $subQuery->where('software_providers.id', $softwareProviderId);
+                              });
+                        });
+                    });
+                    
+                    $hotel = $hotelQuery->first();
 
                     if (!$hotel) {
                         $failCount++;
-                        $errors[] = "未找到酒店：{$hotelNo}";
-                        Log::warning('资源方库存推送：未找到酒店', ['hotel_no' => $hotelNo]);
+                        $errors[] = "未找到酒店：{$hotelNo}（软件服务商ID：{$softwareProviderId}）";
+                        Log::warning('资源方库存推送：未找到酒店', [
+                            'hotel_no' => $hotelNo,
+                            'software_provider_id' => $softwareProviderId,
+                        ]);
                         continue;
                     }
 
