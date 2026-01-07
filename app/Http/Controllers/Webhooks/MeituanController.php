@@ -962,6 +962,8 @@ class MeituanController extends Controller
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
             $refundQuantity = intval($body['refundQuantity'] ?? 0);
+            // 获取退款流水号
+            $refundId = $body['refundId'] ;
 
             if (empty($orderId)) {
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
@@ -991,6 +993,21 @@ class MeituanController extends Controller
             // 验证退款数量
             if ($refundQuantity <= 0 || $refundQuantity > $order->room_count) {
                 return $this->errorResponse(400, '退款数量不正确', $partnerId);
+            }
+
+            // 保存退款流水号到订单（根据美团文档，商家必须存储美团refundId）
+            // 注意：这里先保存，即使后续资源方取消失败，退款流水号也需要保存，因为美团会用同一流水号查询退款进度
+            if (!empty($refundId)) {
+                $order->update(['refund_serial_no' => $refundId]);
+                Log::info('美团订单退款：已保存退款流水号', [
+                    'order_id' => $order->id,
+                    'refund_id' => $refundId,
+                ]);
+            } else {
+                Log::warning('美团订单退款：退款流水号为空', [
+                    'order_id' => $order->id,
+                    'body' => $body,
+                ]);
             }
 
             // 检查是否系统直连
@@ -1038,7 +1055,7 @@ class MeituanController extends Controller
                 [
                     'orderId' => intval($orderId),
                     'partnerOrderId' => $order->order_no,
-                    'refundId' => $body['refundId'] ?? '',
+                    'refundId' => $refundId,  // 使用已获取的 refundId（兼容可能的字段名错误）
                 ],
                 $partnerId,
                 null,

@@ -190,11 +190,13 @@ class MeituanNotificationService implements OtaNotificationInterface
             $refundId = $order->refund_serial_no;
             
             // 如果订单没有退款流水号，可能是订单关闭（不是退款申请）
-            // 根据文档，订单退款通知接口需要 refundId，如果没有则跳过通知
+            // 根据文档，订单退款通知接口用于"美团发起合作方退款申请且商家审核退款通过后"通知美团
+            // 订单关闭是美团主动发起的，美团已经知道订单关闭，不需要退款通知
             if (empty($refundId)) {
-                Log::warning('MeituanNotificationService: 订单没有退款流水号，跳过退款通知', [
+                Log::info('MeituanNotificationService: 订单没有退款流水号，跳过退款通知', [
                     'order_id' => $order->id,
                     'order_status' => $order->status->value,
+                    'reason' => '订单关闭或非退款申请场景，无需通知美团（美团已知道订单关闭）',
                 ]);
                 // 订单关闭不需要退款通知（美团已经知道订单关闭）
                 return;
