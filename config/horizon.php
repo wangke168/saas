@@ -81,6 +81,7 @@ return [
     'waits' => [
         'redis:default' => 60,
         'redis:ota-push' => 60,
+        'redis:ota-notification' => 30,  // OTA通知需要快速响应
         'redis:resource-push' => 30,  // 资源方推送需要快速响应
         'redis:ota-sync' => 120,
     ],
@@ -185,10 +186,10 @@ return [
                 'rest' => 0,
             ],
             
-            // 策略组2：中优先级 - OTA推送和默认队列
+            // 策略组2：中优先级 - OTA推送、OTA通知和默认队列
             'supervisor-medium-priority' => [
                 'connection' => 'redis',
-                'queue' => ['ota-push', 'default'],
+                'queue' => ['ota-notification', 'ota-push', 'default'],
                 'balance' => 'auto',
                 'minProcesses' => 1,
                 'maxProcesses' => 5,
@@ -227,7 +228,7 @@ return [
         'local' => [
             'supervisor-default' => [
                 'connection' => 'redis',
-                'queue' => ['default', 'ota-push', 'resource-push', 'ota-sync'],
+                'queue' => ['default', 'ota-notification', 'ota-push', 'resource-push', 'ota-sync'],
                 'balance' => 'simple',
                 'processes' => 2,
                 'tries' => 3,
