@@ -199,9 +199,36 @@ class ProcessResourceOrderJob implements ShouldQueue
                 // 重新加载订单关联数据，确保 otaPlatform 已加载
                 $this->order->load(['otaPlatform']);
                 
+                // 记录 OTA 平台信息，便于排查问题
+                Log::info('ProcessResourceOrderJob: 检查 OTA 平台信息', [
+                    'order_id' => $this->order->id,
+                    'ota_platform_id' => $this->order->ota_platform_id,
+                    'has_ota_platform' => $this->order->otaPlatform !== null,
+                    'ota_platform_code' => $this->order->otaPlatform?->code?->value ?? null,
+                    'ota_platform_code_enum' => $this->order->otaPlatform?->code !== null ? get_class($this->order->otaPlatform->code) : null,
+                ]);
+                
+                // 检查是否有 OTA 平台
+                if (!$this->order->otaPlatform) {
+                    Log::warning('ProcessResourceOrderJob: 订单没有关联 OTA 平台，跳过通知', [
+                        'order_id' => $this->order->id,
+                        'ota_platform_id' => $this->order->ota_platform_id,
+                    ]);
+                    return;
+                }
+                
                 // 如果是美团订单，同步通知以确保及时性（美团对响应时间要求较高）
                 // 其他平台使用异步通知
-                if ($this->order->otaPlatform?->code === OtaPlatform::MEITUAN) {
+                $isMeituan = $this->order->otaPlatform->code === OtaPlatform::MEITUAN;
+                
+                Log::info('ProcessResourceOrderJob: 判断平台类型', [
+                    'order_id' => $this->order->id,
+                    'ota_platform_code' => $this->order->otaPlatform->code->value,
+                    'is_meituan' => $isMeituan,
+                    'meituan_enum_value' => OtaPlatform::MEITUAN->value,
+                ]);
+                
+                if ($isMeituan) {
                     Log::info('ProcessResourceOrderJob: 美团订单，同步通知', [
                         'order_id' => $this->order->id,
                     ]);
@@ -229,23 +256,44 @@ class ProcessResourceOrderJob implements ShouldQueue
                             ->onQueue('ota-notification');
                     }
                 } else {
-                    // 其他平台使用异步通知
-                    \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order)
-                        ->onQueue('ota-notification');
-                    
-                    Log::info('ProcessResourceOrderJob: 已派发 NotifyOtaOrderStatusJob', [
+                    // 其他平台使用异步通知（包括携程）
+                    Log::info('ProcessResourceOrderJob: 准备派发 NotifyOtaOrderStatusJob（异步通知）', [
                         'order_id' => $this->order->id,
-                        'ota_platform' => $this->order->otaPlatform?->code?->value,
+                        'ota_platform' => $this->order->otaPlatform->code->value,
                         'order_status' => $this->order->status->value,
-                        'queue' => 'ota-notification',
                     ]);
+                    
+                    try {
+                        \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order)
+                            ->onQueue('ota-notification');
+                        
+                        Log::info('ProcessResourceOrderJob: 已派发 NotifyOtaOrderStatusJob', [
+                            'order_id' => $this->order->id,
+                            'ota_platform' => $this->order->otaPlatform->code->value,
+                            'order_status' => $this->order->status->value,
+                            'queue' => 'ota-notification',
+                        ]);
+                    } catch (\Exception $dispatchException) {
+                        Log::error('ProcessResourceOrderJob: 派发 NotifyOtaOrderStatusJob 异常', [
+                            'order_id' => $this->order->id,
+                            'ota_platform' => $this->order->otaPlatform->code->value,
+                            'error' => $dispatchException->getMessage(),
+                            'trace' => $dispatchException->getTraceAsString(),
+                        ]);
+                        // 重新抛出异常，让外层 catch 处理
+                        throw $dispatchException;
+                    }
                 }
             } catch (\Exception $e) {
-                Log::warning('ProcessResourceOrderJob: 派发通知任务失败', [
+                Log::error('ProcessResourceOrderJob: 派发通知任务失败', [
                     'order_id' => $this->order->id,
+                    'ota_platform_id' => $this->order->ota_platform_id,
                     'ota_platform' => $this->order->otaPlatform?->code?->value,
+                    'has_ota_platform' => $this->order->otaPlatform !== null,
                     'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
                 ]);
+                // 注意：这里不抛出异常，因为通知失败不应该影响主流程（订单已经接单成功）
             }
         } else {
             // 判断是否是临时性错误
