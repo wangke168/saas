@@ -14,6 +14,7 @@ use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\OrderOperationService;
 use App\Services\InventoryService;
+use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -706,8 +707,18 @@ class MeituanController extends Controller
             }
 
             // 检查是否系统直连
-            $scenicSpot = $order->hotel->scenicSpot ?? null;
-            $isSystemConnected = $scenicSpot && $scenicSpot->is_system_connected;
+            // 确保订单的关联数据已加载（用于系统直连检查）
+            $order->load(['hotel.scenicSpot', 'product.softwareProvider', 'product.scenicSpot']);
+            
+            // 使用 ResourceServiceFactory 检查系统直连（与携程保持一致）
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+            
+            Log::info('美团订单出票：检查系统直连状态', [
+                'order_id' => $order->id,
+                'is_system_connected' => $isSystemConnected,
+                'hotel_id' => $order->hotel_id,
+                'product_id' => $order->product_id,
+            ]);
 
             // 先响应美团（不等待景区方接口）
             // 系统直连和非系统直连都返回 code=598（出票中）
@@ -717,6 +728,10 @@ class MeituanController extends Controller
             if ($isSystemConnected) {
                 // 系统直连：异步调用景区方接口接单（超时时间已在 Job 类中定义：10秒）
                 \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
+                
+                Log::info('美团订单出票：已派发接单Job', [
+                    'order_id' => $order->id,
+                ]);
             } else {
                 // 非系统直连：只更新状态为确认中，等待人工接单
                 $this->orderService->updateOrderStatus(
@@ -724,6 +739,10 @@ class MeituanController extends Controller
                     OrderStatus::CONFIRMING,
                     '美团订单出票，等待人工接单'
                 );
+                
+                Log::info('美团订单出票：非系统直连，等待人工接单', [
+                    'order_id' => $order->id,
+                ]);
             }
 
             // 返回出票中响应（code=598）
@@ -962,8 +981,18 @@ class MeituanController extends Controller
             }
 
             // 检查是否系统直连
-            $scenicSpot = $order->hotel->scenicSpot ?? null;
-            $isSystemConnected = $scenicSpot && $scenicSpot->is_system_connected;
+            // 确保订单的关联数据已加载（用于系统直连检查）
+            $order->load(['hotel.scenicSpot', 'product.softwareProvider', 'product.scenicSpot']);
+            
+            // 使用 ResourceServiceFactory 检查系统直连（与携程保持一致）
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+            
+            Log::info('美团订单退款：检查系统直连状态', [
+                'order_id' => $order->id,
+                'is_system_connected' => $isSystemConnected,
+                'hotel_id' => $order->hotel_id,
+                'product_id' => $order->product_id,
+            ]);
 
             // 先响应美团（不等待景区方接口）
             // 系统直连和非系统直连都返回 code=602（审批中）
@@ -973,6 +1002,10 @@ class MeituanController extends Controller
             if ($isSystemConnected) {
                 // 系统直连：异步调用景区方接口取消订单（超时时间已在 Job 类中定义：10秒）
                 \App\Jobs\ProcessResourceCancelOrderJob::dispatch($order, '美团申请退款');
+                
+                Log::info('美团订单退款：已派发取消订单Job', [
+                    'order_id' => $order->id,
+                ]);
             } else {
                 // 非系统直连：只更新状态为申请取消中，等待人工处理
                 $this->orderService->updateOrderStatus(
@@ -980,6 +1013,10 @@ class MeituanController extends Controller
                     OrderStatus::CANCEL_REQUESTED,
                     '美团申请退款，数量：' . $refundQuantity
                 );
+                
+                Log::info('美团订单退款：非系统直连，等待人工处理', [
+                    'order_id' => $order->id,
+                ]);
             }
 
             // 返回审批中响应（code=602）
@@ -1021,6 +1058,9 @@ class MeituanController extends Controller
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
             $refundSerialNo = $body['refundSerialNo'] ?? '';
+            $refundTime = $body['refundTime'] ?? '';
+            $refundMessageType = $body['refundMessageType'] ?? 0;
+            $reason = $body['reason'] ?? '';
 
             if (empty($orderId)) {
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
@@ -1033,7 +1073,7 @@ class MeituanController extends Controller
             }
 
             // 幂等性检查：如果订单已存在退款流水号且与请求中的相同，直接返回成功
-            if ($order->refund_serial_no && $order->refund_serial_no === $refundSerialNo) {
+            if ($order->refund_serial_no && !empty($refundSerialNo) && $order->refund_serial_no === $refundSerialNo) {
                 return $this->successResponse(
                     [
                         'orderId' => intval($orderId),
@@ -1042,15 +1082,28 @@ class MeituanController extends Controller
                 );
             }
 
+            // 构建备注信息
+            $remark = '美团已退款';
+            if (!empty($refundSerialNo)) {
+                $remark .= '，退款流水号：' . $refundSerialNo;
+            } elseif (!empty($refundTime)) {
+                $remark .= '，退款时间：' . $refundTime;
+            }
+            if (!empty($reason)) {
+                $remark .= '，原因：' . $reason;
+            }
+
             // 更新订单状态为CANCEL_APPROVED
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::CANCEL_APPROVED,
-                '美团已退款，退款流水号：' . $refundSerialNo
+                $remark
             );
 
-            // 记录退款流水号
-            $order->update(['refund_serial_no' => $refundSerialNo]);
+            // 记录退款流水号（如果提供）
+            if (!empty($refundSerialNo)) {
+                $order->update(['refund_serial_no' => $refundSerialNo]);
+            }
 
             // 释放库存
             $releaseResult = $this->releaseInventoryForPreOrder($order);
