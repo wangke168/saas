@@ -74,7 +74,8 @@ class MeituanController extends Controller
         $config->aes_iv = env('MEITUAN_AES_KEY', ''); // AES密钥存储在aes_iv字段
         
         // API URL 配置
-        $config->api_url = env('MEITUAN_API_URL', 'https://openapi.meituan.com');
+        // 根据美团文档，正确的API地址是 https://connectivity-adapter.meituan.com
+        $config->api_url = env('MEITUAN_API_URL', 'https://connectivity-adapter.meituan.com');
         $config->callback_url = env('MEITUAN_WEBHOOK_URL', '');
         $config->environment = 'production';
         $config->is_active = true;
