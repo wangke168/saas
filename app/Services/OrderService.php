@@ -75,6 +75,7 @@ class OrderService
             OrderStatus::CONFIRMING => in_array($to, [
                 OrderStatus::CONFIRMED,
                 OrderStatus::REJECTED,
+                OrderStatus::CANCEL_APPROVED, // 允许美团主动退款时直接取消（接单失败场景）
             ]),
             OrderStatus::CONFIRMED => in_array($to, [
                 OrderStatus::CANCEL_REQUESTED,

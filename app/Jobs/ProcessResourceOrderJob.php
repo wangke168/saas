@@ -272,7 +272,8 @@ class ProcessResourceOrderJob implements ShouldQueue
                 throw new \Exception('景区方接单失败（临时性错误）：' . ($result['message'] ?? '未知错误'));
             }
             
-            // 如果不是临时性错误，或已达到最大重试次数，创建异常订单（不通知携程）
+            // 如果不是临时性错误，或已达到最大重试次数，创建异常订单（不通知OTA平台）
+            // 注意：接单失败时不应该通知美团/携程，因为订单实际上没有成功
             $this->createExceptionOrder($result);
         }
     }
