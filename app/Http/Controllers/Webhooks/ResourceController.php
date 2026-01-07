@@ -58,11 +58,9 @@ class ResourceController extends Controller
             try {
                 // 解析回调数据，提取业务标识
                 $xmlObj = new SimpleXMLElement($rawBody);
-                $roomQuotaMapJson = (string)$xmlObj->RoomQuotaMap;
                 
-                // 处理转义的JSON字符串
-                $roomQuotaMapJson = stripslashes($roomQuotaMapJson);
-                $roomQuotaMap = json_decode($roomQuotaMapJson, true);
+                // 使用辅助方法解析JSON
+                $roomQuotaMap = $this->parseJsonFromXml($xmlObj->RoomQuotaMap);
                 
                 // 从第一个酒店数据中提取 hotelNo
                 $callbackData = [];
@@ -149,6 +147,71 @@ class ResourceController extends Controller
     }
 
     /**
+     * 从XML节点中解析JSON字符串
+     * 
+     * 处理各种可能的格式：
+     * 1. "[{\"hotelNo\":\"001\",...}]" - 带引号和转义
+     * 2. "[{"hotelNo":"001",...}]" - 带引号但无转义
+     * 3. [{"hotelNo":"001",...}] - 纯JSON数组
+     * 4. " \"[{\"hotelNo\":\"001\",...}]\" " - 前后有空格和引号
+     * 
+     * @param SimpleXMLElement $xmlNode XML节点
+     * @return array|null 解析后的数组，失败返回null
+     */
+    protected function parseJsonFromXml(SimpleXMLElement $xmlNode): ?array
+    {
+        $jsonString = trim((string)$xmlNode);
+        
+        if (empty($jsonString)) {
+            return null;
+        }
+        
+        // 记录原始值（用于调试）
+        $original = $jsonString;
+        
+        // 步骤1：去除外层引号（如果存在）
+        // 检查是否被引号包裹（支持单引号和双引号）
+        if ((str_starts_with($jsonString, '"') && str_ends_with($jsonString, '"')) 
+            || (str_starts_with($jsonString, "'") && str_ends_with($jsonString, "'"))) {
+            $jsonString = substr($jsonString, 1, -1);
+            $jsonString = trim($jsonString); // 去除引号后可能残留的空格
+        }
+        
+        // 步骤2：处理转义字符
+        $jsonString = stripslashes($jsonString);
+        
+        // 步骤3：再次trim（确保没有残留空格）
+        $jsonString = trim($jsonString);
+        
+        // 步骤4：解析JSON
+        $result = json_decode($jsonString, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::warning('资源方库存推送：JSON解析失败（经过清理后）', [
+                'original' => $original,
+                'cleaned' => $jsonString,
+                'original_length' => strlen($original),
+                'cleaned_length' => strlen($jsonString),
+                'cleaned_preview' => substr($jsonString, 0, 200),
+                'error' => json_last_error_msg(),
+            ]);
+            return null;
+        }
+        
+        if (!is_array($result)) {
+            Log::warning('资源方库存推送：JSON解析结果不是数组', [
+                'original' => $original,
+                'cleaned' => $jsonString,
+                'parsed_type' => gettype($result),
+                'parsed_value' => $result,
+            ]);
+            return null;
+        }
+        
+        return $result;
+    }
+
+    /**
      * 同步处理方式（原有逻辑，保持向后兼容）
      * 
      * @param string $rawBody XML请求体
@@ -158,36 +221,18 @@ class ResourceController extends Controller
     {
         // 解析XML请求
         $xmlObj = new SimpleXMLElement($rawBody);
-        $roomQuotaMapJson = (string)$xmlObj->RoomQuotaMap;
-
-        if (empty($roomQuotaMapJson)) {
+        
+        // 使用辅助方法解析JSON
+        $roomQuotaMap = $this->parseJsonFromXml($xmlObj->RoomQuotaMap);
+        
+        if ($roomQuotaMap === null) {
+            Log::error('资源方库存推送：JSON解析失败');
+            return $this->xmlResponse('-1', '数据格式错误：JSON解析失败');
+        }
+        
+        if (empty($roomQuotaMap)) {
             Log::warning('资源方库存推送：RoomQuotaMap为空');
             return $this->xmlResponse('0', '成功');
-        }
-
-        // 解析JSON字符串（可能需要先去除转义）
-        // 如果JSON字符串被转义了（如 \" 变成 \\\"），需要先处理
-        $roomQuotaMapJson = stripslashes($roomQuotaMapJson);
-        
-        $roomQuotaMap = json_decode($roomQuotaMapJson, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            Log::error('资源方库存推送：JSON解析失败', [
-                'json' => $roomQuotaMapJson,
-                'json_length' => strlen($roomQuotaMapJson),
-                'json_preview' => substr($roomQuotaMapJson, 0, 200),
-                'error' => json_last_error_msg(),
-            ]);
-            return $this->xmlResponse('-1', 'JSON解析失败');
-        }
-        
-        // 确保解析结果是数组
-        if (!is_array($roomQuotaMap)) {
-            Log::error('资源方库存推送：JSON解析结果不是数组', [
-                'json' => $roomQuotaMapJson,
-                'parsed_type' => gettype($roomQuotaMap),
-                'parsed_value' => $roomQuotaMap,
-            ]);
-            return $this->xmlResponse('-1', '数据格式错误：期望数组');
         }
 
         try {
