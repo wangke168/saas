@@ -156,7 +156,7 @@ class MeituanController extends Controller
             } elseif (str_contains($path, 'order/query')) {
                 return $this->handleOrderQuery($data);
             } elseif (str_contains($path, 'order/refund') && !str_contains($path, 'refunded')) {
-                return $this->handleOrderRefund($data);
+                return $this->handleOrderRefund($data, $request);
             } elseif (str_contains($path, 'order/refunded')) {
                 return $this->handleOrderRefunded($data);
             } elseif (str_contains($path, 'order/close')) {
@@ -168,7 +168,7 @@ class MeituanController extends Controller
                 } elseif (isset($body['refundSerialNo']) && isset($body['refundTime'])) {
                     return $this->handleOrderRefunded($data);
                 } elseif (isset($body['refundSerialNo'])) {
-                    return $this->handleOrderRefund($data);
+                    return $this->handleOrderRefund($data, $request);
                 } elseif (isset($body['orderId']) && isset($body['payTime'])) {
                     return $this->handleOrderPay($data, $request);
                 } elseif (isset($body['orderId'])) {
@@ -952,7 +952,7 @@ class MeituanController extends Controller
     /**
      * 处理订单退款（对应携程的CancelOrder）
      */
-    protected function handleOrderRefund(array $data): Response
+    protected function handleOrderRefund(array $data, Request $request): Response
     {
         try {
             // 获取partnerId（用于错误响应）
@@ -962,8 +962,8 @@ class MeituanController extends Controller
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
             $refundQuantity = intval($body['refundQuantity'] ?? 0);
-            // 获取退款流水号
-            $refundId = $body['refundId'] ;
+            // 获取退款流水号（根据文档，refundId是必填字段）
+            $refundId = $body['refundId'] ?? '';
 
             if (empty($orderId)) {
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
@@ -1024,6 +1024,16 @@ class MeituanController extends Controller
                 'product_id' => $order->product_id,
             ]);
 
+            // 检查请求是否加密
+            // 如果请求头中有 X-Encryption-Status: encrypted，表示请求是加密的，响应也应该加密
+            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+            
+            Log::info('美团订单退款：检查请求加密状态', [
+                'order_id' => $order->id,
+                'request_encrypted' => $encryptResponse,
+                'x_encryption_status' => $request->header('X-Encryption-Status'),
+            ]);
+
             // 先响应美团（不等待景区方接口）
             // 系统直连和非系统直连都返回 code=602（审批中）
             $code = 602; // 审批中
@@ -1051,16 +1061,18 @@ class MeituanController extends Controller
 
             // 返回审批中响应（code=602）
             // 根据美团文档，退款审批中时外层code应该是602，body中包含orderId、partnerOrderId、refundId
+            // 如果请求是加密的，响应也应该加密
             return $this->successResponse(
                 [
                     'orderId' => intval($orderId),
                     'partnerOrderId' => $order->order_no,
-                    'refundId' => $refundId,  // 使用已获取的 refundId（兼容可能的字段名错误）
+                    'refundId' => $refundId,  // 根据文档，refundId是必填字段
                 ],
                 $partnerId,
                 null,
                 602,  // 外层code=602（审批中）
-                '退款审批中'  // 外层describe='退款审批中'
+                '退款审批中',  // 外层describe='退款审批中'
+                $encryptResponse  // 根据请求的加密状态决定响应是否加密
             );
 
         } catch (\Exception $e) {
