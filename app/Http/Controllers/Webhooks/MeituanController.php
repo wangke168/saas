@@ -407,6 +407,14 @@ class MeituanController extends Controller
             // 测试开关：通过环境变量控制，设置为 true 时模拟景区闭园
             // 测试完成后，删除以下代码块（从这行到 "测试代码结束" 之间的所有代码）
             // 查找方法：在文件中搜索 "测试场景-景区闭园" 即可找到
+            // 
+            // 根据美团文档，订单创建V2失败响应格式：
+            // {
+            //   "code": 421,
+            //   "describe": "景区已闭园",
+            //   "partnerId": 26465
+            // }
+            // 注意：订单创建V2接口是全局加密的，响应需要加密（Base64字符串）
             $testScenicClosed = env('MEITUAN_TEST_SCENIC_CLOSED', false);
             if ($testScenicClosed === true || $testScenicClosed === 'true' || $testScenicClosed === '1') {
                 DB::rollBack();
@@ -414,7 +422,9 @@ class MeituanController extends Controller
                     'order_id' => $orderId,
                     'partner_deal_id' => $partnerDealId,
                 ]);
-                return $this->errorResponse(421, '景区已闭园', $partnerId, true);  // 订单创建V2需要加密
+                // 根据文档，订单创建V2失败响应格式：code、describe、partnerId（无body字段）
+                // 接口是全局加密的，所以响应需要加密
+                return $this->errorResponse(421, '景区已闭园', $partnerId, true);
             }
             // ============================================
             // 测试代码结束
