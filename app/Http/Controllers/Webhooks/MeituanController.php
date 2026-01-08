@@ -424,7 +424,7 @@ class MeituanController extends Controller
                 ]);
                 // 根据文档，订单创建V2失败响应格式：code、describe、partnerId（无body字段）
                 // 接口是全局加密的，所以响应需要加密
-                return $this->errorResponse(410, '未开始售卖该日期或场次，此产品的购买规则为XXX', $partnerId, true);
+                return $this->errorResponse(410, '下单时需包含传游玩日期参数', $partnerId, true);
             }
             // ============================================
             // 测试代码结束
