@@ -424,7 +424,7 @@ class MeituanController extends Controller
                 ]);
                 // 根据文档，订单创建V2失败响应格式：code、describe、partnerId（无body字段）
                 // 接口是全局加密的，所以响应需要加密
-                return $this->errorResponse(410, '证件信息缺失，当前支持证件类型有：ABCDEFG', $partnerId, true);
+                return $this->errorResponse(410, '游客姓名和身份证号不匹配，建议修正后下单', $partnerId, true);
             }
             // ============================================
             // 测试代码结束
