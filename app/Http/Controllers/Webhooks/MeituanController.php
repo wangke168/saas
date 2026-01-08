@@ -1603,7 +1603,6 @@ class MeituanController extends Controller
                     'error' => $e->getMessage(),
                     'raw_body_preview' => substr($rawBody, 0, 100),
                 ]);
-                // 请求是加密的，响应也应该加密
                 return $this->errorResponse(400, '请求数据解密失败', $partnerId, $encryptResponse);
             }
 
@@ -1614,8 +1613,6 @@ class MeituanController extends Controller
                     'error' => json_last_error_msg(),
                     'decrypted_body' => $decryptedBody,
                 ]);
-                // 请求是加密的，响应也应该加密
-                $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
                 return $this->errorResponse(400, '请求数据格式错误', $partnerId, $encryptResponse);
             }
 
@@ -1628,7 +1625,7 @@ class MeituanController extends Controller
             if (empty($partnerDealId) || empty($startTime) || empty($endTime)) {
                 return $this->errorResponse(400, '参数不完整', $partnerId, $encryptResponse);
             }
-            
+
             // 查找产品
             $product = \App\Models\Product::where('code', $partnerDealId)->first();
             if (!$product) {
@@ -1731,11 +1728,6 @@ class MeituanController extends Controller
                 ];
             }
 
-            Log::info('美团拉取多层价格日历V2：检查请求加密状态', [
-                'request_encrypted' => $encryptResponse,
-                'x_encryption_status' => $request->header('X-Encryption-Status'),
-            ]);
-            
             // 返回成功响应，传递 partnerId 和 partnerDealId
             // 根据请求的加密状态决定响应是否加密
             return $this->successResponse($responseBody, $partnerId, $partnerDealId, 200, 'success', $encryptResponse);
@@ -1746,7 +1738,9 @@ class MeituanController extends Controller
             ]);
 
             $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
-            return $this->errorResponse(599, '系统处理异常', $partnerId);
+            // 检查请求是否加密，决定错误响应是否加密
+            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+            return $this->errorResponse(599, '系统处理异常', $partnerId, $encryptResponse);
         }
     }
 }
