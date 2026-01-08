@@ -29,13 +29,6 @@ class SoftwareProvider extends Model
         ];
     }
 
-    protected function casts(): array
-    {
-        return [
-            'is_active' => 'boolean',
-        ];
-    }
-
     /**
      * 景区列表（多对多关系）
      */
