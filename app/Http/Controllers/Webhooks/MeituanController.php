@@ -1257,7 +1257,9 @@ class MeituanController extends Controller
                 // 订单关闭接口不加密（根据文档：是否加密 = -）
                 return $this->errorResponse(400, '订单不存在', $partnerId, false);
             }
-            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+            // 检查请求是否加密
+            // 如果请求头中有 X-Encryption-Status: encrypted，表示请求是加密的，响应也应该加密
+            $requestEncrypted = $request->header('X-Encryption-Status') === 'encrypted';
             // 幂等性检查：如果订单状态已经是CANCEL_APPROVED，直接返回成功
             if ($order->status === OrderStatus::CANCEL_APPROVED) {
                 // 订单关闭接口响应格式：{code, describe, partnerId}，不包含body字段
@@ -1268,7 +1270,7 @@ class MeituanController extends Controller
                     null,
                     200,
                     'success',
-                    $encryptResponse  // 根据请求的加密状态决定响应是否加密
+                    $requestEncrypted  // 根据请求的加密状态决定响应是否加密
                 );
             }
 
