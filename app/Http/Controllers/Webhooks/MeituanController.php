@@ -401,6 +401,25 @@ class MeituanController extends Controller
             $contacts = $body['contacts'] ?? [];
             $contactInfo = !empty($contacts) ? $contacts[0] : [];
             
+            // ============================================
+            // ⚠️ 测试代码：景区闭园场景（测试完成后删除）
+            // ============================================
+            // 测试开关：通过环境变量控制，设置为 true 时模拟景区闭园
+            // 测试完成后，删除以下代码块（从这行到 "测试代码结束" 之间的所有代码）
+            // 查找方法：在文件中搜索 "测试场景-景区闭园" 即可找到
+            $testScenicClosed = env('MEITUAN_TEST_SCENIC_CLOSED', false);
+            if ($testScenicClosed === true || $testScenicClosed === 'true' || $testScenicClosed === '1') {
+                DB::rollBack();
+                Log::info('美团订单创建V2：测试场景-景区闭园', [
+                    'order_id' => $orderId,
+                    'partner_deal_id' => $partnerDealId,
+                ]);
+                return $this->errorResponse(421, '景区已闭园', $partnerId, true);  // 订单创建V2需要加密
+            }
+            // ============================================
+            // 测试代码结束
+            // ============================================
+            
             // 处理游客信息（美团可能使用 visitors 字段）
             if (empty($contacts) && !empty($body['visitors'])) {
                 $contacts = $body['visitors'];
