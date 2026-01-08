@@ -1573,17 +1573,23 @@ class MeituanController extends Controller
 
             $client = $this->getClient();
             if (!$client) {
-                return $this->errorResponse(500, '美团配置不存在', null);
+                // 检查请求是否加密，决定错误响应是否加密
+                $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+                return $this->errorResponse(500, '美团配置不存在', null, $encryptResponse);
             }
 
             // 获取partnerId（用于错误响应）
             $partnerId = $client->getPartnerId();
+            
+            // 检查请求是否加密，决定响应是否加密
+            // 如果请求头中有 X-Encryption-Status: encrypted，表示请求是加密的，响应也应该加密
+            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
 
-            // 获取原始请求体（美团发送的是加密的Base64字符串）
+            // 获取原始请求体（美团发送的可能是加密的Base64字符串）
             $rawBody = $request->getContent();
             if (empty($rawBody)) {
                 Log::warning('美团拉取多层价格日历V2：原始请求体为空');
-                return $this->errorResponse(400, '请求体为空', $partnerId);
+                return $this->errorResponse(400, '请求体为空', $partnerId, $encryptResponse);
             }
 
             // 解密请求体
@@ -1597,7 +1603,8 @@ class MeituanController extends Controller
                     'error' => $e->getMessage(),
                     'raw_body_preview' => substr($rawBody, 0, 100),
                 ]);
-                return $this->errorResponse(400, '请求数据解密失败', $partnerId);
+                // 请求是加密的，响应也应该加密
+                return $this->errorResponse(400, '请求数据解密失败', $partnerId, $encryptResponse);
             }
 
             $data = json_decode($decryptedBody, true);
@@ -1607,7 +1614,9 @@ class MeituanController extends Controller
                     'error' => json_last_error_msg(),
                     'decrypted_body' => $decryptedBody,
                 ]);
-                return $this->errorResponse(400, '请求数据格式错误', $partnerId);
+                // 请求是加密的，响应也应该加密
+                $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+                return $this->errorResponse(400, '请求数据格式错误', $partnerId, $encryptResponse);
             }
 
             $body = $data['body'] ?? $data;
@@ -1617,13 +1626,13 @@ class MeituanController extends Controller
             $asyncType = intval($body['asyncType'] ?? 0); // 0=同步，1=异步
 
             if (empty($partnerDealId) || empty($startTime) || empty($endTime)) {
-                return $this->errorResponse(400, '参数不完整', $partnerId);
+                return $this->errorResponse(400, '参数不完整', $partnerId, $encryptResponse);
             }
-
+            
             // 查找产品
             $product = \App\Models\Product::where('code', $partnerDealId)->first();
             if (!$product) {
-                return $this->errorResponse(505, '产品不存在', $partnerId);
+                return $this->errorResponse(505, '产品不存在', $partnerId, $encryptResponse);
             }
             
             // 如果异步拉取，返回code=999，然后通过"多层价格日历变化通知V2"推送
@@ -1635,7 +1644,8 @@ class MeituanController extends Controller
                     $partnerId,
                     $partnerDealId,
                     999,  // 外层code=999
-                    '异步拉取，将通过通知接口推送'  // 外层describe
+                    '异步拉取，将通过通知接口推送',  // 外层describe
+                    $encryptResponse  // 根据请求的加密状态决定响应是否加密
                 );
             }
 
@@ -1721,8 +1731,14 @@ class MeituanController extends Controller
                 ];
             }
 
+            Log::info('美团拉取多层价格日历V2：检查请求加密状态', [
+                'request_encrypted' => $encryptResponse,
+                'x_encryption_status' => $request->header('X-Encryption-Status'),
+            ]);
+            
             // 返回成功响应，传递 partnerId 和 partnerDealId
-            return $this->successResponse($responseBody, $partnerId, $partnerDealId);
+            // 根据请求的加密状态决定响应是否加密
+            return $this->successResponse($responseBody, $partnerId, $partnerDealId, 200, 'success', $encryptResponse);
         } catch (\Exception $e) {
             Log::error('美团拉取多层价格日历V2失败', [
                 'error' => $e->getMessage(),

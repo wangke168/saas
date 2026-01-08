@@ -302,3 +302,149 @@ Route::prefix('tickets')->group(function () {
         Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);
     });
 });
+
+        Route::delete('/{product}', [\App\Http\Controllers\ProductController::class, 'destroy']);
+    });
+
+    // OTA产品管理
+    Route::prefix('ota-products')->group(function () {
+        Route::post('/{otaProduct}/push', [\App\Http\Controllers\OtaProductController::class, 'push']);
+        Route::put('/{otaProduct}', [\App\Http\Controllers\OtaProductController::class, 'update']);
+        Route::delete('/{otaProduct}', [\App\Http\Controllers\OtaProductController::class, 'destroy']);
+    });
+
+    // 价格管理
+    Route::prefix('prices')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PriceController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\PriceController::class, 'store']);
+        Route::put('/{price}', [\App\Http\Controllers\PriceController::class, 'update']);
+        Route::delete('/{price}', [\App\Http\Controllers\PriceController::class, 'destroy']);
+    });
+
+    // 加价规则管理
+    Route::prefix('price-rules')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PriceRuleController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\PriceRuleController::class, 'store']);
+        Route::get('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'show']);
+        Route::put('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'update']);
+        Route::delete('/{priceRule}', [\App\Http\Controllers\PriceRuleController::class, 'destroy']);
+    });
+
+    // 库存管理
+    Route::prefix('inventories')->group(function () {
+        Route::get('/', [\App\Http\Controllers\InventoryController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\InventoryController::class, 'store']);
+        Route::put('/{inventory}', [\App\Http\Controllers\InventoryController::class, 'update']);
+        Route::post('/{inventory}/close', [\App\Http\Controllers\InventoryController::class, 'close']);
+        Route::post('/{inventory}/open', [\App\Http\Controllers\InventoryController::class, 'open']);
+    });
+
+    // 订单管理
+    Route::prefix('orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
+        Route::get('/{order}', [\App\Http\Controllers\OrderController::class, 'show']);
+        Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
+        // 订单操作
+        Route::post('/{order}/confirm', [\App\Http\Controllers\OrderController::class, 'confirmOrder']);
+        Route::post('/{order}/reject', [\App\Http\Controllers\OrderController::class, 'rejectOrder']);
+        Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);
+        Route::post('/{order}/approve-cancel', [\App\Http\Controllers\OrderController::class, 'approveCancel']);
+        Route::post('/{order}/reject-cancel', [\App\Http\Controllers\OrderController::class, 'rejectCancel']);
+    });
+
+    // 异常订单处理
+    Route::prefix('exception-orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ExceptionOrderController::class, 'index']);
+        Route::get('/{exceptionOrder}', [\App\Http\Controllers\ExceptionOrderController::class, 'show']);
+        Route::post('/{exceptionOrder}/start-processing', [\App\Http\Controllers\ExceptionOrderController::class, 'startProcessing']);
+        Route::post('/{exceptionOrder}/resolve', [\App\Http\Controllers\ExceptionOrderController::class, 'resolve']);
+    });
+
+// 门票管理
+Route::prefix('tickets')->group(function () {
+    Route::get('/', [\App\Http\Controllers\TicketController::class, 'index']);
+    Route::post('/', [\App\Http\Controllers\TicketController::class, 'store']);
+    Route::get('/{ticket}', [\App\Http\Controllers\TicketController::class, 'show']);
+    Route::put('/{ticket}', [\App\Http\Controllers\TicketController::class, 'update']);
+    Route::delete('/{ticket}', [\App\Http\Controllers\TicketController::class, 'destroy']);
+});
+
+    // 门票价库管理
+    Route::prefix('ticket-prices')->middleware('role:admin,operator')->group(function () {
+        Route::get('/', [\App\Http\Controllers\TicketPriceController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\TicketPriceController::class, 'store']);
+        Route::post('/batch', [\App\Http\Controllers\TicketPriceController::class, 'batchStore']);
+        Route::put('/{ticketPrice}', [\App\Http\Controllers\TicketPriceController::class, 'update']);
+        Route::delete('/{ticketPrice}', [\App\Http\Controllers\TicketPriceController::class, 'destroy']);
+    });
+
+    // 打包酒店管理
+    Route::prefix('res-hotels')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ResHotelController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\ResHotelController::class, 'store']);
+        Route::get('/{resHotel}', [\App\Http\Controllers\ResHotelController::class, 'show']);
+        Route::put('/{resHotel}', [\App\Http\Controllers\ResHotelController::class, 'update']);
+        Route::delete('/{resHotel}', [\App\Http\Controllers\ResHotelController::class, 'destroy']);
+    });
+
+    // 打包房型管理
+    Route::prefix('res-room-types')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ResRoomTypeController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\ResRoomTypeController::class, 'store']);
+        Route::get('/{resRoomType}', [\App\Http\Controllers\ResRoomTypeController::class, 'show']);
+        Route::put('/{resRoomType}', [\App\Http\Controllers\ResRoomTypeController::class, 'update']);
+        Route::delete('/{resRoomType}', [\App\Http\Controllers\ResRoomTypeController::class, 'destroy']);
+    });
+
+    // 打包价库管理
+    Route::prefix('res-hotel-daily-stocks')->group(function () {
+        Route::get('/', [\App\Http\Controllers\ResHotelDailyStockController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\ResHotelDailyStockController::class, 'store']);
+        Route::post('/batch', [\App\Http\Controllers\ResHotelDailyStockController::class, 'batchStore']); // 批量设置
+        Route::put('/{resHotelDailyStock}', [\App\Http\Controllers\ResHotelDailyStockController::class, 'update']);
+        Route::delete('/{resHotelDailyStock}', [\App\Http\Controllers\ResHotelDailyStockController::class, 'destroy']);
+    });
+
+    // 打包产品管理
+    Route::prefix('pkg-products')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PkgProductController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\PkgProductController::class, 'store']);
+        Route::get('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'show']);
+        Route::put('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'update']);
+        Route::delete('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'destroy']);
+        
+        // 价格管理路由（需要操作员或管理员权限）
+        Route::prefix('{pkgProduct}/prices')->middleware('role:admin,operator')->group(function () {
+            Route::post('/calculate', [\App\Http\Controllers\PkgProductPriceController::class, 'calculate']);
+            Route::post('/recalculate', [\App\Http\Controllers\PkgProductPriceController::class, 'recalculate']);
+            Route::post('/sync-to-ota', [\App\Http\Controllers\PkgProductPriceController::class, 'syncToOta']);
+            Route::get('/calendar', [\App\Http\Controllers\PkgProductPriceController::class, 'getPriceCalendar']);
+        });
+    });
+
+    // OTA平台管理（只读）
+    // OTA平台公开接口（用于产品绑定时的下拉选择）
+    Route::prefix('ota-platforms')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OtaPlatformController::class, 'index']);
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\OtaPlatformController::class, 'show']);
+    });
+
+    // OTA平台管理接口（仅超级管理员）
+    Route::prefix('admin/ota-platforms')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'store']);
+        
+        // OTA配置管理（必须在/{otaPlatform}之前，避免路由冲突）
+        Route::get('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'show']);
+        Route::post('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'store']);
+        
+        // OTA平台CRUD
+        Route::get('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'show']);
+        Route::put('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'update']);
+        Route::delete('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'destroy']);
+        
+        // OTA配置更新和删除（使用config ID）
+        Route::put('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'update']);
+        Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);
+    });
+});
