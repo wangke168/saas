@@ -424,7 +424,7 @@ class MeituanController extends Controller
                 ]);
                 // 根据文档，订单创建V2失败响应格式：code、describe、partnerId（无body字段）
                 // 接口是全局加密的，所以响应需要加密
-                return $this->errorResponse(421, '此产品已下架，全部日期场次均不可售', $partnerId, true);
+                return $this->errorResponse(420, '库存不足', $partnerId, true);
             }
             // ============================================
             // 测试代码结束
