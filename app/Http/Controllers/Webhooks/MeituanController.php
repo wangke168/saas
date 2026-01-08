@@ -424,7 +424,7 @@ class MeituanController extends Controller
                 ]);
                 // 根据文档，订单创建V2失败响应格式：code、describe、partnerId（无body字段）
                 // 接口是全局加密的，所以响应需要加密
-                return $this->errorResponse(410, '该用户不符合年龄限购规则，本产品适用年龄为X（包含/不包含）-Y（包含/不包含），按照生日/年份计算', $partnerId, true);
+                return $this->errorResponse(410, '该用户不符合区域限购规则，本产品适用XXX区域', $partnerId, true);
             }
             // ============================================
             // 测试代码结束
