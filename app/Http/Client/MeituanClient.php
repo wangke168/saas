@@ -313,14 +313,19 @@ class MeituanClient
     /**
      * 多层价格日历变化通知V2（商家调用美团）
      * 
-     * 根据文档，请求格式应该是：
+     * 根据文档和错误信息分析，美团接口期望整个请求体都是加密的Base64字符串
+     * 而不是JSON格式。因此需要先构建JSON，然后加密整个请求体。
+     * 
+     * 请求格式（加密前）：
      * {
      *   "partnerId": 99999,
      *   "startTime": "2022-05-09",
      *   "endTime": "2022-05-09",
      *   "partnerDealId": "LevelDealId",
-     *   "body": "加密的JSON字符串"  // 只有body字段需要加密
+     *   "body": [...]
      * }
+     * 
+     * 请求格式（加密后）：整个JSON字符串加密成Base64字符串
      * 
      * @param array $data 请求数据（包含partnerId、startTime、endTime、partnerDealId、body等）
      * @return array
@@ -345,16 +350,137 @@ class MeituanClient
             $requestData['partnerDealId'] = $data['partnerDealId'];
         }
         
-        // 如果data中有body字段（数组），需要加密
-        if (isset($data['body']) && is_array($data['body'])) {
-            $bodyJson = json_encode($data['body'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $requestData['body'] = $this->encryptBody($bodyJson);
-        } elseif (isset($data['body']) && is_string($data['body'])) {
-            // 如果body已经是字符串（已加密），直接使用
+        // 如果data中有body字段，添加到请求数据中
+        if (isset($data['body'])) {
             $requestData['body'] = $data['body'];
         }
         
-        return $this->request('POST', $url, $requestData);
+        // 将整个请求数据转换为JSON，然后加密整个请求体
+        $jsonBody = json_encode($requestData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($jsonBody === false) {
+            throw new \Exception('JSON编码失败: ' . json_last_error_msg());
+        }
+        
+        // 加密整个请求体
+        $encryptedBody = $this->encryptBody($jsonBody);
+        
+        // 直接发送加密后的字符串，不使用 request 方法（因为 request 方法会再次处理）
+        return $this->sendEncryptedRequest('POST', $url, $encryptedBody);
+    }
+    
+    /**
+     * 发送加密的请求（整个请求体都是加密的Base64字符串）
+     * 
+     * @param string $method HTTP方法
+     * @param string $url 完整URL
+     * @param string $encryptedBody 已加密的请求体（Base64字符串）
+     * @return array
+     */
+    protected function sendEncryptedRequest(string $method, string $url, string $encryptedBody): array
+    {
+        try {
+            // 解析URL获取URI路径
+            $parsedUrl = parse_url($url);
+            $uri = $parsedUrl['path'] ?? '/';
+            if (isset($parsedUrl['query'])) {
+                $uri .= '?' . $parsedUrl['query'];
+            }
+
+            // 构建BA认证Header
+            $headers = $this->buildAuthHeaders($method, $uri);
+            $headers['Content-Type'] = 'application/json; charset=utf-8';
+
+            Log::info('美团API请求（全量加密）', [
+                'url' => $url,
+                'method' => $method,
+                'uri' => $uri,
+                'headers' => $headers,
+                'body_length' => strlen($encryptedBody),
+            ]);
+
+            // 发送请求（POST请求时，加密的body作为请求体发送）
+            if ($method === 'POST') {
+                $response = Http::timeout(30)
+                    ->withHeaders($headers)
+                    ->withBody($encryptedBody, 'application/json; charset=utf-8')
+                    ->post($url);
+            } else {
+                $response = Http::timeout(30)
+                    ->withHeaders($headers)
+                    ->send($method, $url);
+            }
+
+            $statusCode = $response->status();
+            $rawBody = $response->body();
+
+            Log::info('美团API响应（全量加密）', [
+                'url' => $url,
+                'status' => $statusCode,
+                'body_length' => strlen($rawBody),
+                'body_preview' => substr($rawBody, 0, 200),
+            ]);
+
+            // 如果响应体为空，直接返回
+            if (empty($rawBody)) {
+                return [
+                    'code' => $statusCode,
+                    'describe' => $statusCode === 200 ? 'success' : 'error',
+                ];
+            }
+
+            // 解密响应体
+            try {
+                $decryptedBody = $this->decryptBody($rawBody);
+            } catch (\Exception $e) {
+                // 如果解密失败，可能是响应体未加密（某些接口可能不加密）
+                Log::warning('美团响应解密失败，尝试直接解析JSON', [
+                    'url' => $url,
+                    'error' => $e->getMessage(),
+                ]);
+                $decryptedBody = $rawBody;
+            }
+
+            $responseData = json_decode($decryptedBody, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                Log::warning('美团响应JSON解析失败', [
+                    'url' => $url,
+                    'error' => json_last_error_msg(),
+                    'decrypted_body' => $decryptedBody,
+                ]);
+                return [
+                    'success' => false,
+                    'message' => '响应解析失败',
+                    'raw' => $decryptedBody,
+                ];
+            }
+
+            Log::info('美团API响应（解密后）', [
+                'url' => $url,
+                'response_data' => $responseData,
+            ]);
+
+            return $responseData ?? [];
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('美团API请求连接异常', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+            ]);
+            return [
+                'success' => false,
+                'message' => '网络连接异常：' . $e->getMessage(),
+            ];
+        } catch (\Exception $e) {
+            Log::error('美团API请求异常', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return [
+                'success' => false,
+                'message' => '请求异常：' . $e->getMessage(),
+            ];
+        }
     }
 
     /**
