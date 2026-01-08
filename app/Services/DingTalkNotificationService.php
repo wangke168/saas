@@ -274,9 +274,11 @@ class DingTalkNotificationService
         // 3. 获取资源方绑定的运营人员
         $operatorIds = collect();
         foreach ($resourceProviders as $provider) {
+            // 先获取用户对象，再提取ID，避免SQL字段歧义
             $providerOperatorIds = $provider->users()
                 ->where('role', UserRole::OPERATOR)
                 ->where('is_active', true)
+                ->get()
                 ->pluck('id');
             $operatorIds = $operatorIds->merge($providerOperatorIds);
         }
