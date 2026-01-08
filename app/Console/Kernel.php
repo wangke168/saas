@@ -38,6 +38,9 @@ class Kernel extends ConsoleKernel
                 \App\Jobs\Pkg\UpdatePkgProductPriceJob::dispatch($product->id);
             }
         })->dailyAt('02:00'); // 每天凌晨2点执行
+
+        // 每天凌晨2点查询订单核销状态
+        $schedule->command('order:query-verification-status')->dailyAt('02:00');
     }
 
     /**

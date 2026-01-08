@@ -18,7 +18,16 @@ class SoftwareProvider extends Model
         'api_type',
         'api_url',
         'is_active',
+        'verification_config',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+            'verification_config' => 'array',
+        ];
+    }
 
     protected function casts(): array
     {

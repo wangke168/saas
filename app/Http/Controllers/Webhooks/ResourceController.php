@@ -510,6 +510,221 @@ class ResourceController extends Controller
     }
 
     /**
+     * 接收资源方推送的订单核销状态
+     * 
+     * 路由格式：/webhooks/resource/{api_type}/order-verification
+     * 通过路由参数 {api_type} 识别软件服务商（如：hengdian）
+     * 
+     * @param Request $request
+     * @param string $apiType 软件服务商的api_type（从路由参数获取）
+     * @return JsonResponse
+     */
+    public function handleOrderVerification(Request $request, string $apiType): JsonResponse
+    {
+        try {
+            $rawBody = $request->getContent();
+            $headers = $request->headers->all();
+            
+            Log::info('资源方订单核销状态推送', [
+                'api_type' => $apiType,
+                'body' => $rawBody,
+                'headers' => $headers,
+            ]);
+
+            // 根据api_type查找软件服务商
+            $softwareProvider = SoftwareProvider::where('api_type', $apiType)->first();
+            
+            if (!$softwareProvider) {
+                Log::error('资源方订单核销状态推送：未找到软件服务商', [
+                    'api_type' => $apiType,
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => '未找到软件服务商：' . $apiType,
+                ], 404);
+            }
+
+            // 根据不同的服务商类型，调用对应的处理方法
+            $handlerMethod = 'handle' . ucfirst($apiType) . 'OrderVerification';
+            
+            if (method_exists($this, $handlerMethod)) {
+                return $this->$handlerMethod($request, $softwareProvider);
+            }
+
+            // 如果没有特定的处理方法，使用通用处理方法
+            return $this->handleGenericOrderVerification($request, $softwareProvider);
+            
+        } catch (\Exception $e) {
+            Log::error('资源方订单核销状态推送：处理异常', [
+                'api_type' => $apiType,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '处理异常：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * 处理横店系统的订单核销状态推送
+     * 
+     * @param Request $request
+     * @param SoftwareProvider $softwareProvider
+     * @return JsonResponse
+     */
+    protected function handleHengdianOrderVerification(Request $request, SoftwareProvider $softwareProvider): JsonResponse
+    {
+        try {
+            $rawBody = $request->getContent();
+            
+            // 解析XML请求
+            $xmlObj = new SimpleXMLElement($rawBody);
+            
+            // 提取订单号和状态（根据横店系统的实际推送格式调整）
+            $otaOrderNo = (string)($xmlObj->OtaOrderId ?? '');
+            $status = (string)($xmlObj->Status ?? '');
+            
+            if (empty($otaOrderNo)) {
+                Log::error('横店订单核销推送：订单号为空', [
+                    'body' => $rawBody,
+                ]);
+                return $this->xmlResponse('-1', '订单号不能为空');
+            }
+
+            // 查找订单
+            $order = \App\Models\Order::where('ota_order_no', $otaOrderNo)->first();
+            
+            if (!$order) {
+                Log::warning('横店订单核销推送：订单不存在', [
+                    'ota_order_no' => $otaOrderNo,
+                ]);
+                return $this->xmlResponse('-1', '订单不存在');
+            }
+
+            // 只有状态为'5'（已使用/已核销）时才处理
+            if ($status !== '5') {
+                Log::info('横店订单核销推送：订单状态不是已核销，跳过处理', [
+                    'ota_order_no' => $otaOrderNo,
+                    'status' => $status,
+                ]);
+                return $this->xmlResponse('0', '订单状态不是已核销');
+            }
+
+            // 构建核销数据
+            $verificationData = [
+                'status' => \App\Enums\OrderStatus::VERIFIED->value,
+                'verified_at' => isset($xmlObj->VerifiedTime) ? (string)$xmlObj->VerifiedTime : null,
+                'use_start_date' => isset($xmlObj->UseStartDate) ? (string)$xmlObj->UseStartDate : null,
+                'use_end_date' => isset($xmlObj->UseEndDate) ? (string)$xmlObj->UseEndDate : null,
+                'use_quantity' => isset($xmlObj->UseQuantity) ? (int)$xmlObj->UseQuantity : null,
+                'passengers' => [],
+                'vouchers' => [],
+            ];
+
+            // 异步处理订单核销状态（避免阻塞webhook响应）
+            \App\Jobs\ProcessOrderVerificationJob::dispatch($order->id, $verificationData, 'webhook')
+                ->onQueue('order-verification');
+
+            Log::info('横店订单核销推送：已接收并放入队列', [
+                'ota_order_no' => $otaOrderNo,
+                'order_id' => $order->id,
+            ]);
+
+            return $this->xmlResponse('0', '已接收');
+            
+        } catch (\Exception $e) {
+            Log::error('横店订单核销推送：处理失败', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            return $this->xmlResponse('-1', '处理失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 通用订单核销状态推送处理（适用于其他服务商）
+     * 
+     * @param Request $request
+     * @param SoftwareProvider $softwareProvider
+     * @return JsonResponse
+     */
+    protected function handleGenericOrderVerification(Request $request, SoftwareProvider $softwareProvider): JsonResponse
+    {
+        try {
+            // 尝试解析JSON格式的请求
+            $data = $request->json()->all();
+            
+            $otaOrderNo = $data['order_no'] ?? $data['ota_order_no'] ?? $data['orderId'] ?? '';
+            $status = $data['status'] ?? '';
+            
+            if (empty($otaOrderNo)) {
+                Log::error('通用订单核销推送：订单号为空', [
+                    'data' => $data,
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => '订单号不能为空',
+                ], 400);
+            }
+
+            // 查找订单
+            $order = \App\Models\Order::where('ota_order_no', $otaOrderNo)->first();
+            
+            if (!$order) {
+                Log::warning('通用订单核销推送：订单不存在', [
+                    'ota_order_no' => $otaOrderNo,
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => '订单不存在',
+                ], 404);
+            }
+
+            // 构建核销数据
+            $verificationData = [
+                'status' => $status === 'verified' || $status === '5' ? \App\Enums\OrderStatus::VERIFIED->value : $status,
+                'verified_at' => $data['verified_at'] ?? null,
+                'use_start_date' => $data['use_start_date'] ?? null,
+                'use_end_date' => $data['use_end_date'] ?? null,
+                'use_quantity' => $data['use_quantity'] ?? null,
+                'passengers' => $data['passengers'] ?? [],
+                'vouchers' => $data['vouchers'] ?? [],
+            ];
+
+            // 异步处理订单核销状态
+            \App\Jobs\ProcessOrderVerificationJob::dispatch($order->id, $verificationData, 'webhook')
+                ->onQueue('order-verification');
+
+            Log::info('通用订单核销推送：已接收并放入队列', [
+                'api_type' => $softwareProvider->api_type,
+                'ota_order_no' => $otaOrderNo,
+                'order_id' => $order->id,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => '已接收',
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('通用订单核销推送：处理失败', [
+                'api_type' => $softwareProvider->api_type,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => '处理失败：' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * 返回XML响应
      */
     protected function xmlResponse(string $resultCode, string $message): \Illuminate\Http\Response

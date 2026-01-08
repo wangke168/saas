@@ -714,43 +714,42 @@ class CtripController extends Controller
                     'items' => $this->buildResponseItems($items, $order), // 必填
                 ]);
             } else {
-                // 非系统直连：同步确认（保持现有逻辑）
-                Log::info('携程预下单支付：非系统直连，同步确认', [
+                // 非系统直连：创建异常订单，等待人工操作
+                Log::info('携程预下单支付：非系统直连，创建异常订单等待人工处理', [
                     'order_id' => $order->id,
                     'current_status' => $order->status->value,
                 ]);
                 
                 try {
-                    // 先转换为确认中，再转换为预订成功（符合状态转换规则）
-                    Log::info('携程预下单支付：开始更新订单状态为确认中', [
-                        'order_id' => $order->id,
-                        'from_status' => $order->status->value,
-                        'to_status' => OrderStatus::CONFIRMING->value,
-                    ]);
-                    
-                    $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程预下单支付成功，开始确认订单');
-                    $order->refresh(); // 刷新订单状态
+                    // 1. 更新订单状态为确认中
+                    $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程预下单支付成功，等待人工接单');
+                    $order->refresh();
                     
                     Log::info('携程预下单支付：订单状态已更新为确认中', [
                         'order_id' => $order->id,
                         'current_status' => $order->status->value,
                     ]);
                     
-                    Log::info('携程预下单支付：开始更新订单状态为预订成功', [
+                    // 2. 创建异常订单
+                    $sequenceId = $data['sequenceId'] ?? null;
+                    ExceptionOrder::create([
                         'order_id' => $order->id,
-                        'from_status' => $order->status->value,
-                        'to_status' => OrderStatus::CONFIRMED->value,
+                        'exception_type' => ExceptionOrderType::API_ERROR,
+                        'exception_message' => '非系统直连订单，等待人工接单',
+                        'exception_data' => [
+                            'operation' => 'confirm',
+                            'sequence_id' => $sequenceId,
+                            'ctrip_order_id' => $ctripOrderId,
+                            'ctrip_item_id' => $ctripItemId,
+                        ],
+                        'status' => ExceptionOrderStatus::PENDING,
                     ]);
                     
-                    $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程预下单支付成功（同步确认）');
-                    $order->refresh(); // 刷新订单状态
-                    
-                    Log::info('携程预下单支付：订单状态已更新为预订成功', [
+                    Log::info('携程预下单支付：已创建异常订单', [
                         'order_id' => $order->id,
-                        'current_status' => $order->status->value,
                     ]);
                 } catch (\Exception $e) {
-                    Log::error('携程预下单支付：状态更新失败', [
+                    Log::error('携程预下单支付：非系统直连处理失败', [
                         'order_id' => $order->id,
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
@@ -758,9 +757,9 @@ class CtripController extends Controller
                     throw $e; // 重新抛出异常，让外层 catch 处理
                 }
 
-                // 非系统直连：返回 supplierConfirmType = 1（支付已确认，同步返回）
+                // 非系统直连：返回 supplierConfirmType = 2（支付待确认，需异步返回）
                 return $this->successResponse([
-                    'supplierConfirmType' => 1, // 1.支付已确认（同步返回）
+                    'supplierConfirmType' => 2, // 2.支付待确认（需异步返回）
                     'otaOrderId' => $ctripOrderId, // 确保返回 otaOrderId
                     'supplierOrderId' => $order->order_no,
                     'voucherSender' => 1, // 1=携程发凭证, 2=供应商发。通常选1
@@ -1311,92 +1310,48 @@ class CtripController extends Controller
                     'items' => $responseItems,
                 ]);
             } else {
-                // 非系统直连：同步处理（保持现有逻辑）
-                Log::info('携程取消订单：非系统直连，同步处理', [
+                // 非系统直连：创建异常订单，等待人工操作
+                Log::info('携程取消订单：非系统直连，创建异常订单等待人工处理', [
                     'order_id' => $order->id,
                     'current_status' => $order->status->value,
                     'cancel_quantity' => $totalCancelQuantity,
                 ]);
 
                 try {
-                    // 更新订单状态
-                    if ($order->status === OrderStatus::CONFIRMED) {
-                        Log::info('携程取消订单：订单已确认，先更新为取消申请中', [
-                            'order_id' => $order->id,
-                            'from_status' => $order->status->value,
-                            'to_status' => OrderStatus::CANCEL_REQUESTED->value,
-                        ]);
-                        
-                        $this->orderService->updateOrderStatus(
-                            $order,
-                            OrderStatus::CANCEL_REQUESTED,
-                            '携程申请取消订单，数量：' . $totalCancelQuantity
-                        );
-                        $order->refresh();
-                        
-                        Log::info('携程取消订单：订单状态已更新为取消申请中', [
-                            'order_id' => $order->id,
-                            'current_status' => $order->status->value,
-                        ]);
-                        
-                        Log::info('携程取消订单：开始更新订单状态为取消已确认', [
-                            'order_id' => $order->id,
-                            'from_status' => $order->status->value,
-                            'to_status' => OrderStatus::CANCEL_APPROVED->value,
-                        ]);
-                        
-                        $this->orderService->updateOrderStatus(
-                            $order,
-                            OrderStatus::CANCEL_APPROVED,
-                            '携程取消订单已确认，数量：' . $totalCancelQuantity
-                        );
-                        $order->refresh();
-                    } elseif ($order->status === OrderStatus::CONFIRMING) {
-                        Log::info('携程取消订单：订单确认中，直接更新为取消已确认', [
-                            'order_id' => $order->id,
-                            'from_status' => $order->status->value,
-                            'to_status' => OrderStatus::CANCEL_APPROVED->value,
-                        ]);
-                        
-                        $this->orderService->updateOrderStatus(
-                            $order,
-                            OrderStatus::CANCEL_APPROVED,
-                            '携程申请取消订单（订单确认中），数量：' . $totalCancelQuantity
-                        );
-                        $order->refresh();
-                    } else {
-                        Log::info('携程取消订单：其他状态，直接更新为取消已确认', [
-                            'order_id' => $order->id,
-                            'from_status' => $order->status->value,
-                            'to_status' => OrderStatus::CANCEL_APPROVED->value,
-                        ]);
-                        
-                        $this->orderService->updateOrderStatus(
-                            $order,
-                            OrderStatus::CANCEL_APPROVED,
-                            '携程申请取消订单，数量：' . $totalCancelQuantity
-                        );
-                        $order->refresh();
-                    }
+                    // 1. 更新订单状态为取消申请中
+                    $this->orderService->updateOrderStatus(
+                        $order,
+                        OrderStatus::CANCEL_REQUESTED,
+                        '携程申请取消订单，等待人工处理，数量：' . $totalCancelQuantity
+                    );
+                    $order->refresh();
                     
-                    Log::info('携程取消订单：订单状态已更新为取消已确认', [
+                    Log::info('携程取消订单：订单状态已更新为取消申请中', [
                         'order_id' => $order->id,
                         'current_status' => $order->status->value,
                     ]);
                     
-                    // 更新取消时间
-                    if ($totalCancelQuantity === $order->room_count) {
-                        $order->update(['cancelled_at' => now()]);
-                        Log::info('携程取消订单：已更新取消时间', [
-                            'order_id' => $order->id,
-                            'cancelled_at' => $order->cancelled_at,
-                        ]);
-                    }
-
-                    // 释放库存
-                    // TODO: 实现库存释放逻辑
+                    // 2. 创建异常订单
+                    $sequenceId = $data['sequenceId'] ?? null;
+                    ExceptionOrder::create([
+                        'order_id' => $order->id,
+                        'exception_type' => ExceptionOrderType::API_ERROR,
+                        'exception_message' => '非系统直连订单，等待人工处理取消，数量：' . $totalCancelQuantity,
+                        'exception_data' => [
+                            'operation' => 'cancel',
+                            'sequence_id' => $sequenceId,
+                            'ctrip_order_id' => $ctripOrderId,
+                            'cancel_quantity' => $totalCancelQuantity,
+                            'items' => $items,
+                        ],
+                        'status' => ExceptionOrderStatus::PENDING,
+                    ]);
+                    
+                    Log::info('携程取消订单：已创建异常订单', [
+                        'order_id' => $order->id,
+                    ]);
                 } catch (\Exception $e) {
-                    Log::error('携程取消订单：状态更新失败', [
+                    Log::error('携程取消订单：非系统直连处理失败', [
                         'order_id' => $order->id,
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
@@ -1404,7 +1359,7 @@ class CtripController extends Controller
                     throw $e; // 重新抛出异常，让外层 catch 处理
                 }
 
-                // 返回 supplierConfirmType = 1（取消已确认，同步返回）
+                // 非系统直连：返回 supplierConfirmType = 2（取消待确认，需异步返回）
                 $responseItems = [];
                 foreach ($items as $item) {
                     $responseItems[] = [
@@ -1413,7 +1368,7 @@ class CtripController extends Controller
                 }
 
                 return $this->successResponse([
-                    'supplierConfirmType' => 1, // 取消已确认（同步返回）
+                    'supplierConfirmType' => 2, // 取消待确认（需异步返回）
                     'items' => $responseItems,
                 ]);
             }

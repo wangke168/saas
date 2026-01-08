@@ -638,6 +638,129 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
+     * 查询订单状态（包括核销状态）
+     * 
+     * @param Order|string $orderOrOrderNo 订单对象或订单号
+     * @return array
+     */
+    public function queryOrderStatus($orderOrOrderNo): array
+    {
+        try {
+            // 获取订单号
+            $otaOrderNo = $orderOrOrderNo instanceof Order ? $orderOrOrderNo->ota_order_no : $orderOrOrderNo;
+            $order = $orderOrOrderNo instanceof Order ? $orderOrOrderNo : null;
+
+            // 调用查询订单接口
+            $result = $this->queryOrder($otaOrderNo, $order);
+
+            if (!($result['success'] ?? false)) {
+                return [
+                    'success' => false,
+                    'message' => $result['message'] ?? '查询订单状态失败',
+                    'data' => [],
+                ];
+            }
+
+            // 解析返回数据
+            $responseData = $result['data'] ?? null;
+            if (!$responseData) {
+                return [
+                    'success' => false,
+                    'message' => '查询结果数据为空',
+                    'data' => [],
+                ];
+            }
+
+            // 提取订单状态（横店系统状态：1=预订成功，4=已取消，5=已使用/已核销）
+            $status = (string)($responseData->Status ?? '');
+            $mappedStatus = $this->mapStatus($status);
+
+            // 构建返回数据
+            $data = [
+                'order_no' => $otaOrderNo,
+                'status' => $mappedStatus?->value ?? 'unknown',
+                'verified_at' => null,
+                'use_start_date' => null,
+                'use_end_date' => null,
+                'use_quantity' => null,
+                'passengers' => [],
+                'vouchers' => [],
+            ];
+
+            // 如果订单已核销（Status='5'），提取核销相关信息
+            if ($status === '5' && $order) {
+                // 使用订单信息填充核销数据
+                $data['verified_at'] = $order->updated_at?->toIso8601String();
+                $data['use_start_date'] = $order->check_in_date?->format('Y-m-d');
+                $data['use_end_date'] = $order->check_out_date?->format('Y-m-d');
+                $data['use_quantity'] = $order->room_count ?? null;
+
+                // 如果有客人信息，转换为passengers格式
+                if (!empty($order->guest_info) && is_array($order->guest_info)) {
+                    $data['passengers'] = array_map(function($guest) {
+                        return [
+                            'name' => $guest['name'] ?? $guest['Name'] ?? '',
+                            'idCode' => $guest['idCode'] ?? $guest['IdCode'] ?? $guest['credentialNo'] ?? '',
+                            'credentialType' => $guest['credentialType'] ?? 0,
+                        ];
+                    }, $order->guest_info);
+                }
+            }
+
+            // 如果有其他核销相关字段（根据实际横店接口返回调整）
+            // 例如：核销时间、使用日期等可能从接口返回的数据中获取
+            if (isset($responseData->VerifiedTime)) {
+                try {
+                    $data['verified_at'] = (string)$responseData->VerifiedTime;
+                } catch (\Exception $e) {
+                    Log::warning('解析核销时间失败', [
+                        'ota_order_no' => $otaOrderNo,
+                        'verified_time' => $responseData->VerifiedTime,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            if (isset($responseData->UseStartDate)) {
+                $data['use_start_date'] = (string)$responseData->UseStartDate;
+            }
+
+            if (isset($responseData->UseEndDate)) {
+                $data['use_end_date'] = (string)$responseData->UseEndDate;
+            }
+
+            if (isset($responseData->UseQuantity)) {
+                $data['use_quantity'] = (int)$responseData->UseQuantity;
+            }
+
+            Log::info('查询订单状态成功', [
+                'ota_order_no' => $otaOrderNo,
+                'status' => $status,
+                'mapped_status' => $mappedStatus?->value,
+                'is_verified' => $status === '5',
+            ]);
+
+            return [
+                'success' => true,
+                'message' => '查询成功',
+                'data' => $data,
+            ];
+        } catch (\Exception $e) {
+            Log::error('查询订单状态异常', [
+                'order_or_order_no' => $orderOrOrderNo instanceof Order ? $orderOrOrderNo->id : $orderOrOrderNo,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '查询订单状态异常：' . $e->getMessage(),
+                'data' => [],
+            ];
+        }
+    }
+
+    /**
      * 查询订单是否可以取消
      * 
      * 注意：横店系统可能没有专门的查询是否可以取消的接口

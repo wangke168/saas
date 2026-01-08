@@ -56,4 +56,25 @@ interface ResourceServiceInterface
      * ]
      */
     public function canCancelOrder(Order $order): array;
+
+    /**
+     * 查询订单状态（包括核销状态）
+     * 
+     * @param Order|string $orderOrOrderNo 订单对象或订单号
+     * @return array [
+     *     'success' => bool,
+     *     'message' => string,
+     *     'data' => [
+     *         'order_no' => string,      // 订单号
+     *         'status' => string,         // 订单状态：confirmed/verified/cancelled等
+     *         'verified_at' => string|null,    // 核销时间（ISO 8601格式）
+     *         'use_start_date' => string|null, // 使用开始日期
+     *         'use_end_date' => string|null,   // 使用结束日期
+     *         'use_quantity' => int|null,      // 已使用数量
+     *         'passengers' => array,      // 客人信息（可选）
+     *         'vouchers' => array,        // 凭证信息（可选）
+     *     ]
+     * ]
+     */
+    public function queryOrderStatus($orderOrOrderNo): array;
 }
