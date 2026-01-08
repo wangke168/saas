@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'dingtalk' => [
+        'webhook_url' => env('DINGTALK_WEBHOOK_URL'),
+    ],
+
 ];

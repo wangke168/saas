@@ -8,6 +8,7 @@ use App\Enums\OrderStatus;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Services\InventoryService;
+use App\Services\OrderService;
 use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -111,11 +112,13 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
             $cancelResult = $resourceService->cancelOrder($this->order, $this->reason);
 
             if ($cancelResult['success'] ?? false) {
-                // 取消成功
-                $this->order->update([
-                    'status' => OrderStatus::CANCEL_APPROVED,
-                    'cancelled_at' => now(),
-                ]);
+                // 取消成功 - 使用OrderService更新状态，确保通知能触发
+                $orderService = app(OrderService::class);
+                $orderService->updateOrderStatus(
+                    $this->order,
+                    OrderStatus::CANCEL_APPROVED,
+                    '景区方取消订单成功 - ' . $this->reason
+                );
 
                 // 释放库存
                 try {

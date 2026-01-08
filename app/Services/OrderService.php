@@ -6,6 +6,7 @@ use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\OrderLog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class OrderService
 {
@@ -44,8 +45,9 @@ class OrderService
             throw new \InvalidArgumentException("订单状态不能从 {$order->status->label()} 转换为 {$newStatus->label()}");
         }
 
-        DB::transaction(function () use ($order, $newStatus, $remark, $operatorId) {
-            $oldStatus = $order->status;
+        $oldStatus = $order->status;
+
+        DB::transaction(function () use ($order, $oldStatus, $newStatus, $remark, $operatorId) {
             $order->update(['status' => $newStatus]);
 
             // 记录状态变更日志
@@ -58,6 +60,68 @@ class OrderService
                 $order->update(['cancelled_at' => now()]);
             }
         });
+
+        // 刷新订单对象，确保获取最新状态
+        $order->refresh();
+
+        // 在事务提交后触发钉钉通知（避免阻塞事务）
+        $this->triggerStatusChangeNotifications($order, $oldStatus, $newStatus, $remark);
+    }
+
+    /**
+     * 触发状态变更通知
+     */
+    protected function triggerStatusChangeNotifications(Order $order, OrderStatus $oldStatus, OrderStatus $newStatus, ?string $remark = null): void
+    {
+        try {
+            // 1. 订单进入确认中状态时通知
+            if ($newStatus === OrderStatus::CONFIRMING && $oldStatus !== OrderStatus::CONFIRMING) {
+                Log::info('OrderService: 触发订单确认中状态通知', [
+                    'order_id' => $order->id,
+                    'old_status' => $oldStatus->value,
+                    'new_status' => $newStatus->value,
+                ]);
+                \App\Jobs\NotifyOrderConfirmingJob::dispatch($order);
+            }
+
+            // 2. 订单取消申请时通知
+            if ($newStatus === OrderStatus::CANCEL_REQUESTED && $oldStatus !== OrderStatus::CANCEL_REQUESTED) {
+                Log::info('OrderService: 触发订单取消申请通知', [
+                    'order_id' => $order->id,
+                    'old_status' => $oldStatus->value,
+                    'new_status' => $newStatus->value,
+                ]);
+                
+                // 从备注中提取取消数量等信息（如果有）
+                $cancelData = [];
+                if (preg_match('/数量[：:]\s*(\d+)/', $remark ?? '', $matches)) {
+                    $cancelData['quantity'] = intval($matches[1]);
+                }
+                
+                \App\Jobs\NotifyOrderCancelRequestedJob::dispatch($order, $cancelData);
+            }
+
+            // 3. 订单取消确认时通知（从取消申请中变为取消通过或拒绝）
+            if (in_array($newStatus, [OrderStatus::CANCEL_APPROVED, OrderStatus::CANCEL_REJECTED]) 
+                && $oldStatus === OrderStatus::CANCEL_REQUESTED) {
+                Log::info('OrderService: 触发订单取消确认通知', [
+                    'order_id' => $order->id,
+                    'old_status' => $oldStatus->value,
+                    'new_status' => $newStatus->value,
+                ]);
+                
+                \App\Jobs\NotifyOrderCancelConfirmedJob::dispatch($order, $remark ?? '');
+            }
+        } catch (\Exception $e) {
+            // 通知失败不影响订单状态更新，只记录日志
+            Log::error('OrderService: 触发状态变更通知失败', [
+                'order_id' => $order->id,
+                'old_status' => $oldStatus->value,
+                'new_status' => $newStatus->value,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
     }
 
     /**
