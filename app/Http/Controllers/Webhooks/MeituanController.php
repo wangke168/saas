@@ -424,7 +424,7 @@ class MeituanController extends Controller
                 ]);
                 // 根据文档，订单创建V2失败响应格式：code、describe、partnerId（无body字段）
                 // 接口是全局加密的，所以响应需要加密
-                return $this->errorResponse(410, '该用户已购买本产品，购买渠道：XX', $partnerId, true);
+                return $this->errorResponse(401, '预付款/授信不足，请及时充值', $partnerId, true);
             }
             // ============================================
             // 测试代码结束
