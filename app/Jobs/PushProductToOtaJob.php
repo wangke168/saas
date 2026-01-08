@@ -141,13 +141,21 @@ class PushProductToOtaJob implements ShouldQueue
         CtripService $ctripService,
         MeituanService $meituanService
     ): array {
-        return match ($otaPlatform->code->value) {
+        $platformCode = $otaPlatform->code->value;
+        
+        Log::info('PushProductToOtaJob: 平台代码', [
+            'platform_code' => $platformCode,
+            'platform_code_type' => gettype($platformCode),
+            'ota_platform_id' => $otaPlatform->id,
+        ]);
+        
+        return match ($platformCode) {
             'ctrip' => $this->pushToCtrip($product, $ctripService),
             'meituan' => $this->pushToMeituan($product, $meituanService),
             'fliggy' => $this->pushToFliggy($product),
             default => [
                 'success' => false,
-                'message' => '不支持的OTA平台',
+                'message' => '不支持的OTA平台: ' . $platformCode,
             ],
         };
     }
