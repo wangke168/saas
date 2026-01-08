@@ -424,7 +424,7 @@ class MeituanController extends Controller
                 ]);
                 // 根据文档，订单创建V2失败响应格式：code、describe、partnerId（无body字段）
                 // 接口是全局加密的，所以响应需要加密
-                return $this->errorResponse(410, 'XXX用户身份证号超出限购数量，同一个身份证在X天内最多购买Y张票', $partnerId, true);
+                return $this->errorResponse(410, '购买此产品前需要先购买XXX产品', $partnerId, true);
             }
             // ============================================
             // 测试代码结束
