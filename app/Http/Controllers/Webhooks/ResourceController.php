@@ -384,10 +384,13 @@ class ResourceController extends Controller
                         DB::beginTransaction();
                         try {
                             // 使用批量 upsert（高性能，不触发 Observer，但符合预期）
+                            // 注意：更新字段列表中不包含 is_closed，确保不会覆盖手工关闭的库存状态
+                            // 如果运营手工关闭了库存（is_closed = true），资源方推送时不会覆盖这个状态
+                            // 这样推送到OTA时，is_closed = true 的库存会被正确处理为关闭状态（库存为0）
                             Inventory::upsert(
                                 $dirtyInventories,
                                 ['room_type_id', 'date'], // 唯一键
-                                ['total_quantity', 'available_quantity', 'source', 'updated_at'] // 更新字段
+                                ['total_quantity', 'available_quantity', 'source', 'updated_at'] // 更新字段（不包含 is_closed）
                             );
 
                             DB::commit();

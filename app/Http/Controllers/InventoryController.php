@@ -6,6 +6,8 @@ use App\Models\Inventory;
 use App\Enums\PriceSource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 
 class InventoryController extends Controller
 {
@@ -79,7 +81,7 @@ class InventoryController extends Controller
 
         $inventories = [];
         foreach ($validated['inventories'] as $invData) {
-            $inventories[] = Inventory::updateOrCreate(
+            $inventory = Inventory::updateOrCreate(
                 [
                     'room_type_id' => $validated['room_type_id'],
                     'date' => $invData['date'],
@@ -90,6 +92,28 @@ class InventoryController extends Controller
                     'is_closed' => false,
                 ])
             );
+            $inventories[] = $inventory;
+
+            // 清除 Redis 指纹，确保下次资源方推送时能正常更新
+            try {
+                $date = is_string($invData['date']) ? $invData['date'] : $inventory->date->format('Y-m-d');
+                $fingerprintKey = "inventory:fingerprint:{$validated['room_type_id']}:{$date}";
+                Redis::del($fingerprintKey);
+                
+                Log::info('批量创建库存：已清除 Redis 指纹', [
+                    'room_type_id' => $validated['room_type_id'],
+                    'date' => $date,
+                    'fingerprint_key' => $fingerprintKey,
+                ]);
+            } catch (\Exception $e) {
+                // Redis 操作失败不影响库存创建，只记录日志
+                $dateForLog = is_string($invData['date']) ? $invData['date'] : ($inventory->date->format('Y-m-d') ?? 'unknown');
+                Log::warning('批量创建库存：清除 Redis 指纹失败', [
+                    'room_type_id' => $validated['room_type_id'],
+                    'date' => $dateForLog,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         return response()->json([
@@ -155,6 +179,27 @@ class InventoryController extends Controller
         $inventory->update($validated);
         $inventory->load(['roomType.hotel']);
 
+        // 清除 Redis 指纹，确保下次资源方推送时能正常更新
+        // 当手工编辑库存后，需要清除对应的 Redis 指纹，否则资源方推送时
+        // 会认为库存值没有变化（因为指纹比对相同）而跳过更新
+        try {
+            $fingerprintKey = "inventory:fingerprint:{$inventory->room_type_id}:{$inventory->date->format('Y-m-d')}";
+            Redis::del($fingerprintKey);
+            
+            Log::info('手工编辑库存：已清除 Redis 指纹', [
+                'inventory_id' => $inventory->id,
+                'room_type_id' => $inventory->room_type_id,
+                'date' => $inventory->date->format('Y-m-d'),
+                'fingerprint_key' => $fingerprintKey,
+            ]);
+        } catch (\Exception $e) {
+            // Redis 操作失败不影响库存更新，只记录日志
+            Log::warning('手工编辑库存：清除 Redis 指纹失败', [
+                'inventory_id' => $inventory->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'message' => '库存更新成功',
             'data' => $inventory,
@@ -168,6 +213,17 @@ class InventoryController extends Controller
     {
         $inventory->update(['is_closed' => true]);
 
+        // 清除 Redis 指纹，确保下次资源方推送时能正常更新
+        try {
+            $fingerprintKey = "inventory:fingerprint:{$inventory->room_type_id}:{$inventory->date->format('Y-m-d')}";
+            Redis::del($fingerprintKey);
+        } catch (\Exception $e) {
+            Log::warning('关闭库存：清除 Redis 指纹失败', [
+                'inventory_id' => $inventory->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'message' => '库存已关闭',
         ]);
@@ -179,6 +235,17 @@ class InventoryController extends Controller
     public function open(Inventory $inventory): JsonResponse
     {
         $inventory->update(['is_closed' => false]);
+
+        // 清除 Redis 指纹，确保下次资源方推送时能正常更新
+        try {
+            $fingerprintKey = "inventory:fingerprint:{$inventory->room_type_id}:{$inventory->date->format('Y-m-d')}";
+            Redis::del($fingerprintKey);
+        } catch (\Exception $e) {
+            Log::warning('开启库存：清除 Redis 指纹失败', [
+                'inventory_id' => $inventory->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return response()->json([
             'message' => '库存已开启',
