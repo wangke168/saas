@@ -11,16 +11,25 @@ Route::prefix('webhooks')->group(function () {
     Route::post('/fliggy/order-status', [\App\Http\Controllers\Webhooks\FliggyController::class, 'orderStatus']);
     
     // 美团Webhook路由
-    Route::post('/meituan/order/create/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
-    Route::post('/meituan/order/pay', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
-    Route::post('/meituan/order/query', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
-    Route::post('/meituan/order/refund', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
-    Route::post('/meituan/order/refunded', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
-    Route::post('/meituan/order/close', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    // ⚠️ 测试模式：临时指向测试控制器，测试完成后改回 MeituanController
+    // 原路由：Route::post('/meituan/order/create/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/create/v2', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
+    // 原路由：Route::post('/meituan/order/pay', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/pay', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
+    // 原路由：Route::post('/meituan/order/query', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/query', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
+    // 原路由：Route::post('/meituan/order/refund', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/refund', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
+    // 原路由：Route::post('/meituan/order/refunded', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/refunded', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
+    // 原路由：Route::post('/meituan/order/close', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
+    Route::post('/meituan/order/close', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
     
     // 美团产品相关路由（拉取价格日历等）
-    Route::post('/meituan/product/price/calendar', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductPriceCalendar']);
-    Route::post('/meituan/product/level/price/calendar/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductLevelPriceCalendarV2']);
+    // 原路由：Route::post('/meituan/product/price/calendar', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductPriceCalendar']);
+    Route::post('/meituan/product/price/calendar', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleProductPriceCalendar']);
+    // 原路由：Route::post('/meituan/product/level/price/calendar/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductLevelPriceCalendarV2']);
+    Route::post('/meituan/product/level/price/calendar/v2', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleProductLevelPriceCalendarV2']);
     
     // 资源方Webhook路由
     Route::post('/resource/hengdian/inventory', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);
