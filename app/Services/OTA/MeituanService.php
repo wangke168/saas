@@ -305,18 +305,14 @@ class MeituanService
                 ];
             }
 
-            // 美团请求格式：{partnerId, body: "加密的JSON字符串"}
-            // body字段需要包含：startTime, endTime, partnerDealId, body数组
-            $bodyData = [
+            // 美团请求格式：{partnerId, startTime, endTime, partnerDealId, body: "加密的JSON字符串"}
+            // startTime、endTime、partnerDealId 在顶层，只有 body 数组需要加密
+            $requestData = [
+                'partnerId' => $partnerId,
                 'startTime' => $startDate,
                 'endTime' => $endDate,
                 'partnerDealId' => $product->code,
-                'body' => $body,
-            ];
-
-            $requestData = [
-                'partnerId' => $partnerId,
-                'body' => $bodyData, // body字段是数组，会在MeituanClient中加密
+                'body' => $body, // body数组，会在MeituanClient中加密
             ];
 
             Log::info('准备同步美团多层价格日历数据（增量推送）', [
@@ -407,18 +403,14 @@ class MeituanService
                 ];
             }
 
-            // 美团请求格式：{partnerId, body: "加密的JSON字符串"}
-            // body字段需要包含：startTime, endTime, partnerDealId, body数组
-            $bodyData = [
+            // 美团请求格式：{partnerId, startTime, endTime, partnerDealId, body: "加密的JSON字符串"}
+            // startTime、endTime、partnerDealId 在顶层，只有 body 数组需要加密
+            $requestData = [
+                'partnerId' => $partnerId,
                 'startTime' => $startDate,
                 'endTime' => $endDate,
                 'partnerDealId' => $product->code,
-                'body' => $body,
-            ];
-
-            $requestData = [
-                'partnerId' => $partnerId,
-                'body' => $bodyData, // body字段是数组，会在MeituanClient中加密
+                'body' => $body, // body数组，会在MeituanClient中加密
             ];
 
             Log::info('准备同步美团多层价格日历数据', [

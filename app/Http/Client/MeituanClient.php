@@ -313,22 +313,45 @@ class MeituanClient
     /**
      * 多层价格日历变化通知V2（商家调用美团）
      * 
+     * 根据文档，请求格式应该是：
+     * {
+     *   "partnerId": 99999,
+     *   "startTime": "2022-05-09",
+     *   "endTime": "2022-05-09",
+     *   "partnerDealId": "LevelDealId",
+     *   "body": "加密的JSON字符串"  // 只有body字段需要加密
+     * }
+     * 
      * @param array $data 请求数据（包含partnerId、startTime、endTime、partnerDealId、body等）
      * @return array
      */
     public function notifyLevelPriceStock(array $data): array
     {
         $url = $this->config->api_url . '/rhone/mtp/api/level/price/notice/v2';
-        // 美团请求格式：{partnerId, body: {加密的JSON字符串}}
-        // 所以需要将data中的body字段加密
+        
+        // 构建请求数据，startTime、endTime、partnerDealId 在顶层
         $requestData = [
             'partnerId' => $data['partnerId'] ?? $this->getPartnerId(),
         ];
         
-        // 如果data中有body字段，需要加密
-        if (isset($data['body'])) {
+        // 如果data中有startTime、endTime、partnerDealId，添加到顶层
+        if (isset($data['startTime'])) {
+            $requestData['startTime'] = $data['startTime'];
+        }
+        if (isset($data['endTime'])) {
+            $requestData['endTime'] = $data['endTime'];
+        }
+        if (isset($data['partnerDealId'])) {
+            $requestData['partnerDealId'] = $data['partnerDealId'];
+        }
+        
+        // 如果data中有body字段（数组），需要加密
+        if (isset($data['body']) && is_array($data['body'])) {
             $bodyJson = json_encode($data['body'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $requestData['body'] = $this->encryptBody($bodyJson);
+        } elseif (isset($data['body']) && is_string($data['body'])) {
+            // 如果body已经是字符串（已加密），直接使用
+            $requestData['body'] = $data['body'];
         }
         
         return $this->request('POST', $url, $requestData);
