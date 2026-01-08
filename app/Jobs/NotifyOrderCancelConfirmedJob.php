@@ -72,10 +72,17 @@ class NotifyOrderCancelConfirmedJob implements ShouldQueue
             if ($success) {
                 Log::info('NotifyOrderCancelConfirmedJob: 钉钉通知发送成功', [
                     'order_id' => $this->order->id,
+                    'order_no' => $this->order->order_no,
                 ]);
             } else {
                 Log::warning('NotifyOrderCancelConfirmedJob: 钉钉通知发送失败', [
                     'order_id' => $this->order->id,
+                    'order_no' => $this->order->order_no,
+                    'order_status' => $this->order->status->value,
+                    'has_product' => $this->order->product !== null,
+                    'product_id' => $this->order->product_id,
+                    'scenic_spot_id' => $this->order->product?->scenic_spot_id,
+                    'note' => '请查看DingTalkNotificationService的日志以获取详细错误信息',
                 ]);
             }
         } catch (\Exception $e) {

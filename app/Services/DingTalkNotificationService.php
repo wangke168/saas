@@ -24,10 +24,24 @@ class DingTalkNotificationService
     public function isEnabled(): bool
     {
         if (empty($this->webhookUrl)) {
+            Log::warning('钉钉通知：Webhook URL未配置', [
+                'config_key' => 'DINGTALK_WEBHOOK_URL',
+                'config_value_exists' => !empty(config('services.dingtalk.webhook_url')),
+                'env_value_exists' => !empty(env('DINGTALK_WEBHOOK_URL')),
+            ]);
             return false;
         }
 
-        return env('DINGTALK_NOTIFICATION_ENABLED', true);
+        $enabled = env('DINGTALK_NOTIFICATION_ENABLED', true);
+        if (!$enabled) {
+            Log::info('钉钉通知：已禁用', [
+                'config_key' => 'DINGTALK_NOTIFICATION_ENABLED',
+                'config_value' => env('DINGTALK_NOTIFICATION_ENABLED'),
+            ]);
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -35,7 +49,15 @@ class DingTalkNotificationService
      */
     public function sendOrderConfirmingNotification(Order $order): bool
     {
+        Log::info('DingTalkNotificationService: 开始发送订单确认中通知', [
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+        ]);
+
         if (!$this->isEnabled()) {
+            Log::warning('DingTalkNotificationService: 钉钉通知未启用', [
+                'order_id' => $order->id,
+            ]);
             return false;
         }
 
@@ -47,18 +69,39 @@ class DingTalkNotificationService
             'roomType'
         ]);
 
+        Log::debug('DingTalkNotificationService: 订单关联数据已加载', [
+            'order_id' => $order->id,
+            'has_product' => $order->product !== null,
+            'has_scenic_spot' => $order->product?->scenicSpot !== null,
+            'has_ota_platform' => $order->otaPlatform !== null,
+        ]);
+
         // 获取需要通知的用户
         $users = $this->getUsersToNotify($order);
 
         if ($users->isEmpty()) {
             Log::warning('钉钉通知：没有找到需要通知的用户', [
                 'order_id' => $order->id,
+                'product_id' => $order->product_id,
+                'scenic_spot_id' => $order->product?->scenic_spot_id,
             ]);
             return false;
         }
 
+        Log::info('DingTalkNotificationService: 找到需要通知的用户', [
+            'order_id' => $order->id,
+            'user_count' => $users->count(),
+            'user_ids' => $users->pluck('id')->toArray(),
+            'user_roles' => $users->pluck('role.value')->toArray(),
+        ]);
+
         // 构建消息内容
         $message = $this->buildOrderConfirmingMessage($order);
+
+        Log::debug('DingTalkNotificationService: 消息内容已构建', [
+            'order_id' => $order->id,
+            'message_length' => strlen($message),
+        ]);
 
         // 发送消息
         return $this->sendMessage($message);
@@ -69,7 +112,16 @@ class DingTalkNotificationService
      */
     public function sendOrderCancelRequestedNotification(Order $order, array $cancelData = []): bool
     {
+        Log::info('DingTalkNotificationService: 开始发送订单取消申请通知', [
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+            'cancel_data' => $cancelData,
+        ]);
+
         if (!$this->isEnabled()) {
+            Log::warning('DingTalkNotificationService: 钉钉通知未启用', [
+                'order_id' => $order->id,
+            ]);
             return false;
         }
 
@@ -81,18 +133,39 @@ class DingTalkNotificationService
             'roomType'
         ]);
 
+        Log::debug('DingTalkNotificationService: 订单关联数据已加载', [
+            'order_id' => $order->id,
+            'has_product' => $order->product !== null,
+            'has_scenic_spot' => $order->product?->scenicSpot !== null,
+            'has_ota_platform' => $order->otaPlatform !== null,
+        ]);
+
         // 获取需要通知的用户
         $users = $this->getUsersToNotify($order);
 
         if ($users->isEmpty()) {
             Log::warning('钉钉通知：没有找到需要通知的用户', [
                 'order_id' => $order->id,
+                'product_id' => $order->product_id,
+                'scenic_spot_id' => $order->product?->scenic_spot_id,
             ]);
             return false;
         }
 
+        Log::info('DingTalkNotificationService: 找到需要通知的用户', [
+            'order_id' => $order->id,
+            'user_count' => $users->count(),
+            'user_ids' => $users->pluck('id')->toArray(),
+            'user_roles' => $users->pluck('role.value')->toArray(),
+        ]);
+
         // 构建消息内容
         $message = $this->buildOrderCancelRequestedMessage($order, $cancelData);
+
+        Log::debug('DingTalkNotificationService: 消息内容已构建', [
+            'order_id' => $order->id,
+            'message_length' => strlen($message),
+        ]);
 
         // 发送消息
         return $this->sendMessage($message);
@@ -103,7 +176,17 @@ class DingTalkNotificationService
      */
     public function sendOrderCancelConfirmedNotification(Order $order, string $cancelReason = ''): bool
     {
+        Log::info('DingTalkNotificationService: 开始发送订单取消确认通知', [
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+            'order_status' => $order->status->value,
+            'cancel_reason' => $cancelReason,
+        ]);
+
         if (!$this->isEnabled()) {
+            Log::warning('DingTalkNotificationService: 钉钉通知未启用', [
+                'order_id' => $order->id,
+            ]);
             return false;
         }
 
@@ -115,18 +198,39 @@ class DingTalkNotificationService
             'roomType'
         ]);
 
+        Log::debug('DingTalkNotificationService: 订单关联数据已加载', [
+            'order_id' => $order->id,
+            'has_product' => $order->product !== null,
+            'has_scenic_spot' => $order->product?->scenicSpot !== null,
+            'has_ota_platform' => $order->otaPlatform !== null,
+        ]);
+
         // 获取需要通知的用户
         $users = $this->getUsersToNotify($order);
 
         if ($users->isEmpty()) {
             Log::warning('钉钉通知：没有找到需要通知的用户', [
                 'order_id' => $order->id,
+                'product_id' => $order->product_id,
+                'scenic_spot_id' => $order->product?->scenic_spot_id,
             ]);
             return false;
         }
 
+        Log::info('DingTalkNotificationService: 找到需要通知的用户', [
+            'order_id' => $order->id,
+            'user_count' => $users->count(),
+            'user_ids' => $users->pluck('id')->toArray(),
+            'user_roles' => $users->pluck('role.value')->toArray(),
+        ]);
+
         // 构建消息内容
         $message = $this->buildOrderCancelConfirmedMessage($order, $cancelReason);
+
+        Log::debug('DingTalkNotificationService: 消息内容已构建', [
+            'order_id' => $order->id,
+            'message_length' => strlen($message),
+        ]);
 
         // 发送消息
         return $this->sendMessage($message);
@@ -145,14 +249,23 @@ class DingTalkNotificationService
         $scenicSpot = $order->product->scenicSpot ?? null;
 
         if (!$scenicSpot) {
-            Log::warning('钉钉通知：订单没有关联景区', [
+            Log::warning('钉钉通知：订单没有关联景区，仅通知管理员', [
                 'order_id' => $order->id,
                 'product_id' => $order->product_id,
+                'has_product' => $order->product !== null,
             ]);
             // 如果没有景区，只通知管理员
-            return User::where('role', UserRole::ADMIN)
+            $admins = User::where('role', UserRole::ADMIN)
                 ->where('is_active', true)
                 ->get();
+            
+            Log::info('钉钉通知：找到管理员用户', [
+                'order_id' => $order->id,
+                'admin_count' => $admins->count(),
+                'admin_ids' => $admins->pluck('id')->toArray(),
+            ]);
+            
+            return $admins;
         }
 
         // 2. 获取景区关联的资源方
@@ -176,11 +289,38 @@ class DingTalkNotificationService
         // 5. 合并并去重
         $allUserIds = $operatorIds->merge($adminIds)->unique();
 
+        Log::debug('钉钉通知：用户查询结果', [
+            'order_id' => $order->id,
+            'scenic_spot_id' => $scenicSpot->id,
+            'scenic_spot_name' => $scenicSpot->name,
+            'resource_provider_count' => $resourceProviders->count(),
+            'operator_ids' => $operatorIds->toArray(),
+            'admin_ids' => $adminIds->toArray(),
+            'all_user_ids' => $allUserIds->toArray(),
+        ]);
+
         if ($allUserIds->isEmpty()) {
+            Log::warning('钉钉通知：未找到任何用户（运营人员和管理员）', [
+                'order_id' => $order->id,
+                'scenic_spot_id' => $scenicSpot->id,
+                'resource_provider_count' => $resourceProviders->count(),
+            ]);
             return collect();
         }
 
-        return User::whereIn('id', $allUserIds)->get();
+        $users = User::whereIn('id', $allUserIds)->get();
+
+        Log::debug('钉钉通知：用户查询完成', [
+            'order_id' => $order->id,
+            'user_count' => $users->count(),
+            'user_details' => $users->map(fn($u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'role' => $u->role->value,
+            ])->toArray(),
+        ]);
+
+        return $users;
     }
 
     /**
@@ -300,7 +440,15 @@ class DingTalkNotificationService
      */
     protected function sendMessage(string $message): bool
     {
+        // 脱敏处理Webhook URL（只显示前30个字符）
+        $maskedUrl = $this->maskWebhookUrl($this->webhookUrl);
+
         try {
+            Log::debug('DingTalkNotificationService: 准备发送钉钉消息', [
+                'webhook_url_masked' => $maskedUrl,
+                'message_length' => strlen($message),
+            ]);
+
             $response = Http::timeout(10)->post($this->webhookUrl, [
                 'msgtype' => 'markdown',
                 'markdown' => [
@@ -313,33 +461,76 @@ class DingTalkNotificationService
                 $result = $response->json();
                 if (($result['errcode'] ?? -1) === 0) {
                     Log::info('钉钉通知发送成功', [
-                        'webhook_url' => $this->webhookUrl,
+                        'webhook_url_masked' => $maskedUrl,
+                        'message_length' => strlen($message),
                     ]);
                     return true;
                 } else {
-                    Log::error('钉钉通知发送失败', [
-                        'webhook_url' => $this->webhookUrl,
+                    Log::error('钉钉通知发送失败（API返回错误）', [
+                        'webhook_url_masked' => $maskedUrl,
                         'error_code' => $result['errcode'] ?? 'unknown',
                         'error_msg' => $result['errmsg'] ?? 'unknown',
+                        'full_response' => $result,
+                        'message_length' => strlen($message),
                     ]);
                     return false;
                 }
             } else {
-                Log::error('钉钉通知请求失败', [
-                    'webhook_url' => $this->webhookUrl,
-                    'status' => $response->status(),
-                    'body' => $response->body(),
+                $responseBody = $response->body();
+                Log::error('钉钉通知请求失败（HTTP错误）', [
+                    'webhook_url_masked' => $maskedUrl,
+                    'http_status' => $response->status(),
+                    'response_body' => $responseBody,
+                    'message_length' => strlen($message),
                 ]);
                 return false;
             }
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('钉钉通知异常（网络连接失败）', [
+                'webhook_url_masked' => $maskedUrl,
+                'error' => $e->getMessage(),
+                'error_class' => get_class($e),
+                'message_length' => strlen($message),
+            ]);
+            return false;
         } catch (\Exception $e) {
             Log::error('钉钉通知异常', [
-                'webhook_url' => $this->webhookUrl,
+                'webhook_url_masked' => $maskedUrl,
                 'error' => $e->getMessage(),
+                'error_class' => get_class($e),
                 'trace' => $e->getTraceAsString(),
+                'message_length' => strlen($message),
             ]);
             return false;
         }
+    }
+
+    /**
+     * 脱敏处理Webhook URL
+     */
+    protected function maskWebhookUrl(?string $url): string
+    {
+        if (empty($url)) {
+            return '(empty)';
+        }
+
+        // 提取URL的基础部分和token部分
+        $parsed = parse_url($url);
+        if (!$parsed) {
+            return substr($url, 0, 30) . '...';
+        }
+
+        $base = ($parsed['scheme'] ?? '') . '://' . ($parsed['host'] ?? '') . ($parsed['path'] ?? '');
+        $query = $parsed['query'] ?? '';
+
+        // 如果包含access_token，只显示前10个字符
+        if (preg_match('/access_token=([^&]+)/', $query, $matches)) {
+            $token = $matches[1];
+            $maskedToken = substr($token, 0, 10) . '...' . substr($token, -4);
+            $query = preg_replace('/access_token=[^&]+/', 'access_token=' . $maskedToken, $query);
+        }
+
+        return $base . ($query ? '?' . $query : '');
     }
 }
 
