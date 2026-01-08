@@ -177,6 +177,206 @@ class MeituanService
     }
 
     /**
+     * 构建多层价格日历数据（支持日期数组，用于增量推送）
+     * 
+     * @param \App\Models\Product $product 产品
+     * @param \App\Models\Hotel $hotel 酒店
+     * @param \App\Models\RoomType $roomType 房型
+     * @param array $dates 日期数组，格式：['2025-12-27', '2025-12-28']
+     * @return array
+     */
+    public function buildLevelPriceStockDataByDates(
+        \App\Models\Product $product,
+        \App\Models\Hotel $hotel,
+        \App\Models\RoomType $roomType,
+        array $dates
+    ): array {
+        $body = [];
+
+        // 去重并排序日期
+        $dates = array_unique($dates);
+        sort($dates);
+
+        foreach ($dates as $date) {
+            // 计算价格
+            $priceData = $this->productService->calculatePrice($product, $roomType->id, $date);
+            
+            // 获取库存
+            $inventory = \App\Models\Inventory::where('room_type_id', $roomType->id)
+                ->where('date', $date)
+                ->first();
+
+            // 检查销售日期范围
+            $stock = 0;
+            $isClosed = true;
+            if ($inventory) {
+                $isInSalePeriod = true;
+                if ($product->sale_start_date || $product->sale_end_date) {
+                    $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
+                    $saleEndDate = $product->sale_end_date ? $product->sale_end_date->format('Y-m-d') : null;
+                    
+                    if ($saleStartDate && $date < $saleStartDate) {
+                        $isInSalePeriod = false;
+                    }
+                    if ($saleEndDate && $date > $saleEndDate) {
+                        $isInSalePeriod = false;
+                    }
+                }
+                
+                if ($isInSalePeriod && !$inventory->is_closed) {
+                    $stock = $inventory->available_quantity;
+                    $isClosed = false;
+                }
+            }
+
+            // 生成partnerPrimaryKey
+            $partnerPrimaryKey = $this->generatePartnerPrimaryKey($hotel->id, $roomType->id, $date);
+
+            $body[] = [
+                'partnerPrimaryKey' => $partnerPrimaryKey,
+                'skuInfo' => [
+                    'startTime' => '14:00',
+                    'endTime' => '16:00',
+                    'levelInfoList' => [
+                        [
+                            'levelNo' => 1,
+                            'levelName' => $hotel->name,
+                        ],
+                        [
+                            'levelNo' => 2,
+                            'levelName' => $roomType->name,
+                        ],
+                    ],
+                ],
+                'priceDate' => $date,
+                // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
+                'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']) / 100, 2),
+                'mtPrice' => round(floatval($priceData['sale_price']) / 100, 2),
+                'settlementPrice' => round(floatval($priceData['settlement_price']) / 100, 2),
+                'stock' => $stock,
+                'attr' => null,
+            ];
+        }
+
+        return $body;
+    }
+
+    /**
+     * 同步多层价格日历变化通知V2（增量推送，支持日期数组）
+     * 
+     * @param \App\Models\Product $product 产品
+     * @param \App\Models\Hotel $hotel 酒店
+     * @param \App\Models\RoomType $roomType 房型
+     * @param array $dates 日期数组，格式：['2025-12-27', '2025-12-28']
+     * @return array
+     */
+    public function syncLevelPriceStockByDates(
+        \App\Models\Product $product,
+        \App\Models\Hotel $hotel,
+        \App\Models\RoomType $roomType,
+        array $dates
+    ): array {
+        try {
+            if (empty($dates)) {
+                return [
+                    'success' => false,
+                    'message' => '日期数组为空',
+                ];
+            }
+
+            $client = $this->getClient();
+            $partnerId = $client->getPartnerId();
+
+            // 去重并排序日期
+            $dates = array_unique($dates);
+            sort($dates);
+
+            // 计算最小和最大日期作为 startTime 和 endTime
+            $startDate = min($dates);
+            $endDate = max($dates);
+
+            // 构建请求数据（只包含指定的日期）
+            $body = $this->buildLevelPriceStockDataByDates($product, $hotel, $roomType, $dates);
+
+            if (empty($body)) {
+                return [
+                    'success' => false,
+                    'message' => '没有价格库存数据',
+                ];
+            }
+
+            // 美团请求格式：{partnerId, body: "加密的JSON字符串"}
+            // body字段需要包含：startTime, endTime, partnerDealId, body数组
+            $bodyData = [
+                'startTime' => $startDate,
+                'endTime' => $endDate,
+                'partnerDealId' => $product->code,
+                'body' => $body,
+            ];
+
+            $requestData = [
+                'partnerId' => $partnerId,
+                'body' => $bodyData, // body字段是数组，会在MeituanClient中加密
+            ];
+
+            Log::info('准备同步美团多层价格日历数据（增量推送）', [
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'dates' => $dates,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'body_count' => count($body),
+            ]);
+
+            $result = $client->notifyLevelPriceStock($requestData);
+
+            // 检查响应
+            if (isset($result['code']) && $result['code'] == 200) {
+                Log::info('同步美团多层价格日历（增量推送）：成功', [
+                    'product_id' => $product->id,
+                    'hotel_id' => $hotel->id,
+                    'room_type_id' => $roomType->id,
+                    'dates' => $dates,
+                ]);
+
+                return [
+                    'success' => true,
+                    'message' => '同步成功',
+                    'data' => $result,
+                ];
+            } else {
+                Log::error('同步美团多层价格日历（增量推送）：失败', [
+                    'product_id' => $product->id,
+                    'hotel_id' => $hotel->id,
+                    'room_type_id' => $roomType->id,
+                    'dates' => $dates,
+                    'result' => $result,
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => $result['describe'] ?? '同步失败',
+                    'data' => $result,
+                ];
+            }
+        } catch (\Exception $e) {
+            Log::error('同步美团多层价格日历（增量推送）异常', [
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'dates' => $dates,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '同步异常：' . $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
      * 同步多层价格日历变化通知V2（主动推送）
      * 
      * @param \App\Models\Product $product 产品

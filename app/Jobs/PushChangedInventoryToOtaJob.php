@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\OtaPlatform;
 use App\Enums\OtaPlatform as OtaPlatformEnum;
 use App\Services\OTA\CtripService;
+use App\Services\OTA\MeituanService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -52,7 +53,7 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
     /**
      * Execute the job.
      */
-    public function handle(CtripService $ctripService): void
+    public function handle(CtripService $ctripService, MeituanService $meituanService): void
     {
         Log::info('PushChangedInventoryToOtaJob 开始执行', [
             'room_type_id' => $this->roomTypeId,
@@ -157,6 +158,7 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                     // 根据平台类型推送
                     match ($platform->code->value) {
                         'ctrip' => $this->pushToCtrip($product, $hotel, $roomType, $ctripService),
+                        'meituan' => $this->pushToMeituan($product, $hotel, $roomType, $meituanService),
                         default => Log::info('推送库存变化：暂不支持该OTA平台', [
                             'product_id' => $product->id,
                             'platform_code' => $platform->code->value,
@@ -282,6 +284,111 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                 'trace' => $e->getTraceAsString(),
             ]);
             throw $e;
+        }
+    }
+
+    /**
+     * 推送到美团（增量推送）
+     */
+    protected function pushToMeituan(
+        Product $product,
+        \App\Models\Hotel $hotel,
+        RoomType $roomType,
+        MeituanService $meituanService
+    ): void {
+        try {
+            // 根据产品的入住天数，扩大查询日期范围
+            // 如果产品有入住天数（stay_days > 1），需要查询所有相关日期，以便正确计算连续入住天数的库存
+            // 
+            // 逻辑说明：
+            // - 如果 stay_days = 2，变化日期是 2026-01-11
+            // - 需要查询：2026-01-10, 2026-01-11
+            // - 因为：
+            //   1. 从 2026-01-10 开始入住需要：2026-01-10, 2026-01-11
+            //      - 如果 2026-01-11 变成0，2026-01-10 也应该变成0（无法满足连续入住）
+            //      - 如果 2026-01-11 从0变成正数，2026-01-10 需要重新计算并推送准确库存（可以满足连续入住）
+            //   2. 从 2026-01-11 开始入住需要：2026-01-11, 2026-01-12
+            $stayDays = $product->stay_days ?: 1;
+            $queryDates = $this->dates;
+            
+            if ($stayDays > 1 && !empty($this->dates)) {
+                // 对于每个变化的日期，需要查询前面相关日期的库存
+                // 这样当库存变化时，可以重新计算所有受影响日期的库存
+                $expandedDates = [];
+                foreach ($this->dates as $date) {
+                    $dateObj = \Carbon\Carbon::parse($date);
+                    
+                    // 查询范围：[变化日期 - (stay_days-1), 变化日期]
+                    // 例如：stay_days=2, 变化日期=2026-01-11
+                    // 查询：2026-01-10, 2026-01-11
+                    // 
+                    // 原因：
+                    // - 如果 2026-01-11 的库存变成0，会影响从 2026-01-10 开始的连续入住
+                    // - 但不会影响从 2026-01-12 开始的连续入住（2026-01-12 可以开始新的连续入住）
+                    // - 因此只需要查询前面和当前日期，不需要查询后面日期
+                    for ($i = -($stayDays - 1); $i <= 0; $i++) {
+                        $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
+                        if (!in_array($checkDate, $expandedDates)) {
+                            $expandedDates[] = $checkDate;
+                        }
+                    }
+                }
+                
+                // 排序日期，确保顺序正确
+                sort($expandedDates);
+                $queryDates = $expandedDates;
+                
+                Log::debug('推送库存变化到美团：扩大查询日期范围（考虑入住天数）', [
+                    'product_id' => $product->id,
+                    'stay_days' => $stayDays,
+                    'original_dates' => $this->dates,
+                    'expanded_dates' => $queryDates,
+                    'reason' => '只查询前面和当前日期，不查询后面日期。后面日期的连续入住不受前面日期变化影响',
+                ]);
+            }
+            
+            // 推送到美团（使用扩大后的日期范围，增量推送）
+            $result = $meituanService->syncLevelPriceStockByDates(
+                $product,
+                $hotel,
+                $roomType,
+                $queryDates
+            );
+
+            if ($result['success'] ?? false) {
+                Log::info('库存变化自动推送到美团成功', [
+                    'product_id' => $product->id,
+                    'hotel_id' => $hotel->id,
+                    'room_type_id' => $roomType->id,
+                    'original_dates' => $this->dates,
+                    'query_dates' => $queryDates,
+                    'stay_days' => $stayDays,
+                    'dates_count' => count($queryDates),
+                ]);
+            } else {
+                Log::warning('库存变化自动推送到美团失败', [
+                    'product_id' => $product->id,
+                    'hotel_id' => $hotel->id,
+                    'room_type_id' => $roomType->id,
+                    'original_dates' => $this->dates,
+                    'query_dates' => $queryDates,
+                    'stay_days' => $stayDays,
+                    'result' => $result,
+                    'error_message' => $result['message'] ?? '未知错误',
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('库存变化自动推送到美团异常', [
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'original_dates' => $this->dates,
+                'query_dates' => $queryDates ?? null,
+                'stay_days' => $stayDays ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            // 美团推送失败不影响其他平台，只记录错误，不抛出异常
         }
     }
 }
