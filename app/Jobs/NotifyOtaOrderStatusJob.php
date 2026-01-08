@@ -91,30 +91,4 @@ class NotifyOtaOrderStatusJob implements ShouldQueue
             throw $e; // 重新抛出异常，让队列重试
         }
     }
-
-}
-
-                $notification->notifyOrderConfirmed($this->order);
-            } elseif ($this->order->status->value === 'cancel_approved') {
-                $notification->notifyOrderRefunded($this->order);
-            } elseif ($this->order->status->value === 'verified') {
-                $notification->notifyOrderConsumed($this->order);
-            } else {
-                Log::info('NotifyOtaOrderStatusJob: 订单状态无需通知', [
-                    'order_id' => $this->order->id,
-                    'order_status' => $this->order->status->value,
-                ]);
-            }
-        } catch (\Exception $e) {
-            Log::error('NotifyOtaOrderStatusJob: 通知失败', [
-                'order_id' => $this->order->id,
-                'platform' => $this->order->otaPlatform?->code?->value,
-                'order_status' => $this->order->status->value,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            throw $e; // 重新抛出异常，让队列重试
-        }
-    }
-
 }
