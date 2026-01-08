@@ -160,11 +160,11 @@ class MeituanController extends Controller
             } elseif (str_contains($path, 'order/refunded')) {
                 return $this->handleOrderRefunded($data);
             } elseif (str_contains($path, 'order/close')) {
-                return $this->handleOrderClose($data);
+                return $this->handleOrderClose($data, $request);
             } else {
                 // 如果路径无法判断，根据数据内容判断
                 if (isset($body['closeType'])) {
-                    return $this->handleOrderClose($data);
+                    return $this->handleOrderClose($data, $request);
                 } elseif (isset($body['refundSerialNo']) && isset($body['refundTime'])) {
                     return $this->handleOrderRefunded($data);
                 } elseif (isset($body['refundSerialNo'])) {
@@ -1235,7 +1235,7 @@ class MeituanController extends Controller
     /**
      * 处理订单关闭消息（新功能）
      */
-    protected function handleOrderClose(array $data): Response
+    protected function handleOrderClose(array $data, Request $request): Response
     {
         try {
             // 获取partnerId（用于错误响应）
@@ -1247,20 +1247,29 @@ class MeituanController extends Controller
             $closeType = intval($body['closeType'] ?? 0);
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
+                // 订单关闭接口不加密（根据文档：是否加密 = -）
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, false);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在', $partnerId);
+                // 订单关闭接口不加密（根据文档：是否加密 = -）
+                return $this->errorResponse(400, '订单不存在', $partnerId, false);
             }
 
             // 幂等性检查：如果订单状态已经是CANCEL_APPROVED，直接返回成功
             if ($order->status === OrderStatus::CANCEL_APPROVED) {
-                return $this->successResponse([
-                    'orderId' => intval($orderId),
-                ], $partnerId);
+                // 订单关闭接口响应格式：{code, describe, partnerId}，不包含body字段
+                // 订单关闭接口不加密（根据文档：是否加密 = -）
+                return $this->successResponse(
+                    [],  // 空body，不包含orderId
+                    $partnerId,
+                    null,
+                    200,
+                    'success',
+                    false  // 明确指定不加密
+                );
             }
 
             // 更新订单状态为CANCEL_APPROVED
@@ -1308,11 +1317,15 @@ class MeituanController extends Controller
                 ]);
             }
 
+            // 订单关闭接口响应格式：{code, describe, partnerId}，不包含body字段
+            // 订单关闭接口不加密（根据文档：是否加密 = -）
             return $this->successResponse(
-                [
-                    'orderId' => intval($orderId),
-                ],
-                $partnerId
+                [],  // 空body，不包含orderId
+                $partnerId,
+                null,
+                200,
+                'success',
+                false  // 明确指定不加密
             );
 
         } catch (\Exception $e) {
@@ -1323,7 +1336,8 @@ class MeituanController extends Controller
             ]);
 
             $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
-            return $this->errorResponse(599, '系统处理异常', $partnerId);
+            // 订单关闭接口不加密（根据文档：是否加密 = -）
+            return $this->errorResponse(599, '系统处理异常', $partnerId, false);
         }
     }
 
