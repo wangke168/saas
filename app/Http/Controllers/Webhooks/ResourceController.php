@@ -468,7 +468,8 @@ class ResourceController extends Controller
     }
 
     /**
-     * 触发推送到携程（针对特定房型和日期）
+     * 触发推送到OTA平台（针对特定房型和日期）
+     * 推送到所有已推送的平台（包括携程和美团）
      * 
      * @param RoomType $roomType 房型
      * @param array $dates 变化的日期数组
@@ -476,24 +477,16 @@ class ResourceController extends Controller
     protected function triggerOtaPushForRoomType(RoomType $roomType, array $dates): void
     {
         try {
-            // 查找携程平台
-            $ctripPlatform = OtaPlatform::where('code', OtaPlatformEnum::CTRIP->value)->first();
-            if (!$ctripPlatform) {
-                Log::warning('资源方库存推送：携程平台不存在', [
-                    'room_type_id' => $roomType->id,
-                ]);
-                return;
-            }
-
+            // 推送到所有已推送的平台（传入 null 表示推送到所有平台）
             // 放入队列（延迟合并，避免频繁推送）
             $pushDelay = (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5);
             PushChangedInventoryToOtaJob::dispatch(
                 $roomType->id,
                 $dates,
-                $ctripPlatform->id
+                null // null 表示推送到所有已推送的平台（包括携程和美团）
             )->onQueue('ota-push')->delay(now()->addSeconds($pushDelay));
 
-            Log::info('资源方库存推送：已触发OTA推送任务', [
+            Log::info('资源方库存推送：已触发OTA推送任务（推送到所有平台）', [
                 'room_type_id' => $roomType->id,
                 'dates_count' => count($dates),
                 'dates' => array_slice($dates, 0, 10), // 只记录前10个日期

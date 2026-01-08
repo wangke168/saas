@@ -97,15 +97,38 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
             // 确定要推送的OTA平台
             $otaPlatforms = [];
             if ($this->otaPlatformId) {
+                // 如果指定了平台ID，只推送到该平台
                 $platform = OtaPlatform::find($this->otaPlatformId);
                 if ($platform) {
                     $otaPlatforms[] = $platform;
                 }
             } else {
-                // 默认只推送到携程
-                $ctripPlatform = OtaPlatform::where('code', OtaPlatformEnum::CTRIP->value)->first();
-                if ($ctripPlatform) {
-                    $otaPlatforms[] = $ctripPlatform;
+                // 如果没有指定平台ID，推送到所有已推送的平台（包括携程和美团）
+                // 查找所有已推送产品的平台
+                $platforms = OtaPlatform::whereIn('code', [
+                    OtaPlatformEnum::CTRIP->value,
+                    OtaPlatformEnum::MEITUAN->value,
+                ])->get();
+                
+                foreach ($platforms as $platform) {
+                    // 检查是否有产品已推送到该平台
+                    $hasOtaProduct = $products->contains(function ($product) use ($platform) {
+                        return $product->otaProducts()
+                            ->where('ota_platform_id', $platform->id)
+                            ->where('is_active', true)
+                            ->exists();
+                    });
+                    
+                    if ($hasOtaProduct) {
+                        $otaPlatforms[] = $platform;
+                    }
+                }
+                
+                // 如果没有找到任何平台，记录警告但不报错（向后兼容）
+                if (empty($otaPlatforms)) {
+                    Log::info('推送库存变化：没有找到已推送的平台', [
+                        'room_type_id' => $this->roomTypeId,
+                    ]);
                 }
             }
 
