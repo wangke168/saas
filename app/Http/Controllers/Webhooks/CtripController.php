@@ -1238,8 +1238,35 @@ class CtripController extends Controller
                 return $this->errorResponse('2004', '取消数量不正确');
             }
 
+            // 加载订单关联数据（用于通知和系统直连检查）
+            $order->load([
+                'otaPlatform',
+                'product.scenicSpot',
+                'hotel.scenicSpot.resourceConfig',
+                'hotel.scenicSpot.softwareProvider'
+            ]);
+
+            // 在接收到OTA取消请求时立即发送钉钉通知（在状态更新之前）
+            try {
+                $cancelData = [
+                    'quantity' => $totalCancelQuantity,
+                    'cancel_type_label' => $totalCancelQuantity >= $order->room_count ? '全部取消' : '部分取消',
+                ];
+                \App\Jobs\NotifyOrderCancelRequestedJob::dispatch($order, $cancelData);
+                
+                Log::info('携程取消订单：已触发钉钉通知', [
+                    'order_id' => $order->id,
+                    'cancel_quantity' => $totalCancelQuantity,
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('携程取消订单：触发钉钉通知失败', [
+                    'order_id' => $order->id,
+                    'error' => $e->getMessage(),
+                ]);
+                // 通知失败不影响取消流程，继续处理
+            }
+
             // 检查是否系统直连
-            $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
             $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
 
             if ($isSystemConnected) {
@@ -1318,7 +1345,72 @@ class CtripController extends Controller
                 ]);
 
                 try {
-                    // 1. 更新订单状态为取消申请中
+                    // 0. 幂等性检查：如果订单已经是取消相关状态且已存在取消异常订单，直接返回成功
+                    if (in_array($order->status, [OrderStatus::CANCEL_REQUESTED, OrderStatus::CANCEL_APPROVED, OrderStatus::CANCEL_REJECTED])) {
+                        $existingCancelException = ExceptionOrder::where('order_id', $order->id)
+                            ->where('status', ExceptionOrderStatus::PENDING)
+                            ->where('exception_data->operation', 'cancel')
+                            ->first();
+                        
+                        if ($existingCancelException) {
+                            Log::info('携程取消订单：订单已存在取消异常订单，幂等性处理', [
+                                'order_id' => $order->id,
+                                'current_status' => $order->status->value,
+                                'exception_order_id' => $existingCancelException->id,
+                            ]);
+                            
+                            // 返回成功，避免重复处理
+                            $responseItems = [];
+                            foreach ($items as $item) {
+                                $responseItems[] = [
+                                    'itemId' => $item['itemId'] ?? '1',
+                                ];
+                            }
+                            
+                            return $this->successResponse([
+                                'supplierConfirmType' => 2, // 取消待确认（需异步返回）
+                                'items' => $responseItems,
+                            ]);
+                        }
+                    }
+                    
+                    // 1. 检查订单状态，如果订单在确认中且存在接单异常订单，自动关闭接单异常订单
+                    $confirmExceptionOrder = null;
+                    if ($order->status === OrderStatus::CONFIRMING) {
+                        // 查找待处理的接单异常订单
+                        $confirmExceptionOrder = ExceptionOrder::where('order_id', $order->id)
+                            ->where('status', ExceptionOrderStatus::PENDING)
+                            ->where('exception_data->operation', 'confirm')
+                            ->first();
+                        
+                        if ($confirmExceptionOrder) {
+                            // 自动关闭接单异常订单
+                            $confirmExceptionOrder->update([
+                                'status' => ExceptionOrderStatus::RESOLVED,
+                                'exception_data' => array_merge(
+                                    $confirmExceptionOrder->exception_data ?? [],
+                                    [
+                                        'resolved_reason' => '订单在确认中被OTA取消，自动关闭接单异常订单',
+                                        'resolved_by' => 'system',
+                                        'resolved_at' => now()->toDateTimeString(),
+                                        'cancel_request_info' => [
+                                            'ctrip_order_id' => $ctripOrderId,
+                                            'cancel_quantity' => $totalCancelQuantity,
+                                            'items' => $items,
+                                        ],
+                                    ]
+                                ),
+                            ]);
+                            
+                            Log::info('携程取消订单：订单在确认中，已自动关闭接单异常订单', [
+                                'order_id' => $order->id,
+                                'confirm_exception_order_id' => $confirmExceptionOrder->id,
+                                'cancel_quantity' => $totalCancelQuantity,
+                            ]);
+                        }
+                    }
+                    
+                    // 2. 更新订单状态为取消申请中
                     $this->orderService->updateOrderStatus(
                         $order,
                         OrderStatus::CANCEL_REQUESTED,
@@ -1331,24 +1423,33 @@ class CtripController extends Controller
                         'current_status' => $order->status->value,
                     ]);
                     
-                    // 2. 创建异常订单
+                    // 3. 创建取消异常订单
                     $sequenceId = $data['sequenceId'] ?? null;
+                    $exceptionData = [
+                        'operation' => 'cancel',
+                        'sequence_id' => $sequenceId,
+                        'ctrip_order_id' => $ctripOrderId,
+                        'cancel_quantity' => $totalCancelQuantity,
+                        'items' => $items,
+                    ];
+                    
+                    // 如果有接单异常订单，记录关联信息
+                    if ($confirmExceptionOrder) {
+                        $exceptionData['previous_operation'] = 'confirm';
+                        $exceptionData['previous_exception_order_id'] = $confirmExceptionOrder->id;
+                    }
+                    
                     ExceptionOrder::create([
                         'order_id' => $order->id,
                         'exception_type' => ExceptionOrderType::API_ERROR,
                         'exception_message' => '非系统直连订单，等待人工处理取消，数量：' . $totalCancelQuantity,
-                        'exception_data' => [
-                            'operation' => 'cancel',
-                            'sequence_id' => $sequenceId,
-                            'ctrip_order_id' => $ctripOrderId,
-                            'cancel_quantity' => $totalCancelQuantity,
-                            'items' => $items,
-                        ],
+                        'exception_data' => $exceptionData,
                         'status' => ExceptionOrderStatus::PENDING,
                     ]);
                     
                     Log::info('携程取消订单：已创建异常订单', [
                         'order_id' => $order->id,
+                        'has_previous_confirm_exception' => $confirmExceptionOrder !== null,
                     ]);
                 } catch (\Exception $e) {
                     Log::error('携程取消订单：非系统直连处理失败', [
