@@ -98,10 +98,11 @@ class MeituanNotificationService implements OtaNotificationInterface
             ];
 
             // 如果是实名制订单，返回credentialList
-            // 注意：voucherType=0 时，不需要传递voucher字段
+            // 根据文档第1165行：realNameType=1时，credentialList中的voucher字段是必传的（不管voucherType）
             // credentialList的数量应该与订单数量（room_count）一致
             if ($order->real_name_type === 1 && !empty($order->credential_list)) {
                 $requestData['body']['credentialList'] = [];
+                $vouchers = [];  // 收集所有凭证码
                 $roomCount = $order->room_count ?? 1;
                 $credentialList = $order->credential_list;
                 
@@ -111,28 +112,41 @@ class MeituanNotificationService implements OtaNotificationInterface
                 for ($i = 0; $i < $roomCount; $i++) {
                     $credential = $credentialList[$i] ?? $credentialList[0] ?? null;
                     if ($credential) {
+                        // 生成或获取凭证码
+                        // 如果credential中没有voucher字段，则生成一个
+                        $voucher = $credential['voucher'] ?? $this->generateVoucher($order, $i);
+                        
                         $credentialItem = [
                             'credentialType' => $credential['credentialType'] ?? 0,
                             'credentialNo' => $credential['credentialNo'] ?? '',
+                            'voucher' => $voucher,  // realNameType=1时必传（文档第1165行）
                         ];
                         
-                        // 只有当voucherType=1（一码一验）时才传递voucher字段
-                        // voucherType=0时，不传递voucher字段（即使有值也不传）
-                        // 如果voucher为空字符串，也不传递该字段
-                        if (!empty($credential['voucher'])) {
-                            $credentialItem['voucher'] = $credential['voucher'];
-                        }
-                        
                         $requestData['body']['credentialList'][] = $credentialItem;
+                        $vouchers[] = $voucher;
                     }
                 }
                 
-                Log::info('MeituanNotificationService: 构建credentialList', [
+                // 添加vouchers数组（出票成功时必传字段）
+                $requestData['body']['vouchers'] = $vouchers;
+                
+                // 添加voucherPics数组（出票成功时必传字段）
+                // 生成凭证码图片链接，顺序必须与vouchers数组一致
+                $requestData['body']['voucherPics'] = $this->generateVoucherPics($vouchers, $order);
+                
+                Log::info('MeituanNotificationService: 构建credentialList和凭证码', [
                     'order_id' => $order->id,
                     'room_count' => $roomCount,
                     'credential_list_count' => count($credentialList),
                     'final_credential_list_count' => count($requestData['body']['credentialList']),
+                    'vouchers_count' => count($vouchers),
+                    'voucher_pics_count' => count($requestData['body']['voucherPics']),
                 ]);
+            } else {
+                // 非实名制订单，也需要生成vouchers和voucherPics（如果订单有凭证码）
+                // 这里暂时返回空数组，实际应该从订单中获取
+                $requestData['body']['vouchers'] = [];
+                $requestData['body']['voucherPics'] = [];
             }
 
             $result = $client->notifyOrderPay($requestData);
@@ -264,5 +278,52 @@ class MeituanNotificationService implements OtaNotificationInterface
         ]);
         // 美团可能不支持订单核销通知，这里先留空
         // 如果后续需要实现，可以在这里添加逻辑
+    }
+
+    /**
+     * 生成凭证码
+     * 
+     * @param Order $order 订单
+     * @param int $index 凭证码索引（从0开始）
+     * @return string 凭证码
+     */
+    protected function generateVoucher(Order $order, int $index): string
+    {
+        // 凭证码格式：订单号 + 序号（例如：ORD2026010818374262886-1）
+        // 如果订单只有1张票，可以只使用订单号
+        $roomCount = $order->room_count ?? 1;
+        
+        if ($roomCount === 1) {
+            // 单张票，使用订单号作为凭证码
+            return strtoupper($order->order_no);
+        } else {
+            // 多张票，使用订单号 + 序号
+            return strtoupper($order->order_no) . '-' . ($index + 1);
+        }
+    }
+
+    /**
+     * 生成凭证码图片链接
+     * 
+     * @param array $vouchers 凭证码数组
+     * @param Order $order 订单
+     * @return array 凭证码图片链接数组
+     */
+    protected function generateVoucherPics(array $vouchers, Order $order): array
+    {
+        $voucherPics = [];
+        
+        // 生成凭证码图片链接
+        // 这里使用占位链接，实际应该生成真实的图片链接
+        // 图片链接格式可以是：https://your-domain.com/vouchers/{voucher}.png
+        $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
+        
+        foreach ($vouchers as $voucher) {
+            // 生成图片链接（可以是占位链接，或实际生成图片）
+            // 注意：图片链接必须可访问，且顺序必须与vouchers数组一致
+            $voucherPics[] = $baseUrl . '/vouchers/' . urlencode($voucher) . '.png';
+        }
+        
+        return $voucherPics;
     }
 }

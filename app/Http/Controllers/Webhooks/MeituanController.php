@@ -831,10 +831,11 @@ class MeituanController extends Controller
         $responseBody['voucherAdditionalList'] = [];
 
         // 如果是实名制订单，返回credentialList
-        // 注意：voucherType=0 时，不需要传递voucher字段
+        // 根据文档第1165行：realNameType=1时，credentialList中的voucher字段是必传的（不管voucherType）
         // credentialList的数量应该与订单数量（room_count）一致
         if ($order->real_name_type === 1 && !empty($order->credential_list)) {
             $responseBody['credentialList'] = [];
+            $vouchers = [];  // 收集所有凭证码
             $roomCount = $order->room_count ?? 1;
             $credentialList = $order->credential_list;
             
@@ -844,21 +845,26 @@ class MeituanController extends Controller
             for ($i = 0; $i < $roomCount; $i++) {
                 $credential = $credentialList[$i] ?? $credentialList[0] ?? null;
                 if ($credential) {
+                    // 生成或获取凭证码
+                    // 如果credential中没有voucher字段，则生成一个
+                    $voucher = $credential['voucher'] ?? $this->generateVoucherForOrder($order, $i);
+                    
                     $credentialItem = [
                         'credentialType' => $credential['credentialType'] ?? 0,
                         'credentialNo' => $credential['credentialNo'] ?? '',
+                        'voucher' => $voucher,  // realNameType=1时必传（文档第1165行）
                     ];
                     
-                    // 只有当voucherType=1（一码一验）时才传递voucher字段
-                    // voucherType=0时，不传递voucher字段（即使有值也不传）
-                    // 如果voucher为空字符串，也不传递该字段
-                    if (!empty($credential['voucher'])) {
-                        $credentialItem['voucher'] = $credential['voucher'];
-                    }
-                    
                     $responseBody['credentialList'][] = $credentialItem;
+                    $vouchers[] = $voucher;
                 }
             }
+            
+            // 更新vouchers数组（从credentialList中提取）
+            $responseBody['vouchers'] = $vouchers;
+            
+            // 生成voucherPics数组
+            $responseBody['voucherPics'] = $this->generateVoucherPicsForOrder($vouchers, $order);
         }
 
         return $this->successResponse($responseBody, $partnerId);
@@ -1914,5 +1920,52 @@ class MeituanController extends Controller
             $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
             return $this->errorResponse(599, '系统处理异常', $partnerId, $encryptResponse);
         }
+    }
+
+    /**
+     * 生成凭证码（用于同步出票响应）
+     * 
+     * @param Order $order 订单
+     * @param int $index 凭证码索引（从0开始）
+     * @return string 凭证码
+     */
+    protected function generateVoucherForOrder(Order $order, int $index): string
+    {
+        // 凭证码格式：订单号 + 序号（例如：ORD2026010818374262886-1）
+        // 如果订单只有1张票，可以只使用订单号
+        $roomCount = $order->room_count ?? 1;
+        
+        if ($roomCount === 1) {
+            // 单张票，使用订单号作为凭证码
+            return strtoupper($order->order_no);
+        } else {
+            // 多张票，使用订单号 + 序号
+            return strtoupper($order->order_no) . '-' . ($index + 1);
+        }
+    }
+
+    /**
+     * 生成凭证码图片链接（用于同步出票响应）
+     * 
+     * @param array $vouchers 凭证码数组
+     * @param Order $order 订单
+     * @return array 凭证码图片链接数组
+     */
+    protected function generateVoucherPicsForOrder(array $vouchers, Order $order): array
+    {
+        $voucherPics = [];
+        
+        // 生成凭证码图片链接
+        // 这里使用占位链接，实际应该生成真实的图片链接
+        // 图片链接格式可以是：https://your-domain.com/vouchers/{voucher}.png
+        $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
+        
+        foreach ($vouchers as $voucher) {
+            // 生成图片链接（可以是占位链接，或实际生成图片）
+            // 注意：图片链接必须可访问，且顺序必须与vouchers数组一致
+            $voucherPics[] = $baseUrl . '/vouchers/' . urlencode($voucher) . '.png';
+        }
+        
+        return $voucherPics;
     }
 }
