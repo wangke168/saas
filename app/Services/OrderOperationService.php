@@ -608,11 +608,13 @@ class OrderOperationService
                 ];
             }
 
-            // 2. 更新订单状态
+            // 2. 更新订单状态（在备注中包含核销数量，便于订单查询接口提取）
+            $useQuantity = $data['use_quantity'] ?? $order->room_count;
+            $remark = '系统直连：资源方核销成功，核销数量：' . $useQuantity;
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::VERIFIED,
-                '系统直连：资源方核销成功',
+                $remark,
                 null
             );
 
@@ -660,35 +662,65 @@ class OrderOperationService
             $order->load(['otaPlatform']);
             
             // 1. 先通知OTA平台，等待响应成功后再更新订单状态
-            Log::info('OrderOperationService::verifyOrderManually: 开始通知OTA平台', [
-                'order_id' => $order->id,
-                'ota_platform' => $order->otaPlatform?->code?->value,
-            ]);
+            // 检查是否跳过美团通知（测试模式）
+            $skipMeituanNotification = env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === true 
+                || env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === 'true'
+                || env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === '1';
             
-            try {
-                // 调用通知接口
-                $this->notifyOtaOrderConsumed($order, $data);
+            if ($skipMeituanNotification && $order->otaPlatform?->code === \App\Enums\OtaPlatform::MEITUAN) {
+                Log::info('OrderOperationService::verifyOrderManually: 测试模式，跳过美团核销通知', [
+                    'order_id' => $order->id,
+                    'use_quantity' => $data['use_quantity'] ?? $order->room_count,
+                ]);
+            } else {
+                Log::info('OrderOperationService::verifyOrderManually: 开始通知OTA平台', [
+                    'order_id' => $order->id,
+                    'ota_platform' => $order->otaPlatform?->code?->value,
+                ]);
                 
-                Log::info('OrderOperationService::verifyOrderManually: OTA平台核销通知成功', [
-                    'order_id' => $order->id,
-                ]);
-            } catch (\Exception $e) {
-                Log::error('OrderOperationService::verifyOrderManually: OTA平台核销通知失败', [
-                    'order_id' => $order->id,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-                throw $e; // 重新抛出异常，阻止后续状态更新
+                try {
+                    // 调用通知接口
+                    $this->notifyOtaOrderConsumed($order, $data);
+                    
+                    Log::info('OrderOperationService::verifyOrderManually: OTA平台核销通知成功', [
+                        'order_id' => $order->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('OrderOperationService::verifyOrderManually: OTA平台核销通知失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    throw $e; // 重新抛出异常，阻止后续状态更新
+                }
             }
             
             // 2. OTA平台通知成功，开始事务更新订单状态
             DB::beginTransaction();
 
-            // 3. 更新订单状态
+            // 3. 更新订单状态（在备注中包含核销数量，便于订单查询接口提取）
+            $useQuantity = $data['use_quantity'] ?? $order->room_count;
+            $remark = '人工操作：核销，核销数量：' . $useQuantity;
+            
+            // 如果是实名制订单，在备注中包含已核销的证件号（便于订单查询接口匹配）
+            if ($order->real_name_type === 1 && !empty($data['passengers'])) {
+                $credentialNos = [];
+                foreach ($data['passengers'] as $passenger) {
+                    if (!empty($passenger['credentialNo'])) {
+                        $credentialNos[] = $passenger['credentialNo'];
+                    } elseif (!empty($passenger['idCode'])) {
+                        $credentialNos[] = $passenger['idCode'];
+                    }
+                }
+                if (!empty($credentialNos)) {
+                    $remark .= '，已核销证件号：' . implode('、', $credentialNos);
+                }
+            }
+            
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::VERIFIED,
-                '人工操作：核销',
+                $remark,
                 $operatorId
             );
 

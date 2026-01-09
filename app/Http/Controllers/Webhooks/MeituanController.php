@@ -154,7 +154,7 @@ class MeituanController extends Controller
             } elseif (str_contains($path, 'order/pay')) {
                 return $this->handleOrderPay($data, $request);
             } elseif (str_contains($path, 'order/query')) {
-                return $this->handleOrderQuery($data);
+                return $this->handleOrderQuery($data, $request);
             } elseif (str_contains($path, 'order/refund') && !str_contains($path, 'refunded')) {
                 return $this->handleOrderRefund($data, $request);
             } elseif (str_contains($path, 'order/refunded')) {
@@ -866,90 +866,58 @@ class MeituanController extends Controller
 
     /**
      * 处理订单查询（对应携程的QueryOrder）
+     * 支持部分核销场景：从订单日志表中查询已核销数量和已退款数量
      */
-    protected function handleOrderQuery(array $data): Response
+    protected function handleOrderQuery(array $data, Request $request): Response
     {
         try {
             // 获取partnerId（用于错误响应）
             $client = $this->getClient();
             $partnerId = $client ? $client->getPartnerId() : null;
 
+            // 检查请求是否加密
+            // 如果请求头中有 X-Encryption-Status: encrypted，表示请求是加密的，响应也应该加密
+            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, $encryptResponse);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)
-                ->with(['product', 'hotel', 'roomType'])
+                ->with(['product', 'hotel', 'roomType', 'logs'])
                 ->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在', $partnerId);
+                return $this->errorResponse(400, '订单不存在', $partnerId, $encryptResponse);
             }
 
             // 映射订单状态到美团状态
             $orderStatus = $this->mapOrderStatusToMeituan($order->status);
 
-            // 构建响应数据（根据美团文档，订单查询响应body中不包含code和describe）
-            // 计算已使用数量和已退款数量
-            $usedQuantity = 0;
-            $refundedQuantity = 0;
-            if ($order->status === OrderStatus::VERIFIED) {
-                $usedQuantity = $order->room_count;
-            } elseif ($order->status === OrderStatus::CANCEL_APPROVED) {
-                $refundedQuantity = $order->room_count;
-            }
+            // 从订单日志表中查询已核销数量和已退款数量
+            $usedQuantity = $this->calculateUsedQuantity($order);
+            $refundedQuantity = $this->calculateRefundedQuantity($order);
             
             $responseBody = [
                 'orderId' => intval($orderId),
                 'partnerOrderId' => $order->order_no,
                 'orderStatus' => $orderStatus,
                 'orderQuantity' => $order->room_count,  // 订单总票数
-                'usedQuantity' => $usedQuantity,  // 已使用数量
-                'refundedQuantity' => $refundedQuantity,  // 已退款数量
+                'usedQuantity' => $usedQuantity,  // 已使用数量（支持部分核销）
+                'refundedQuantity' => $refundedQuantity,  // 已退款数量（支持部分退款）
                 'voucherType' => 0,  // 凭证码类型：0为不需要码核销
             ];
             
             // 如果是实名制订单，添加credentialList
             if ($order->real_name_type === 1 && !empty($order->credential_list)) {
                 $responseBody['realNameType'] = 1;
-                $responseBody['credentialList'] = [];
-                $roomCount = $order->room_count ?? 1;
-                $credentialList = $order->credential_list;
-                
-                // 确保credentialList的数量与订单数量一致
-                for ($i = 0; $i < $roomCount; $i++) {
-                    $credential = $credentialList[$i] ?? $credentialList[0] ?? null;
-                    if ($credential) {
-                        $credentialItem = [
-                            'credentialType' => $credential['credentialType'] ?? 0,
-                            'credentialNo' => $credential['credentialNo'] ?? '',
-                            'status' => 0,  // 0为未使用，1为已使用，2为已退款
-                        ];
-                        
-                        // 只有当voucher不为空时才传递voucher字段
-                        if (!empty($credential['voucher'])) {
-                            $credentialItem['voucher'] = $credential['voucher'];
-                        }
-                        
-                        $responseBody['credentialList'][] = $credentialItem;
-                    }
-                }
+                $responseBody['credentialList'] = $this->buildCredentialListForQuery($order, $usedQuantity);
             }
 
-            // 如果订单已核销，返回usedQuantity
-            if ($order->status === OrderStatus::VERIFIED) {
-                $responseBody['usedQuantity'] = $order->room_count;
-            }
-
-            // 如果订单已退款，返回refundedQuantity
-            if ($order->status === OrderStatus::CANCEL_APPROVED) {
-                $responseBody['refundedQuantity'] = $order->room_count;
-            }
-
-            return $this->successResponse($responseBody, $partnerId);
+            return $this->successResponse($responseBody, $partnerId, null, 200, 'success', $encryptResponse);
         } catch (\Exception $e) {
             Log::error('美团订单查询失败', [
                 'error' => $e->getMessage(),
@@ -958,8 +926,197 @@ class MeituanController extends Controller
             ]);
 
             $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
-            return $this->errorResponse(599, '系统处理异常', $partnerId);
+            // 根据请求加密状态决定响应是否加密
+            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+            return $this->errorResponse(599, '系统处理异常', $partnerId, $encryptResponse);
         }
+    }
+
+    /**
+     * 计算已核销数量（从订单日志表中查询）
+     * 支持部分核销场景
+     */
+    protected function calculateUsedQuantity(Order $order): int
+    {
+        // 查询所有核销相关的日志（to_status = 'verified'）
+        $verifiedLogs = \App\Models\OrderLog::where('order_id', $order->id)
+            ->where('to_status', OrderStatus::VERIFIED->value)
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+        if ($verifiedLogs->isEmpty()) {
+            // 如果没有核销日志，但订单状态是VERIFIED，返回全部数量（兼容旧逻辑）
+            if ($order->status === OrderStatus::VERIFIED) {
+                return $order->room_count;
+            }
+            return 0;
+        }
+
+        // 从备注中提取核销数量
+        $totalUsedQuantity = 0;
+        foreach ($verifiedLogs as $log) {
+            $quantity = $this->extractQuantityFromRemark($log->remark, '核销');
+            if ($quantity > 0) {
+                $totalUsedQuantity += $quantity;
+            } else {
+                // 如果备注中没有明确数量，假设是全部核销（兼容旧逻辑）
+                // 但只计算第一次核销日志，避免重复计算
+                if ($totalUsedQuantity === 0) {
+                    $totalUsedQuantity = $order->room_count;
+                }
+            }
+        }
+
+        // 确保不超过订单总数量
+        return min($totalUsedQuantity, $order->room_count);
+    }
+
+    /**
+     * 计算已退款数量（从订单日志表中查询）
+     * 支持部分退款场景
+     */
+    protected function calculateRefundedQuantity(Order $order): int
+    {
+        // 查询所有退款相关的日志（to_status = 'cancel_approved'）
+        $refundedLogs = \App\Models\OrderLog::where('order_id', $order->id)
+            ->where('to_status', OrderStatus::CANCEL_APPROVED->value)
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+        if ($refundedLogs->isEmpty()) {
+            // 如果没有退款日志，但订单状态是CANCEL_APPROVED，返回全部数量（兼容旧逻辑）
+            if ($order->status === OrderStatus::CANCEL_APPROVED) {
+                return $order->room_count;
+            }
+            return 0;
+        }
+
+        // 从备注中提取退款数量
+        $totalRefundedQuantity = 0;
+        foreach ($refundedLogs as $log) {
+            $quantity = $this->extractQuantityFromRemark($log->remark, '退款');
+            if ($quantity > 0) {
+                $totalRefundedQuantity += $quantity;
+            } else {
+                // 如果备注中没有明确数量，假设是全部退款（兼容旧逻辑）
+                // 但只计算第一次退款日志，避免重复计算
+                if ($totalRefundedQuantity === 0) {
+                    $totalRefundedQuantity = $order->room_count;
+                }
+            }
+        }
+
+        // 确保不超过订单总数量
+        return min($totalRefundedQuantity, $order->room_count);
+    }
+
+    /**
+     * 从备注中提取数量
+     * 支持多种格式：
+     * - "核销数量：1"
+     * - "核销1张"
+     * - "已核销：1"
+     * - "use_quantity: 1"
+     */
+    protected function extractQuantityFromRemark(?string $remark, string $type = '核销'): int
+    {
+        if (empty($remark)) {
+            return 0;
+        }
+
+        // 尝试匹配 "数量：X" 或 "数量:X" 格式
+        if (preg_match('/数量[：:]\s*(\d+)/u', $remark, $matches)) {
+            return intval($matches[1]);
+        }
+
+        // 尝试匹配 "X张" 格式
+        if (preg_match('/(\d+)\s*张/u', $remark, $matches)) {
+            return intval($matches[1]);
+        }
+
+        // 尝试匹配 "已X：X" 格式
+        if (preg_match('/已' . preg_quote($type, '/') . '[：:]\s*(\d+)/u', $remark, $matches)) {
+            return intval($matches[1]);
+        }
+
+        // 尝试匹配 "use_quantity: X" 格式
+        if (preg_match('/use_quantity[：:]\s*(\d+)/i', $remark, $matches)) {
+            return intval($matches[1]);
+        }
+
+        return 0;
+    }
+
+    /**
+     * 构建实名制订单的credentialList（用于订单查询响应）
+     * 根据已核销数量更新status字段
+     */
+    protected function buildCredentialListForQuery(Order $order, int $usedQuantity): array
+    {
+        $credentialList = [];
+        $roomCount = $order->room_count ?? 1;
+        $orderCredentialList = $order->credential_list ?? [];
+
+        // 查询已核销的证件号（从订单日志中提取）
+        $verifiedCredentialNos = $this->getVerifiedCredentialNos($order);
+
+        // 构建credentialList
+        for ($i = 0; $i < $roomCount; $i++) {
+            $credential = $orderCredentialList[$i] ?? $orderCredentialList[0] ?? null;
+            if ($credential) {
+                $credentialNo = $credential['credentialNo'] ?? '';
+                
+                // 判断该证件是否已核销
+                $status = 0; // 默认未使用
+                if (!empty($credentialNo) && in_array($credentialNo, $verifiedCredentialNos)) {
+                    $status = 1; // 已使用
+                } elseif ($usedQuantity > 0 && $i < $usedQuantity) {
+                    // 如果无法从日志中获取具体证件号，根据已核销数量推断
+                    // 假设前N个证件已核销（按顺序）
+                    $status = 1; // 已使用
+                }
+
+                $credentialItem = [
+                    'credentialType' => $credential['credentialType'] ?? 0,
+                    'credentialNo' => $credentialNo,
+                    'status' => $status,
+                ];
+                
+                // 只有当voucher不为空时才传递voucher字段
+                if (!empty($credential['voucher'])) {
+                    $credentialItem['voucher'] = $credential['voucher'];
+                }
+                
+                $credentialList[] = $credentialItem;
+            }
+        }
+
+        return $credentialList;
+    }
+
+    /**
+     * 从订单日志中提取已核销的证件号
+     * 从核销日志的备注中解析证件号信息
+     */
+    protected function getVerifiedCredentialNos(Order $order): array
+    {
+        $verifiedCredentialNos = [];
+
+        // 查询所有核销相关的日志
+        $verifiedLogs = \App\Models\OrderLog::where('order_id', $order->id)
+            ->where('to_status', OrderStatus::VERIFIED->value)
+            ->orderBy('created_at', 'asc')
+            ->get();
+
+        foreach ($verifiedLogs as $log) {
+            // 从备注中提取证件号（如果备注中包含证件号信息）
+            // 格式可能是：证件号：360302198906195033 或 credentialNo: 360302198906195033
+            if (preg_match_all('/(?:证件号|credentialNo)[：:]\s*([0-9Xx]{15,18})/u', $log->remark ?? '', $matches)) {
+                $verifiedCredentialNos = array_merge($verifiedCredentialNos, $matches[1]);
+            }
+        }
+
+        return array_unique($verifiedCredentialNos);
     }
 
     /**
