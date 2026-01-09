@@ -114,23 +114,58 @@ class MeituanNotificationService implements OtaNotificationInterface
                 $credentialList = $order->credential_list;
                 
                 // 确保credentialList的数量与订单数量一致
-                // 如果credentialList数量少于订单数量，使用第一个证件信息填充
+                // 如果credentialList数量少于订单数量，记录警告但继续处理（使用已有的证件信息）
                 // 如果credentialList数量多于订单数量，只取前roomCount个
+                $credentialListCount = count($credentialList);
+                if ($credentialListCount < $roomCount) {
+                    Log::warning('MeituanNotificationService: credentialList数量少于订单票数', [
+                        'order_id' => $order->id,
+                        'room_count' => $roomCount,
+                        'credential_list_count' => $credentialListCount,
+                    ]);
+                }
+                
                 for ($i = 0; $i < $roomCount; $i++) {
-                    $credential = $credentialList[$i] ?? $credentialList[0] ?? null;
+                    // 优先使用对应索引的证件信息，如果不存在则使用第一个（但记录警告）
+                    $credential = null;
+                    if (isset($credentialList[$i])) {
+                        $credential = $credentialList[$i];
+                    } elseif (!empty($credentialList[0])) {
+                        // 如果对应索引不存在，使用第一个（但这不是理想情况）
+                        $credential = $credentialList[0];
+                        Log::warning('MeituanNotificationService: 使用第一个证件信息填充', [
+                            'order_id' => $order->id,
+                            'index' => $i,
+                            'credential_no' => $credentialList[0]['credentialNo'] ?? '',
+                        ]);
+                    }
+                    
                     if ($credential) {
                         // 生成或获取凭证码
-                        // 如果credential中没有voucher字段，则生成一个
-                        $voucher = $credential['voucher'] ?? $this->generateVoucher($order, $i);
+                        // 如果credential中没有voucher字段或voucher为空字符串，则生成一个
+                        $voucher = !empty($credential['voucher']) ? $credential['voucher'] : $this->generateVoucher($order, $i);
+                        
+                        // 确保凭证码不为空
+                        if (empty($voucher)) {
+                            $voucher = $this->generateVoucher($order, $i);
+                        }
                         
                         $credentialItem = [
                             'credentialType' => $credential['credentialType'] ?? 0,
                             'credentialNo' => $credential['credentialNo'] ?? '',
-                            'voucher' => $voucher,  // realNameType=1时必传（文档第1165行）
+                            'voucher' => $voucher,  // realNameType=1时必传（文档第1165行），且不能为空
                         ];
                         
                         $requestData['body']['credentialList'][] = $credentialItem;
                         $vouchers[] = $voucher;
+                    } else {
+                        // 如果没有证件信息，记录错误
+                        Log::error('MeituanNotificationService: 缺少证件信息', [
+                            'order_id' => $order->id,
+                            'index' => $i,
+                            'room_count' => $roomCount,
+                            'credential_list_count' => $credentialListCount,
+                        ]);
                     }
                 }
                 
