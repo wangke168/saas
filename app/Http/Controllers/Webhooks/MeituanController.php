@@ -541,6 +541,11 @@ class MeituanController extends Controller
             $contactEmail = $contactInfo['email'] ?? '';
 
             // 处理实名制订单
+            // 如果请求中有credentialList，自动将realNameType设置为1（即使请求中realNameType=0）
+            if (!empty($credentialList)) {
+                $realNameType = 1; // 有证件信息，强制设置为实名制
+            }
+            
             $credentialListData = null;
             if ($realNameType === 1 && !empty($credentialList)) {
                 $credentialListData = [];
@@ -817,12 +822,18 @@ class MeituanController extends Controller
      */
     protected function buildOrderPaySuccessResponse(Order $order, string $orderId, ?int $partnerId = null): Response
     {
+        // 确定realNameType：如果订单有credential_list，强制设置为1
+        $realNameType = $order->real_name_type ?? 0;
+        if (!empty($order->credential_list)) {
+            $realNameType = 1; // 有证件信息，强制设置为实名制
+        }
+        
         // 构建响应数据（根据美团文档，出票成功时body中不包含code和describe）
         $responseBody = [
             'orderId' => intval($orderId),
             'partnerOrderId' => $order->order_no,
             'voucherType' => 0, // 不需要支持一码一验，统一使用0
-            'realNameType' => $order->real_name_type ?? 0,
+            'realNameType' => $realNameType, // 确保realNameType=1（如果有credential_list）
         ];
 
         // 如果订单有凭证码，返回凭证码（这里暂时返回空，实际应该从订单中获取）
@@ -833,7 +844,8 @@ class MeituanController extends Controller
         // 如果是实名制订单，返回credentialList
         // 根据文档第1165行：realNameType=1时，credentialList中的voucher字段是必传的（不管voucherType）
         // credentialList的数量应该与订单数量（room_count）一致
-        if ($order->real_name_type === 1 && !empty($order->credential_list)) {
+        // 注意：使用上面确定的realNameType，而不是直接从订单读取（因为可能订单中real_name_type=0但实际有credential_list）
+        if ($realNameType === 1 && !empty($order->credential_list)) {
             $responseBody['credentialList'] = [];
             $vouchers = [];  // 收集所有凭证码
             $roomCount = $order->room_count ?? 1;
