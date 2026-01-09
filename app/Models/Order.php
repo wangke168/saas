@@ -92,6 +92,17 @@ class Order extends Model
     }
 
     /**
+     * 序列化日期格式为 Y-m-d（与前端日期选择器的 value-format 一致）
+     * 确保 check_in_date 和 check_out_date 以正确的格式返回
+     * 注意：这会影响所有日期字段的序列化格式，包括 datetime 类型字段
+     * 前端 formatDateTime 函数使用 new Date() 可以正确解析 Y-m-d 格式的日期字符串
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d');
+    }
+
+    /**
      * 获取系统服务商（通过酒店->景区关联）
      */
     public function getSoftwareProviderAttribute(): ?SoftwareProvider
