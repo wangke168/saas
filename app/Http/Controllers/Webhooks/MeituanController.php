@@ -158,7 +158,7 @@ class MeituanController extends Controller
             } elseif (str_contains($path, 'order/refund') && !str_contains($path, 'refunded')) {
                 return $this->handleOrderRefund($data, $request);
             } elseif (str_contains($path, 'order/refunded')) {
-                return $this->handleOrderRefunded($data);
+                return $this->handleOrderRefunded($data, $request);
             } elseif (str_contains($path, 'order/close')) {
                 return $this->handleOrderClose($data, $request);
             } else {
@@ -166,7 +166,7 @@ class MeituanController extends Controller
                 if (isset($body['closeType'])) {
                     return $this->handleOrderClose($data, $request);
                 } elseif (isset($body['refundSerialNo']) && isset($body['refundTime'])) {
-                    return $this->handleOrderRefunded($data);
+                    return $this->handleOrderRefunded($data, $request);
                 } elseif (isset($body['refundSerialNo'])) {
                     return $this->handleOrderRefund($data, $request);
                 } elseif (isset($body['orderId']) && isset($body['payTime'])) {
@@ -1384,12 +1384,16 @@ class MeituanController extends Controller
     /**
      * 处理已退款消息（新功能）
      */
-    protected function handleOrderRefunded(array $data): Response
+    protected function handleOrderRefunded(array $data, Request $request): Response
     {
         try {
             // 获取partnerId（用于错误响应）
             $client = $this->getClient();
             $partnerId = $client ? $client->getPartnerId() : null;
+
+            // 检查请求是否加密
+            // 如果请求头中有 X-Encryption-Status: encrypted，表示请求是加密的，响应也应该加密
+            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
 
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
@@ -1399,22 +1403,25 @@ class MeituanController extends Controller
             $reason = $body['reason'] ?? '';
 
             if (empty($orderId)) {
-                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
+                return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, $encryptResponse);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)->first();
 
             if (!$order) {
-                return $this->errorResponse(400, '订单不存在', $partnerId);
+                return $this->errorResponse(400, '订单不存在', $partnerId, $encryptResponse);
             }
 
             // 幂等性检查：如果订单已存在退款流水号且与请求中的相同，直接返回成功
             if ($order->refund_serial_no && !empty($refundSerialNo) && $order->refund_serial_no === $refundSerialNo) {
+                // 根据文档，已退款消息接口响应格式：{code, describe, partnerId}，不包含body字段
                 return $this->successResponse(
-                    [
-                        'orderId' => intval($orderId),
-                    ],
-                    $partnerId
+                    [],  // 空body，不包含orderId
+                    $partnerId,
+                    null,
+                    200,
+                    '成功',
+                    $encryptResponse  // 根据请求的加密状态决定响应是否加密
                 );
             }
 
@@ -1450,11 +1457,14 @@ class MeituanController extends Controller
                 ]);
             }
 
+            // 根据文档，已退款消息接口响应格式：{code, describe, partnerId}，不包含body字段
             return $this->successResponse(
-                [
-                    'orderId' => intval($orderId),
-                ],
-                $partnerId
+                [],  // 空body，不包含orderId
+                $partnerId,
+                null,
+                200,
+                '成功',
+                $encryptResponse  // 根据请求的加密状态决定响应是否加密
             );
 
         } catch (\Exception $e) {
@@ -1465,7 +1475,9 @@ class MeituanController extends Controller
             ]);
 
             $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
-            return $this->errorResponse(599, '系统处理异常', $partnerId);
+            // 根据请求加密状态决定响应是否加密
+            $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
+            return $this->errorResponse(599, '系统处理异常', $partnerId, $encryptResponse);
         }
     }
 
