@@ -11,6 +11,12 @@ use App\Http\Client\CtripClient;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Models\OtaPlatform as OtaPlatformModel;
+use App\Models\Pkg\PkgProduct;
+use App\Models\Pkg\PkgOrder;
+use App\Models\Pkg\PkgProductDailyPrice;
+use App\Models\Res\ResHotel;
+use App\Models\Res\ResRoomType;
+use App\Models\Res\ResHotelDailyStock;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\Resource\ResourceServiceFactory;
@@ -244,21 +250,44 @@ class CtripController extends Controller
                 return $this->errorResponse('1003', '数据参数不合法：使用日期(useStartDate/useDate)为空');
             }
 
-            // 解析携程PLU格式：酒店编码|房型编码|产品编码
+            // 解析携程PLU格式
             $hotelCode = null;
             $roomTypeCode = null;
             $productCode = $supplierOptionId;
+            $isPkgProduct = false;
             
             if (strpos($supplierOptionId, '|') !== false) {
                 $parts = explode('|', $supplierOptionId);
-                // PLU格式：酒店编码|房型编码|产品编码
-                if (count($parts) >= 3) {
-                    $hotelCode = trim($parts[0]);
-                    $roomTypeCode = trim($parts[1]);
-                    $productCode = trim($parts[2]);
+                if (count($parts) >= 1) {
+                    $firstPart = trim($parts[0]);
+                    // 判断是否为打包产品（PLU以PKG开头，不区分大小写）
+                    $isPkgProduct = strtoupper($firstPart) === 'PKG';
+                }
+                
+                if ($isPkgProduct) {
+                    // 打包产品格式：PKG|房型编码|酒店编码|产品编码
+                    if (count($parts) >= 4) {
+                        $roomTypeCode = trim($parts[1]);
+                        $hotelCode = trim($parts[2]);
+                        $productCode = trim($parts[3]);
+                    } else {
+                        DB::rollBack();
+                        Log::warning('携程预下单：打包产品PLU格式错误', [
+                            'plu' => $supplierOptionId,
+                            'parts_count' => count($parts),
+                        ]);
+                        return $this->errorResponse('1002', '供应商PLU不存在/错误：打包产品PLU格式错误');
+                    }
                 } else {
-                    // 如果格式不对，尝试取最后一个部分作为产品编码（向后兼容）
-                    $productCode = trim(end($parts));
+                    // 常规产品格式：酒店编码|房型编码|产品编码
+                    if (count($parts) >= 3) {
+                        $hotelCode = trim($parts[0]);
+                        $roomTypeCode = trim($parts[1]);
+                        $productCode = trim($parts[2]);
+                    } else {
+                        // 如果格式不对，尝试取最后一个部分作为产品编码（向后兼容）
+                        $productCode = trim(end($parts));
+                    }
                 }
             } else {
                 $productCode = trim($productCode);
@@ -266,21 +295,199 @@ class CtripController extends Controller
             
             Log::info('携程预下单：解析PLU', [
                 'plu' => $supplierOptionId,
+                'is_pkg_product' => $isPkgProduct,
                 'parsed_hotel_code' => $hotelCode,
                 'parsed_room_type_code' => $roomTypeCode,
                 'parsed_product_code' => $productCode,
             ]);
             
-            // 根据产品编码查找产品
-            $product = \App\Models\Product::where('code', $productCode)->first();
-            if (!$product) {
-                DB::rollBack();
-                Log::warning('携程预下单：产品不存在', [
-                    'plu' => $supplierOptionId,
-                    'product_code' => $productCode,
+            // 分支处理：打包产品和常规产品
+            if ($isPkgProduct) {
+                // ========== 打包产品处理逻辑 ==========
+                // 根据产品编码查找打包产品
+                $pkgProduct = PkgProduct::where('product_code', $productCode)->first();
+                if (!$pkgProduct) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：打包产品不存在', [
+                        'plu' => $supplierOptionId,
+                        'product_code' => $productCode,
+                    ]);
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误：打包产品不存在');
+                }
+                
+                // 根据酒店编码查找打包酒店
+                $resHotel = ResHotel::where('code', $hotelCode)->first();
+                if (!$resHotel) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：打包酒店不存在', [
+                        'plu' => $supplierOptionId,
+                        'hotel_code' => $hotelCode,
+                    ]);
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误：打包酒店编码不存在');
+                }
+                
+                // 根据房型编码查找打包房型
+                $resRoomType = ResRoomType::where('code', $roomTypeCode)
+                    ->where('hotel_id', $resHotel->id)
+                    ->first();
+                if (!$resRoomType) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：打包房型不存在', [
+                        'plu' => $supplierOptionId,
+                        'room_type_code' => $roomTypeCode,
+                        'hotel_id' => $resHotel->id,
+                    ]);
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误：打包房型编码不存在');
+                }
+                
+                // 验证打包产品-酒店-房型组合是否存在（通过PkgProductDailyPrice表验证）
+                $pkgDailyPrice = PkgProductDailyPrice::where('pkg_product_id', $pkgProduct->id)
+                    ->where('hotel_id', $resHotel->id)
+                    ->where('room_type_id', $resRoomType->id)
+                    ->where('biz_date', $useStartDate)
+                    ->first();
+                    
+                if (!$pkgDailyPrice) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：打包产品-酒店-房型组合不存在或指定日期没有价格', [
+                        'pkg_product_id' => $pkgProduct->id,
+                        'hotel_id' => $resHotel->id,
+                        'room_type_id' => $resRoomType->id,
+                        'use_start_date' => $useStartDate,
+                    ]);
+                    return $this->errorResponse('1003', '数据参数不合法：指定日期没有价格或打包产品-酒店-房型组合不匹配');
+                }
+                
+                Log::info('携程预下单：通过PLU验证打包产品-酒店-房型组合成功', [
+                    'pkg_product_id' => $pkgProduct->id,
+                    'hotel_id' => $resHotel->id,
+                    'room_type_id' => $resRoomType->id,
+                    'pkg_daily_price_id' => $pkgDailyPrice->id,
                 ]);
-                return $this->errorResponse('1002', '供应商PLU不存在/错误');
-            }
+                
+                // 检查库存（考虑入住天数）
+                $stayDays = $pkgProduct->stay_days ?: 1;
+                $checkInDate = \Carbon\Carbon::parse($useStartDate);
+                
+                // 检查连续入住天数的库存是否足够（使用打包酒店库存表）
+                $inventoryCheck = $this->checkResHotelStockForStayDays($resRoomType->id, $checkInDate, $stayDays, $quantity);
+                if (!$inventoryCheck['success']) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：打包产品库存检查失败', [
+                        'room_type_id' => $resRoomType->id,
+                        'check_in_date' => $checkInDate->format('Y-m-d'),
+                        'stay_days' => $stayDays,
+                        'quantity' => $quantity,
+                        'error_message' => $inventoryCheck['message'],
+                    ]);
+                    return $this->errorResponse('1003', $inventoryCheck['message']);
+                }
+                
+                Log::info('携程预下单：打包产品库存检查通过');
+                
+                // 检查是否已存在订单（防止重复）
+                $existingPkgOrder = PkgOrder::where('ota_order_no', $ctripOrderId)
+                    ->where('ota_platform_id', $otaPlatform->id)
+                    ->first();
+                
+                if ($existingPkgOrder) {
+                    // 已存在，返回成功（幂等性）
+                    DB::rollBack();
+                    Log::info('携程预下单：打包订单已存在，返回成功', [
+                        'ctrip_order_id' => $ctripOrderId,
+                        'pkg_order_no' => $existingPkgOrder->order_no,
+                    ]);
+                    return $this->successResponse([
+                        'otaOrderId' => $ctripOrderId,
+                        'orderId' => $existingPkgOrder->order_no,
+                        'supplierOrderId' => $existingPkgOrder->order_no,
+                    ]);
+                }
+                
+                // 如果没有从 items 中获取价格，则从价格表获取
+                if ($salePrice <= 0) {
+                    $salePrice = floatval($pkgDailyPrice->sale_price) / 100; // 转换为元
+                }
+                if ($costPrice <= 0) {
+                    $costPrice = floatval($pkgDailyPrice->cost_price) / 100; // 转换为元
+                }
+                
+                // 从出行人信息中提取身份证号（cardNo）
+                $cardNo = null;
+                if (!empty($passengers) && is_array($passengers)) {
+                    $firstPassenger = $passengers[0] ?? [];
+                    $cardNo = $firstPassenger['cardNo'] ?? $firstPassenger['card_no'] ?? null;
+                }
+                
+                // 计算离店日期（如果 useEndDate 为空或等于 useStartDate，根据产品入住天数计算）
+                if (empty($useEndDate) || $useEndDate === $useStartDate) {
+                    $checkOutDate = \Carbon\Carbon::parse($useStartDate)->addDays($stayDays)->format('Y-m-d');
+                    
+                    Log::info('携程预下单：根据打包产品入住天数计算离店日期', [
+                        'use_start_date' => $useStartDate,
+                        'stay_days' => $stayDays,
+                        'calculated_check_out_date' => $checkOutDate,
+                    ]);
+                } else {
+                    $checkOutDate = $useEndDate;
+                }
+                
+                // 创建打包订单
+                $pkgOrder = PkgOrder::create([
+                    'order_no' => $this->generateOrderNo(),
+                    'ota_order_no' => $ctripOrderId,
+                    'ota_platform_id' => $otaPlatform->id,
+                    'pkg_product_id' => $pkgProduct->id,
+                    'hotel_id' => $resHotel->id,
+                    'room_type_id' => $resRoomType->id,
+                    'status' => \App\Enums\PkgOrderStatus::PAID, // 预下单时使用PAID状态（待确认）
+                    'check_in_date' => $useStartDate,
+                    'check_out_date' => $checkOutDate,
+                    'stay_days' => $stayDays,
+                    'total_amount' => intval($salePrice * $quantity * 100), // 转换为分
+                    'settlement_amount' => intval($costPrice * $quantity * 100), // 转换为分
+                    'contact_name' => $contactInfo['name'] ?? '',
+                    'contact_phone' => $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '',
+                    'contact_email' => $contactInfo['email'] ?? '',
+                    'paid_at' => null, // 预下单创建时还未支付
+                ]);
+                
+                // 锁定库存（预下单的核心目的就是锁库存）
+                $lockResult = $this->lockResHotelStockForPreOrder($pkgOrder, $pkgProduct->stay_days, $quantity);
+                if (!$lockResult['success']) {
+                    DB::rollBack();
+                    Log::error('携程预下单：打包产品库存锁定失败', [
+                        'pkg_order_id' => $pkgOrder->id,
+                        'error' => $lockResult['message'],
+                    ]);
+                    return $this->errorResponse('1003', '库存锁定失败：' . $lockResult['message']);
+                }
+                
+                DB::commit();
+                
+                Log::info('携程预下单成功（打包产品）', [
+                    'ctrip_order_id' => $ctripOrderId,
+                    'pkg_order_no' => $pkgOrder->order_no,
+                    'product_code' => $supplierOptionId,
+                ]);
+                
+                return $this->successResponse([
+                    'otaOrderId' => $ctripOrderId,
+                    'orderId' => $pkgOrder->order_no,
+                    'supplierOrderId' => $pkgOrder->order_no,
+                ]);
+            } else {
+                // ========== 常规产品处理逻辑（完全保留原有逻辑） ==========
+                // 根据产品编码查找产品
+                $product = \App\Models\Product::where('code', $productCode)->first();
+                if (!$product) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：产品不存在', [
+                        'plu' => $supplierOptionId,
+                        'product_code' => $productCode,
+                    ]);
+                    return $this->errorResponse('1002', '供应商PLU不存在/错误');
+                }
             
             // 如果PLU中包含了酒店编码和房型编码，需要验证组合是否正确
             if ($hotelCode && $roomTypeCode) {
@@ -477,7 +684,7 @@ class CtripController extends Controller
 
             DB::commit();
 
-            Log::info('携程预下单成功', [
+            Log::info('携程预下单成功（常规产品）', [
                 'ctrip_order_id' => $ctripOrderId,
                 'order_no' => $order->order_no,
                 'product_code' => $supplierOptionId,
@@ -2053,5 +2260,181 @@ class CtripController extends Controller
     protected function generateOrderNo(): string
     {
         return 'ORD' . date('YmdHis') . str_pad(mt_rand(1, 99999), 5, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * 检查打包酒店连续入住天数的库存是否足够
+     * 使用 ResHotelDailyStock 表
+     *
+     * @param int $resRoomTypeId 打包房型ID（res_room_types表）
+     * @param \Carbon\Carbon $checkInDate 入住日期
+     * @param int $stayDays 入住天数
+     * @param int $quantity 房间数量
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function checkResHotelStockForStayDays(int $resRoomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity): array
+    {
+        // 检查连续入住天数的库存
+        for ($i = 0; $i < $stayDays; $i++) {
+            $date = $checkInDate->copy()->addDays($i);
+            $stock = ResHotelDailyStock::where('room_type_id', $resRoomTypeId)
+                ->where('biz_date', $date->format('Y-m-d'))
+                ->first();
+
+            if (!$stock) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，没有库存记录',
+                ];
+            }
+
+            if ($stock->is_closed) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，库存已关闭',
+                ];
+            }
+
+            // 获取可用库存（优先使用 stock_available 字段，如果为 NULL 则计算）
+            $availableStock = $stock->stock_available ?? ($stock->stock_total - $stock->stock_sold);
+            if ($availableStock < $quantity) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，实际可用库存：' . $availableStock . '，需要：' . $quantity,
+                ];
+            }
+        }
+
+        return ['success' => true, 'message' => ''];
+    }
+
+    /**
+     * 锁定打包酒店库存（预下单时使用）
+     * 使用 ResHotelDailyStock 表，直接增加 stock_sold（一次性扣减）
+     * 使用乐观锁（version字段）防止并发冲突
+     *
+     * @param PkgOrder $order 打包订单
+     * @param int|null $stayDays 入住天数，如果为null则从产品获取
+     * @param int $quantity 房间数量
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function lockResHotelStockForPreOrder(PkgOrder $order, ?int $stayDays = null, int $quantity = 1): array
+    {
+        try {
+            // 获取入住天数
+            if ($stayDays === null) {
+                $pkgProduct = $order->product;
+                $stayDays = $pkgProduct->stay_days ?? 1;
+            }
+
+            $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
+            $resRoomTypeId = $order->room_type_id;
+
+            // 使用 Redis 分布式锁，防止并发问题
+            // 锁的粒度：按房型和日期
+            $lockKeys = [];
+            for ($i = 0; $i < $stayDays; $i++) {
+                $date = $checkInDate->copy()->addDays($i);
+                $lockKey = "res_hotel_stock_lock:{$resRoomTypeId}:{$date->format('Y-m-d')}";
+                $lockKeys[] = $lockKey;
+            }
+
+            // 尝试获取所有日期的锁
+            $acquiredLocks = [];
+            foreach ($lockKeys as $lockKey) {
+                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
+                if (!$lock) {
+                    // 获取锁失败，释放已获取的锁
+                    foreach ($acquiredLocks as $acquiredLock) {
+                        Redis::del($acquiredLock);
+                    }
+                    return [
+                        'success' => false,
+                        'message' => '库存锁定失败：并发冲突，请稍后重试',
+                    ];
+                }
+                $acquiredLocks[] = $lockKey;
+            }
+
+            try {
+                // 再次检查库存（在锁内检查，确保准确性）
+                $checkResult = $this->checkResHotelStockForStayDays($resRoomTypeId, $checkInDate, $stayDays, $quantity);
+                if (!$checkResult['success']) {
+                    return $checkResult;
+                }
+
+                // 使用乐观锁更新库存（直接增加 stock_sold）
+                for ($i = 0; $i < $stayDays; $i++) {
+                    $date = $checkInDate->copy()->addDays($i);
+                    $stock = ResHotelDailyStock::where('room_type_id', $resRoomTypeId)
+                        ->where('biz_date', $date->format('Y-m-d'))
+                        ->lockForUpdate() // 行级锁，防止并发
+                        ->first();
+
+                    if (!$stock) {
+                        return [
+                            'success' => false,
+                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 没有库存记录',
+                        ];
+                    }
+
+                    // 再次检查（双重检查，确保在获取行锁后库存仍然足够）
+                    $availableStock = $stock->stock_available ?? ($stock->stock_total - $stock->stock_sold);
+                    if ($stock->is_closed || $availableStock < $quantity) {
+                        return [
+                            'success' => false,
+                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 库存不足或已关闭',
+                        ];
+                    }
+
+                    // 使用乐观锁更新（增加 stock_sold，版本号递增）
+                    $updated = ResHotelDailyStock::where('id', $stock->id)
+                        ->where('version', $stock->version) // 版本号必须匹配
+                        ->update([
+                            'stock_sold' => DB::raw('stock_sold + ' . $quantity),
+                            'version' => DB::raw('version + 1'), // 版本号递增
+                        ]);
+
+                    if ($updated === 0) {
+                        // 版本号不匹配，说明数据已被其他事务修改
+                        return [
+                            'success' => false,
+                            'message' => '库存已被其他订单占用，请重试',
+                        ];
+                    }
+
+                    Log::info('预下单打包酒店库存锁定成功', [
+                        'pkg_order_id' => $order->id,
+                        'room_type_id' => $resRoomTypeId,
+                        'date' => $date->format('Y-m-d'),
+                        'quantity' => $quantity,
+                        'stock_sold' => $stock->stock_sold + $quantity,
+                        'version' => $stock->version + 1,
+                    ]);
+                }
+
+                return ['success' => true, 'message' => ''];
+            } finally {
+                // 释放所有 Redis 锁
+                foreach ($acquiredLocks as $lockKey) {
+                    try {
+                        Redis::del($lockKey);
+                    } catch (\Exception $e) {
+                        // 忽略释放锁的异常
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单打包酒店库存锁定异常', [
+                'pkg_order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '库存锁定异常：' . $e->getMessage(),
+            ];
+        }
     }
 }

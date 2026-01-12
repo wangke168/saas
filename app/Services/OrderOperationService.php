@@ -595,20 +595,71 @@ class OrderOperationService
     protected function verifyOrderWithResource(Order $order, ResourceServiceInterface $resourceService, array $data): array
     {
         try {
-            DB::beginTransaction();
-
             // 1. 调用资源方接口核销订单
             $result = $resourceService->verifyOrder($order, $data);
 
             if (!($result['success'] ?? false)) {
-                DB::rollBack();
                 return [
                     'success' => false,
                     'message' => $result['message'] ?? '资源方核销失败',
                 ];
             }
 
-            // 2. 更新订单状态（在备注中包含核销数量，便于订单查询接口提取）
+            Log::info('OrderOperationService::verifyOrderWithResource: 资源方核销成功，准备通知OTA平台', [
+                'order_id' => $order->id,
+                'use_quantity' => $data['use_quantity'] ?? $order->room_count,
+            ]);
+
+            // 2. 先通知OTA平台，等待成功后再更新订单状态
+            // 重新加载订单关联数据，确保 otaPlatform 已加载
+            $order->load(['otaPlatform']);
+            
+            if (!$order->otaPlatform) {
+                Log::warning('OrderOperationService::verifyOrderWithResource: 订单没有关联OTA平台，跳过通知', [
+                    'order_id' => $order->id,
+                ]);
+                // 没有OTA平台，直接更新状态（兼容旧逻辑）
+                $useQuantity = $data['use_quantity'] ?? $order->room_count;
+                $remark = '系统直连：资源方核销成功，核销数量：' . $useQuantity;
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::VERIFIED,
+                    $remark,
+                    null
+                );
+                return [
+                    'success' => true,
+                    'message' => '核销成功',
+                    'data' => [
+                        'order_id' => $order->id,
+                        'status' => $order->status->value,
+                    ],
+                ];
+            }
+            
+            try {
+                // 调用通知接口（会抛出异常如果失败）
+                $this->notifyOtaOrderConsumed($order, $data);
+                
+                Log::info('OrderOperationService::verifyOrderWithResource: OTA平台核销通知成功', [
+                    'order_id' => $order->id,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('OrderOperationService::verifyOrderWithResource: OTA平台核销通知失败，不更新订单状态', [
+                    'order_id' => $order->id,
+                    'ota_platform' => $order->otaPlatform->code->value,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                
+                // OTA通知失败，不更新状态，抛出异常
+                throw $e;
+            }
+
+            // 3. OTA平台通知成功，开始事务更新订单状态
+            DB::beginTransaction();
+
+            // 4. 更新订单状态（在备注中包含核销数量，便于订单查询接口提取）
             $useQuantity = $data['use_quantity'] ?? $order->room_count;
             $remark = '系统直连：资源方核销成功，核销数量：' . $useQuantity;
             $this->orderService->updateOrderStatus(
@@ -620,15 +671,9 @@ class OrderOperationService
 
             DB::commit();
 
-            // 3. 通知OTA平台（调用核销通知接口）
-            try {
-                $this->notifyOtaOrderConsumed($order, $data);
-            } catch (\Exception $e) {
-                Log::warning('通知OTA订单核销失败', [
-                    'order_id' => $order->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            Log::info('OrderOperationService::verifyOrderWithResource: 订单状态已更新为已核销', [
+                'order_id' => $order->id,
+            ]);
 
             return [
                 'success' => true,
@@ -639,10 +684,15 @@ class OrderOperationService
                 ],
             ];
         } catch (\Exception $e) {
-            DB::rollBack();
+            // 如果已经开始事务，回滚
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+            
             Log::error('系统直连核销失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
@@ -1244,6 +1294,7 @@ class OrderOperationService
 
     /**
      * 通知携程订单核销
+     * 同步通知，如果失败会抛出异常
      */
     protected function notifyCtripOrderConsumed(Order $order, array $data): void
     {
@@ -1255,17 +1306,27 @@ class OrderOperationService
 
         $itemId = $order->ctrip_item_id ?: (string)$order->id;
 
-        $this->ctripService->notifyOrderConsumed(
-            $order->ota_order_no,
-            $order->order_no,
-            $itemId,
-            $useStartDate,
-            $useEndDate,
-            $order->room_count,
-            $useQuantity,
-            $passengers,
-            $vouchers
-        );
+        try {
+            $this->ctripService->notifyOrderConsumed(
+                $order->ota_order_no,
+                $order->order_no,
+                $itemId,
+                $useStartDate,
+                $useEndDate,
+                $order->room_count,
+                $useQuantity,
+                $passengers,
+                $vouchers
+            );
+        } catch (\Exception $e) {
+            Log::error('OrderOperationService::notifyCtripOrderConsumed: 携程订单核销通知失败', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            // 重新抛出异常，让调用方处理
+            throw $e;
+        }
     }
 
     /**
@@ -1426,16 +1487,23 @@ class OrderOperationService
                     'order_id' => $order->id,
                 ]);
             } else {
+                $errorMessage = $result['describe'] ?? ($result['message'] ?? '未知错误');
                 Log::error('通知美团订单消费失败', [
                     'order_id' => $order->id,
                     'result' => $result,
+                    'error_message' => $errorMessage,
                 ]);
+                // 抛出异常，让调用方处理
+                throw new \Exception('美团订单核销通知失败：' . $errorMessage);
             }
         } catch (\Exception $e) {
             Log::error('通知美团订单消费异常', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
+            // 重新抛出异常，让调用方处理
+            throw $e;
         }
     }
 

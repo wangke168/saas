@@ -173,8 +173,99 @@ class ProcessResourceOrderJob implements ShouldQueue
             if (!$resourceOrderNo && $this->order->resource_order_no) {
                 $resourceOrderNo = $this->order->resource_order_no;
             }
+
+            Log::info('ProcessResourceOrderJob: 景区方接单成功，准备通知OTA平台', [
+                'order_id' => $this->order->id,
+                'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
+                'result_data_type' => gettype($result['data'] ?? null),
+            ]);
+
+            // 先通知OTA平台，等待成功后再更新订单状态
+            // 重新加载订单关联数据，确保 otaPlatform 已加载
+            $this->order->load(['otaPlatform']);
             
-            // 景区方成功
+            // 检查是否有 OTA 平台
+            if (!$this->order->otaPlatform) {
+                Log::warning('ProcessResourceOrderJob: 订单没有关联 OTA 平台，跳过通知和状态更新', [
+                    'order_id' => $this->order->id,
+                    'ota_platform_id' => $this->order->ota_platform_id,
+                ]);
+                // 没有OTA平台，创建异常订单供人工处理
+                $this->createExceptionOrder([
+                    'success' => false,
+                    'message' => '订单没有关联OTA平台，无法通知',
+                ]);
+                return;
+            }
+            
+            // 判断平台类型
+            $isMeituan = $this->order->otaPlatform->code === OtaPlatform::MEITUAN;
+            
+            Log::info('ProcessResourceOrderJob: 判断平台类型', [
+                'order_id' => $this->order->id,
+                'ota_platform_code' => $this->order->otaPlatform->code->value,
+                'is_meituan' => $isMeituan,
+            ]);
+            
+            // 先通知OTA平台，等待成功后再更新状态
+            try {
+                if ($isMeituan) {
+                    // 美团订单：同步通知
+                    Log::info('ProcessResourceOrderJob: 美团订单，同步通知', [
+                        'order_id' => $this->order->id,
+                    ]);
+                    
+                    $notification = NotificationFactory::create($this->order);
+                    if (!$notification) {
+                        throw new \Exception('无法创建美团通知服务');
+                    }
+                    
+                    $notification->notifyOrderConfirmed($this->order);
+                    
+                    Log::info('ProcessResourceOrderJob: 美团订单同步通知成功', [
+                        'order_id' => $this->order->id,
+                    ]);
+                } else {
+                    // 携程订单：同步通知（使用NotificationFactory）
+                    Log::info('ProcessResourceOrderJob: 携程订单，同步通知', [
+                        'order_id' => $this->order->id,
+                    ]);
+                    
+                    $notification = NotificationFactory::create($this->order);
+                    if (!$notification) {
+                        throw new \Exception('无法创建携程通知服务');
+                    }
+                    
+                    $notification->notifyOrderConfirmed($this->order);
+                    
+                    Log::info('ProcessResourceOrderJob: 携程订单同步通知成功', [
+                        'order_id' => $this->order->id,
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::error('ProcessResourceOrderJob: OTA平台通知失败，不更新订单状态', [
+                    'order_id' => $this->order->id,
+                    'ota_platform' => $this->order->otaPlatform->code->value,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                
+                // OTA通知失败，不更新状态，创建异常订单供人工处理
+                $this->createExceptionOrder([
+                    'success' => false,
+                    'message' => 'OTA平台通知失败：' . $e->getMessage(),
+                ]);
+                
+                // 抛出异常，让队列系统重试（如果是临时性错误）
+                throw $e;
+            }
+            
+            // OTA平台通知成功，开始更新订单状态
+            Log::info('ProcessResourceOrderJob: OTA平台通知成功，开始更新订单状态', [
+                'order_id' => $this->order->id,
+            ]);
+            
+            // 更新订单状态
             $updateData = [
                 'status' => OrderStatus::CONFIRMED,
                 'confirmed_at' => now(),
@@ -187,114 +278,10 @@ class ProcessResourceOrderJob implements ShouldQueue
             
             $this->order->update($updateData);
 
-            Log::info('ProcessResourceOrderJob: 景区方接单成功', [
+            Log::info('ProcessResourceOrderJob: 订单状态已更新为已确认', [
                 'order_id' => $this->order->id,
                 'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
-                'result_data_type' => gettype($result['data'] ?? null),
             ]);
-
-            // 通知OTA平台订单确认
-            // 注意：NotifyOtaOrderStatusJob 现在支持携程和美团
-            try {
-                // 重新加载订单关联数据，确保 otaPlatform 已加载
-                $this->order->load(['otaPlatform']);
-                
-                // 记录 OTA 平台信息，便于排查问题
-                Log::info('ProcessResourceOrderJob: 检查 OTA 平台信息', [
-                    'order_id' => $this->order->id,
-                    'ota_platform_id' => $this->order->ota_platform_id,
-                    'has_ota_platform' => $this->order->otaPlatform !== null,
-                    'ota_platform_code' => $this->order->otaPlatform?->code?->value ?? null,
-                    'ota_platform_code_enum' => $this->order->otaPlatform?->code !== null ? get_class($this->order->otaPlatform->code) : null,
-                ]);
-                
-                // 检查是否有 OTA 平台
-                if (!$this->order->otaPlatform) {
-                    Log::warning('ProcessResourceOrderJob: 订单没有关联 OTA 平台，跳过通知', [
-                        'order_id' => $this->order->id,
-                        'ota_platform_id' => $this->order->ota_platform_id,
-                    ]);
-                    return;
-                }
-                
-                // 如果是美团订单，同步通知以确保及时性（美团对响应时间要求较高）
-                // 其他平台使用异步通知
-                $isMeituan = $this->order->otaPlatform->code === OtaPlatform::MEITUAN;
-                
-                Log::info('ProcessResourceOrderJob: 判断平台类型', [
-                    'order_id' => $this->order->id,
-                    'ota_platform_code' => $this->order->otaPlatform->code->value,
-                    'is_meituan' => $isMeituan,
-                    'meituan_enum_value' => OtaPlatform::MEITUAN->value,
-                ]);
-                
-                if ($isMeituan) {
-                    Log::info('ProcessResourceOrderJob: 美团订单，同步通知', [
-                        'order_id' => $this->order->id,
-                    ]);
-                    
-                    try {
-                        $notification = NotificationFactory::create($this->order);
-                        if ($notification) {
-                            $notification->notifyOrderConfirmed($this->order);
-                            Log::info('ProcessResourceOrderJob: 美团订单同步通知成功', [
-                                'order_id' => $this->order->id,
-                            ]);
-                        } else {
-                            Log::warning('ProcessResourceOrderJob: 无法创建美团通知服务', [
-                                'order_id' => $this->order->id,
-                            ]);
-                        }
-                    } catch (\Exception $e) {
-                        Log::error('ProcessResourceOrderJob: 美团订单同步通知失败', [
-                            'order_id' => $this->order->id,
-                            'error' => $e->getMessage(),
-                            'trace' => $e->getTraceAsString(),
-                        ]);
-                        // 同步通知失败不影响主流程，继续派发异步Job作为备份
-                        \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order)
-                            ->onQueue('ota-notification');
-                    }
-                } else {
-                    // 其他平台使用异步通知（包括携程）
-                    Log::info('ProcessResourceOrderJob: 准备派发 NotifyOtaOrderStatusJob（异步通知）', [
-                        'order_id' => $this->order->id,
-                        'ota_platform' => $this->order->otaPlatform->code->value,
-                        'order_status' => $this->order->status->value,
-                    ]);
-                    
-                    try {
-                        \App\Jobs\NotifyOtaOrderStatusJob::dispatch($this->order)
-                            ->onQueue('ota-notification');
-                        
-                        Log::info('ProcessResourceOrderJob: 已派发 NotifyOtaOrderStatusJob', [
-                            'order_id' => $this->order->id,
-                            'ota_platform' => $this->order->otaPlatform->code->value,
-                            'order_status' => $this->order->status->value,
-                            'queue' => 'ota-notification',
-                        ]);
-                    } catch (\Exception $dispatchException) {
-                        Log::error('ProcessResourceOrderJob: 派发 NotifyOtaOrderStatusJob 异常', [
-                            'order_id' => $this->order->id,
-                            'ota_platform' => $this->order->otaPlatform->code->value,
-                            'error' => $dispatchException->getMessage(),
-                            'trace' => $dispatchException->getTraceAsString(),
-                        ]);
-                        // 重新抛出异常，让外层 catch 处理
-                        throw $dispatchException;
-                    }
-                }
-            } catch (\Exception $e) {
-                Log::error('ProcessResourceOrderJob: 派发通知任务失败', [
-                    'order_id' => $this->order->id,
-                    'ota_platform_id' => $this->order->ota_platform_id,
-                    'ota_platform' => $this->order->otaPlatform?->code?->value,
-                    'has_ota_platform' => $this->order->otaPlatform !== null,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-                // 注意：这里不抛出异常，因为通知失败不应该影响主流程（订单已经接单成功）
-            }
         } else {
             // 判断是否是临时性错误
             $isTemporaryError = $this->isTemporaryErrorFromResult($result);

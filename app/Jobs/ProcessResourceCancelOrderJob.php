@@ -112,7 +112,59 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
             $cancelResult = $resourceService->cancelOrder($this->order, $this->reason);
 
             if ($cancelResult['success'] ?? false) {
-                // 取消成功 - 使用OrderService更新状态，确保通知能触发
+                Log::info('ProcessResourceCancelOrderJob: 景区方取消成功，准备通知OTA平台', [
+                    'order_id' => $this->order->id,
+                ]);
+
+                // 先通知OTA平台，等待成功后再更新订单状态
+                // 重新加载订单关联数据，确保 otaPlatform 已加载
+                $this->order->load(['otaPlatform']);
+                
+                if (!$this->order->otaPlatform) {
+                    Log::warning('ProcessResourceCancelOrderJob: 订单没有关联OTA平台，跳过通知', [
+                        'order_id' => $this->order->id,
+                    ]);
+                    // 没有OTA平台，直接更新状态（兼容旧逻辑）
+                    $orderService = app(OrderService::class);
+                    $orderService->updateOrderStatus(
+                        $this->order,
+                        OrderStatus::CANCEL_APPROVED,
+                        '景区方取消订单成功 - ' . $this->reason
+                    );
+                    return;
+                }
+                
+                // 先通知OTA平台
+                try {
+                    $this->notifyOtaOrderCancelled($this->order);
+                    
+                    Log::info('ProcessResourceCancelOrderJob: OTA平台取消通知成功', [
+                        'order_id' => $this->order->id,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('ProcessResourceCancelOrderJob: OTA平台取消通知失败，不更新订单状态', [
+                        'order_id' => $this->order->id,
+                        'ota_platform' => $this->order->otaPlatform->code->value,
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString(),
+                    ]);
+                    
+                    // OTA通知失败，不更新状态，创建异常订单供人工处理
+                    $this->createExceptionOrder([
+                        'success' => false,
+                        'message' => 'OTA平台取消通知失败：' . $e->getMessage(),
+                    ]);
+                    
+                    // 抛出异常，让队列系统重试（如果是临时性错误）
+                    throw $e;
+                }
+
+                // OTA平台通知成功，开始更新订单状态
+                Log::info('ProcessResourceCancelOrderJob: OTA平台通知成功，开始更新订单状态', [
+                    'order_id' => $this->order->id,
+                ]);
+
+                // 更新订单状态
                 $orderService = app(OrderService::class);
                 $orderService->updateOrderStatus(
                     $this->order,
@@ -139,15 +191,9 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
                     ]);
                 }
 
-                Log::info('ProcessResourceCancelOrderJob: 景区方取消成功', [
+                Log::info('ProcessResourceCancelOrderJob: 订单状态已更新为取消已确认', [
                     'order_id' => $this->order->id,
                 ]);
-
-                // 刷新订单对象，确保状态是最新的
-                $this->order->refresh();
-
-                // 根据OTA平台类型通知取消成功
-                $this->notifyOtaOrderCancelled($this->order);
             } else {
                 // 判断是否是临时性错误
                 $isTemporaryError = $this->isTemporaryErrorFromResult($cancelResult);
@@ -251,30 +297,37 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
 
     /**
      * 通知OTA平台订单取消
+     * 同步通知，等待成功后再返回
      */
     protected function notifyOtaOrderCancelled(Order $order): void
     {
         $platform = $order->otaPlatform;
         if (!$platform) {
-            return;
+            throw new \Exception('订单没有关联OTA平台');
         }
 
-        // 统一使用 NotifyOtaOrderStatusJob（现在支持携程和美团）
-        // 注意：订单状态必须是 cancel_approved，NotifyOtaOrderStatusJob 才会通知退款
+        // 使用 NotificationFactory 同步通知
         try {
-            \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
+            $notification = \App\Services\OTA\NotificationFactory::create($order);
+            if (!$notification) {
+                throw new \Exception('无法创建OTA通知服务');
+            }
             
-            Log::info('ProcessResourceCancelOrderJob: 已派发 NotifyOtaOrderStatusJob', [
+            $notification->notifyOrderRefunded($order);
+            
+            Log::info('ProcessResourceCancelOrderJob: OTA平台取消通知成功', [
                 'order_id' => $order->id,
                 'ota_platform' => $platform->code->value,
-                'order_status' => $order->status->value,
             ]);
         } catch (\Exception $e) {
-            Log::warning('ProcessResourceCancelOrderJob: 派发 NotifyOtaOrderStatusJob 失败', [
+            Log::error('ProcessResourceCancelOrderJob: OTA平台取消通知失败', [
                 'order_id' => $order->id,
                 'ota_platform' => $platform->code->value,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
+            // 重新抛出异常，让调用方处理
+            throw $e;
         }
     }
 
