@@ -79,7 +79,7 @@
                                 style="flex: 1;"
                             />
                         </div>
-                        
+
                         <!-- 按房型分组展示 -->
                         <div v-loading="pricesLoading">
                             <el-collapse v-model="expandedRoomTypes" v-if="groupedPrices.length > 0">
@@ -106,7 +106,7 @@
                                         <el-table-column label="日期范围" width="200">
                                             <template #default="{ row }">
                                                 <span v-if="row.start === row.end">{{ row.start }}</span>
-                                                <span v-else>{{ row.start }} 至 {{ row.end }}</span>
+                                                <span v-else>{{ formatDateOnly(row.start) }} 至 {{ formatDateOnly(row.end) }}</span>
                                             </template>
                                         </el-table-column>
                                         <el-table-column prop="market_price" label="门市价（元）" width="120">
@@ -494,31 +494,31 @@
                             </el-table-column>
                             <el-table-column label="推送状态" width="150">
                                 <template #default="{ row }">
-                                    <el-tag 
+                                    <el-tag
                                         v-if="row.push_status === 'processing'"
                                         type="warning"
                                     >
                                         推送中...
                                     </el-tag>
-                                    <el-tag 
+                                    <el-tag
                                         v-else-if="row.push_status === 'success'"
                                         type="success"
                                     >
                                         推送成功
                                     </el-tag>
-                                    <el-tag 
+                                    <el-tag
                                         v-else-if="row.push_status === 'failed'"
                                         type="danger"
                                     >
                                         推送失败
                                     </el-tag>
-                                    <el-tag 
+                                    <el-tag
                                         v-else-if="row.pushed_at"
                                         type="success"
                                     >
                                         已推送
                                     </el-tag>
-                                    <el-tag 
+                                    <el-tag
                                         v-else
                                         type="info"
                                     >
@@ -535,9 +535,9 @@
                                 <template #default="{ row }">
                                     <el-button size="small" @click="handleEditOtaProduct(row)">编辑</el-button>
                                     <el-button size="small" type="danger" @click="handleDeleteOtaProduct(row)">删除</el-button>
-                                    <el-button 
-                                        size="small" 
-                                        type="primary" 
+                                    <el-button
+                                        size="small"
+                                        type="primary"
                                         @click="handlePushOtaProduct(row)"
                                         :disabled="!row.is_active || row.push_status === 'processing'"
                                         :loading="row.push_status === 'processing'"
@@ -547,7 +547,7 @@
                                 </template>
                             </el-table-column>
                         </el-table>
-                        
+
                         <!-- OTA绑定对话框 -->
                         <el-dialog
                             v-model="otaBindDialogVisible"
@@ -651,9 +651,9 @@ const pollingIntervals = ref({}); // 存储每个 ota_product_id 的轮询定时
 // 表单验证规则
 const priceFormRules = {
     room_type_ids: [
-        { 
-            required: true, 
-            message: '请至少选择一个房型', 
+        {
+            required: true,
+            message: '请至少选择一个房型',
             trigger: 'change',
             validator: (rule, value, callback) => {
                 if (!value || value.length === 0) {
@@ -726,10 +726,10 @@ const availableHotelsForPriceRule = computed(() => {
     if (!prices.value || prices.value.length === 0) {
         return [];
     }
-    
+
     // 获取所有已添加价格的房型ID
     const roomTypeIds = [...new Set(prices.value.map(p => p.room_type_id))];
-    
+
     // 获取这些房型对应的酒店
     const hotelIds = new Set();
     roomTypeIds.forEach(roomTypeId => {
@@ -738,7 +738,7 @@ const availableHotelsForPriceRule = computed(() => {
             hotelIds.add(roomType.hotel_id);
         }
     });
-    
+
     // 返回这些酒店
     return hotels.value.filter(h => hotelIds.has(h.id));
 });
@@ -746,12 +746,12 @@ const availableHotelsForPriceRule = computed(() => {
 // 获取指定酒店下已添加价格的房型列表
 const getAvailableRoomTypesForPriceRule = (hotelId) => {
     if (!hotelId) return [];
-    
+
     // 获取所有已添加价格的房型ID
     const roomTypeIdsWithPrice = new Set(prices.value.map(p => p.room_type_id));
-    
+
     // 返回该酒店下已添加价格的房型
-    return allRoomTypes.value.filter(rt => 
+    return allRoomTypes.value.filter(rt =>
         rt.hotel_id === hotelId && roomTypeIdsWithPrice.has(rt.id)
     );
 };
@@ -759,12 +759,12 @@ const getAvailableRoomTypesForPriceRule = (hotelId) => {
 // 价格筛选和分组
 const filteredPrices = computed(() => {
     let result = prices.value || [];
-    
+
     // 按房型筛选
     if (priceFilterRoomTypeId.value) {
         result = result.filter(p => p.room_type_id === priceFilterRoomTypeId.value);
     }
-    
+
     // 按日期范围筛选
     if (priceFilterDateRange.value && priceFilterDateRange.value.length === 2) {
         const [startDate, endDate] = priceFilterDateRange.value;
@@ -773,21 +773,21 @@ const filteredPrices = computed(() => {
             return priceDate >= startDate && priceDate <= endDate;
         });
     }
-    
+
     return result;
 });
 
 // 按房型分组价格，并合并连续日期
 const groupedPrices = computed(() => {
     const groups = {};
-    
+
     filteredPrices.value.forEach(price => {
         const roomTypeId = price.room_type_id;
         if (!groups[roomTypeId]) {
             // 查找房型和酒店信息
             const roomType = allRoomTypes.value.find(rt => rt.id === roomTypeId);
             const hotel = hotels.value.find(h => h.id === roomType?.hotel_id);
-            
+
             groups[roomTypeId] = {
                 roomTypeId,
                 hotelId: roomType?.hotel_id,
@@ -799,11 +799,11 @@ const groupedPrices = computed(() => {
         }
         groups[roomTypeId].prices.push(price);
     });
-    
+
     // 对每个分组的价格按日期排序，并合并连续日期
     Object.values(groups).forEach(group => {
         group.prices.sort((a, b) => new Date(a.date) - new Date(b.date));
-        
+
         // 按价格值分组（相同价格的连续日期合并为一个范围）
         const priceGroups = {};
         group.prices.forEach(price => {
@@ -819,19 +819,19 @@ const groupedPrices = computed(() => {
             }
             priceGroups[key].dates.push(price.date);
         });
-        
+
         // 将日期数组转换为日期范围
         group.dateRanges = Object.values(priceGroups).map(pg => {
             const sortedDates = pg.dates.sort();
             let ranges = [];
             let start = sortedDates[0];
             let end = sortedDates[0];
-            
+
             for (let i = 1; i < sortedDates.length; i++) {
                 const current = new Date(sortedDates[i]);
                 const prev = new Date(sortedDates[i - 1]);
                 const diffDays = (current - prev) / (1000 * 60 * 60 * 24);
-                
+
                 if (diffDays === 1) {
                     // 连续日期，扩展范围
                     end = sortedDates[i];
@@ -843,11 +843,11 @@ const groupedPrices = computed(() => {
                 }
             }
             ranges.push({ start, end, ...pg });
-            
+
             return ranges;
         }).flat();
     });
-    
+
     // 计算每个分组的日期范围显示
     Object.values(groups).forEach(group => {
         if (group.prices.length > 0) {
@@ -857,7 +857,7 @@ const groupedPrices = computed(() => {
             group.dateRange = '-';
         }
     });
-    
+
     return Object.values(groups);
 });
 
@@ -869,17 +869,17 @@ const fetchProduct = async () => {
     loading.value = true;
     try {
         const response = await axios.get(`/products/${route.params.id}`);
-        
+
         // 检查响应数据格式
         if (!response.data || !response.data.data) {
             throw new Error('返回数据格式错误');
         }
-        
+
         product.value = response.data.data;
         prices.value = product.value.prices || [];
         priceRules.value = product.value.price_rules || [];
         otaProducts.value = product.value.ota_products || [];
-        
+
         // 如果产品已加载，获取酒店和房型列表
         if (product.value && product.value.scenic_spot_id) {
             await fetchHotels();
@@ -916,14 +916,16 @@ const formatDate = (date) => {
     });
 };
 
+
 const formatDateOnly = (date) => {
     if (!date) return '';
-    return new Date(date).toLocaleDateString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    });
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 };
+
 
 const formatPrice = (price) => {
     if (!price) return '0.00';
@@ -950,7 +952,7 @@ const handleAddPrice = () => {
         ElMessage.warning('请先在产品编辑页面设置销售开始日期和结束日期');
         return;
     }
-    
+
     editingPriceId.value = null;
     resetPriceForm();
     priceDialogVisible.value = true;
@@ -989,15 +991,15 @@ const handleEditPriceRange = (group, range) => {
         const priceDate = p.date;
         return priceDate >= range.start && priceDate <= range.end;
     });
-    
+
     if (pricesInRange.length === 0) return;
-    
+
     // 如果只有一个日期，直接编辑
     if (pricesInRange.length === 1) {
         handleEditPrice(pricesInRange[0]);
         return;
     }
-    
+
     // 多个日期，提示用户选择编辑方式
     ElMessageBox.confirm(
         `该日期范围包含 ${pricesInRange.length} 天的价格记录。是否批量编辑为相同价格？`,
@@ -1030,9 +1032,9 @@ const handleDeletePriceRange = async (group, range) => {
             const priceDate = p.date;
             return priceDate >= range.start && priceDate <= range.end;
         });
-        
+
         if (pricesInRange.length === 0) return;
-        
+
         await ElMessageBox.confirm(
             `确定要删除该日期范围（${range.start} 至 ${range.end}）的 ${pricesInRange.length} 条价格记录吗？`,
             '提示',
@@ -1040,7 +1042,7 @@ const handleDeletePriceRange = async (group, range) => {
                 type: 'warning',
             }
         );
-        
+
         // 批量删除
         await Promise.all(pricesInRange.map(p => axios.delete(`/prices/${p.id}`)));
         ElMessage.success('删除成功');
@@ -1108,7 +1110,7 @@ const resetPriceFilter = () => {
 
 const handleSubmitPrice = async () => {
     if (!priceFormRef.value) return;
-    
+
     await priceFormRef.value.validate(async (valid) => {
         if (valid) {
             priceSubmitting.value = true;
@@ -1129,14 +1131,14 @@ const handleSubmitPrice = async () => {
                         priceSubmitting.value = false;
                         return;
                     }
-                    
+
                     // 使用产品的销售日期范围
                     const startDate = product.value.sale_start_date;
                     const endDate = product.value.sale_end_date;
                     const prices = [];
                     const start = new Date(startDate);
                     const end = new Date(endDate);
-                    
+
                     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
                         prices.push({
                             date: d.toISOString().split('T')[0],
@@ -1145,7 +1147,7 @@ const handleSubmitPrice = async () => {
                             sale_price: Math.round(priceForm.value.sale_price * 100),
                         });
                     }
-                    
+
                     // 为每个选中的房型批量创建价格
                     const promises = priceForm.value.room_type_ids.map(roomTypeId => {
                         return axios.post('/prices', {
@@ -1154,7 +1156,7 @@ const handleSubmitPrice = async () => {
                             prices: prices,
                         });
                     });
-                    
+
                     await Promise.all(promises);
                     ElMessage.success(`成功为 ${priceForm.value.room_type_ids.length} 个房型创建价格`);
                 }
@@ -1193,7 +1195,7 @@ const handleEditPriceRule = async (row) => {
     try {
         // 如果 row 已经包含 items，直接使用，否则从 API 获取
         const rule = row.items ? row : (await axios.get(`/price-rules/${row.id}`)).data.data || row;
-        
+
         priceRuleForm.value = {
             name: rule.name,
             type: rule.type,
@@ -1245,7 +1247,7 @@ const handlePriceRuleHotelChange = (index) => {
 
 const handleSubmitPriceRule = async () => {
     if (!priceRuleFormRef.value) return;
-    
+
     await priceRuleFormRef.value.validate(async (valid) => {
         if (valid) {
             priceRuleSubmitting.value = true;
@@ -1260,7 +1262,7 @@ const handleSubmitPriceRule = async () => {
                     is_active: priceRuleForm.value.is_active,
                     items: priceRuleForm.value.items,
                 };
-                
+
                 if (priceRuleForm.value.type === 'weekday') {
                     data.weekdays = priceRuleForm.value.weekdays.join(',');
                 } else {
@@ -1268,7 +1270,7 @@ const handleSubmitPriceRule = async () => {
                     data.start_date = startDate;
                     data.end_date = endDate;
                 }
-                
+
                 if (editingPriceRuleId.value) {
                     await axios.put(`/price-rules/${editingPriceRuleId.value}`, data);
                     ElMessage.success('加价规则更新成功');
@@ -1276,7 +1278,7 @@ const handleSubmitPriceRule = async () => {
                     await axios.post('/price-rules', data);
                     ElMessage.success('加价规则创建成功');
                 }
-                
+
                 priceRuleDialogVisible.value = false;
                 resetPriceRuleForm();
                 fetchProduct();
@@ -1364,9 +1366,9 @@ const handlePushOtaProduct = async (row) => {
                 cancelButtonText: '取消'
             }
         );
-        
+
         const response = await axios.post(`/ota-products/${row.id}/push`);
-        
+
         if (response.data.success) {
             // 如果是异步推送，提示用户
             if (response.data.message && response.data.message.includes('后台处理')) {
@@ -1374,13 +1376,13 @@ const handlePushOtaProduct = async (row) => {
             } else {
                 ElMessage.success('推送成功');
             }
-            
+
             // 更新本地数据中的推送状态
             if (response.data.data) {
                 row.push_status = response.data.data.push_status;
                 row.push_started_at = response.data.data.push_started_at;
             }
-            
+
             // 如果是异步推送，开始轮询状态
             if (response.data.data?.push_status === 'processing') {
                 startPollingPushStatus(row.id);
@@ -1403,7 +1405,7 @@ const handleEditOtaProduct = async (row) => {
     try {
         // 如果已推送，只能修改状态；如果未推送，可以修改平台和状态
         const canChangePlatform = !row.pushed_at;
-        
+
         if (canChangePlatform) {
             // 未推送：可以修改平台和状态
             await ElMessageBox.prompt(
@@ -1497,7 +1499,7 @@ const startPollingPushStatus = (otaProductId) => {
                 if (updatedOtaProduct.push_status !== 'processing') {
                     clearInterval(pollingIntervals.value[otaProductId]);
                     delete pollingIntervals.value[otaProductId];
-                    
+
                     // 显示完成消息
                     if (updatedOtaProduct.push_status === 'success') {
                         ElMessage.success(`产品 ${updatedOtaProduct.ota_platform?.name} 推送成功`);
@@ -1540,6 +1542,8 @@ onUnmounted(() => {
     // 组件卸载时清理所有轮询
     clearAllPolling();
 });
+
+
 </script>
 
 <style scoped>

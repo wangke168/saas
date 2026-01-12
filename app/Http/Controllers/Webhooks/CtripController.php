@@ -695,6 +695,7 @@ class CtripController extends Controller
                 'orderId' => $order->order_no, // 供应商订单号（兼容旧格式）
                 'supplierOrderId' => $order->order_no, // 供应商订单号
             ]);
+            } // 结束 else 块（常规产品处理逻辑）
         } catch (\Exception $e) {
             DB::rollBack();
 
