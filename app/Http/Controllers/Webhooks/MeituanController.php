@@ -1387,6 +1387,14 @@ class MeituanController extends Controller
     protected function handleOrderRefunded(array $data, Request $request): Response
     {
         try {
+            // 记录已退款消息请求
+            Log::info('美团已退款消息请求', [
+                'request_data' => $data,
+                'headers' => [
+                    'X-Encryption-Status' => $request->header('X-Encryption-Status'),
+                ],
+            ]);
+
             // 获取partnerId（用于错误响应）
             $client = $this->getClient();
             $partnerId = $client ? $client->getPartnerId() : null;
@@ -1402,18 +1410,46 @@ class MeituanController extends Controller
             $refundMessageType = $body['refundMessageType'] ?? 0;
             $reason = $body['reason'] ?? '';
 
+            Log::info('美团已退款消息：解析请求参数', [
+                'order_id' => $orderId,
+                'refund_serial_no' => $refundSerialNo,
+                'refund_time' => $refundTime,
+                'refund_message_type' => $refundMessageType,
+                'reason' => $reason,
+                'encrypt_response' => $encryptResponse,
+            ]);
+
             if (empty($orderId)) {
+                Log::warning('美团已退款消息：订单号为空', [
+                    'request_data' => $data,
+                ]);
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, $encryptResponse);
             }
 
             $order = Order::where('ota_order_no', (string)$orderId)->first();
 
             if (!$order) {
+                Log::warning('美团已退款消息：订单不存在', [
+                    'order_id' => $orderId,
+                    'ota_order_no' => $orderId,
+                ]);
                 return $this->errorResponse(400, '订单不存在', $partnerId, $encryptResponse);
             }
 
+            Log::info('美团已退款消息：找到订单', [
+                'order_id' => $order->id,
+                'order_no' => $order->order_no,
+                'ota_order_no' => $order->ota_order_no,
+                'current_status' => $order->status->value,
+                'current_refund_serial_no' => $order->refund_serial_no,
+            ]);
+
             // 幂等性检查：如果订单已存在退款流水号且与请求中的相同，直接返回成功
             if ($order->refund_serial_no && !empty($refundSerialNo) && $order->refund_serial_no === $refundSerialNo) {
+                Log::info('美团已退款消息：幂等性检查通过，直接返回成功', [
+                    'order_id' => $order->id,
+                    'refund_serial_no' => $refundSerialNo,
+                ]);
                 // 根据文档，已退款消息接口响应格式：{code, describe, partnerId}，不包含body字段
                 return $this->successResponse(
                     [],  // 空body，不包含orderId
@@ -1436,26 +1472,78 @@ class MeituanController extends Controller
                 $remark .= '，原因：' . $reason;
             }
 
+            Log::info('美团已退款消息：准备更新订单状态', [
+                'order_id' => $order->id,
+                'from_status' => $order->status->value,
+                'to_status' => OrderStatus::CANCEL_APPROVED->value,
+                'remark' => $remark,
+            ]);
+
             // 更新订单状态为CANCEL_APPROVED
-            $this->orderService->updateOrderStatus(
-                $order,
-                OrderStatus::CANCEL_APPROVED,
-                $remark
-            );
+            try {
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CANCEL_APPROVED,
+                    $remark
+                );
+                Log::info('美团已退款消息：订单状态更新成功', [
+                    'order_id' => $order->id,
+                    'new_status' => $order->fresh()->status->value,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('美团已退款消息：订单状态更新失败', [
+                    'order_id' => $order->id,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+                throw $e; // 重新抛出异常
+            }
 
             // 记录退款流水号（如果提供）
             if (!empty($refundSerialNo)) {
-                $order->update(['refund_serial_no' => $refundSerialNo]);
+                try {
+                    $order->update(['refund_serial_no' => $refundSerialNo]);
+                    Log::info('美团已退款消息：退款流水号记录成功', [
+                        'order_id' => $order->id,
+                        'refund_serial_no' => $refundSerialNo,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('美团已退款消息：退款流水号记录失败', [
+                        'order_id' => $order->id,
+                        'refund_serial_no' => $refundSerialNo,
+                        'error' => $e->getMessage(),
+                    ]);
+                    // 记录失败不影响主流程，继续执行
+                }
             }
 
             // 释放库存
-            $releaseResult = $this->releaseInventoryForPreOrder($order);
-            if (!$releaseResult['success']) {
-                Log::warning('美团已退款消息：库存释放失败', [
+            try {
+                $releaseResult = $this->releaseInventoryForPreOrder($order);
+                if (!$releaseResult['success']) {
+                    Log::warning('美团已退款消息：库存释放失败', [
+                        'order_id' => $order->id,
+                        'error' => $releaseResult['message'],
+                    ]);
+                } else {
+                    Log::info('美团已退款消息：库存释放成功', [
+                        'order_id' => $order->id,
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::error('美团已退款消息：库存释放异常', [
                     'order_id' => $order->id,
-                    'error' => $releaseResult['message'],
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
                 ]);
+                // 库存释放失败不影响主流程，继续执行
             }
+
+            Log::info('美团已退款消息：处理成功', [
+                'order_id' => $order->id,
+                'order_no' => $order->order_no,
+                'refund_serial_no' => $refundSerialNo,
+            ]);
 
             // 根据文档，已退款消息接口响应格式：{code, describe, partnerId}，不包含body字段
             return $this->successResponse(
@@ -1470,7 +1558,9 @@ class MeituanController extends Controller
         } catch (\Exception $e) {
             Log::error('美团已退款消息处理失败', [
                 'error' => $e->getMessage(),
-                'data' => $data,
+                'error_class' => get_class($e),
+                'request_data' => $data,
+                'order_id' => $data['body']['orderId'] ?? $data['orderId'] ?? null,
                 'trace' => $e->getTraceAsString(),
             ]);
 

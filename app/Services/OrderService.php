@@ -138,9 +138,11 @@ class OrderService
             OrderStatus::CANCEL_REJECTED => in_array($to, [
                 OrderStatus::CONFIRMED, // 取消被拒绝，回到确认状态
             ]),
+            OrderStatus::VERIFIED => in_array($to, [
+                OrderStatus::CANCEL_APPROVED, // 允许已核销订单退款（已消费强退场景）
+            ]),
             // 终止状态不能再流转
             OrderStatus::CANCEL_APPROVED,
-            OrderStatus::VERIFIED,
             OrderStatus::REJECTED => false,
         };
     }
