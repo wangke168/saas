@@ -935,7 +935,18 @@ class MeituanController extends Controller
             $body = $data['body'] ?? $data;
             $orderId = $body['orderId'] ?? '';
 
+            // 记录查询请求
+            Log::info('美团订单查询请求', [
+                'order_id' => $orderId,
+                'partner_id' => $partnerId,
+                'encrypt_response' => $encryptResponse,
+                'request_data' => $body,
+            ]);
+
             if (empty($orderId)) {
+                Log::warning('美团订单查询：订单号为空', [
+                    'request_data' => $body,
+                ]);
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, $encryptResponse);
             }
 
@@ -944,6 +955,9 @@ class MeituanController extends Controller
                 ->first();
 
             if (!$order) {
+                Log::warning('美团订单查询：订单不存在', [
+                    'order_id' => $orderId,
+                ]);
                 return $this->errorResponse(400, '订单不存在', $partnerId, $encryptResponse);
             }
 
@@ -969,6 +983,19 @@ class MeituanController extends Controller
                 $responseBody['realNameType'] = 1;
                 $responseBody['credentialList'] = $this->buildCredentialListForQuery($order, $usedQuantity);
             }
+
+            // 记录查询结果
+            Log::info('美团订单查询成功', [
+                'order_id' => $orderId,
+                'partner_order_id' => $order->order_no,
+                'order_status' => $order->status->value,
+                'meituan_order_status' => $orderStatus,
+                'order_quantity' => $order->room_count,
+                'used_quantity' => $usedQuantity,
+                'refunded_quantity' => $refundedQuantity,
+                'real_name_type' => $order->real_name_type,
+                'response_body' => $responseBody,
+            ]);
 
             return $this->successResponse($responseBody, $partnerId, null, 200, 'success', $encryptResponse);
         } catch (\Exception $e) {

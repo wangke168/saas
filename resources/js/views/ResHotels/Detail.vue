@@ -257,10 +257,31 @@
                         <el-input-number v-model="batchStockForm.sale_price" :min="0" :precision="2" style="width: 100%" />
                     </el-form-item>
                     <el-form-item label="总库存" prop="stock_total">
-                        <el-input-number v-model="batchStockForm.stock_total" :min="0" style="width: 100%" />
+                        <el-input-number 
+                            v-model="batchStockForm.stock_total" 
+                            :min="0" 
+                            style="width: 100%"
+                            @change="handleBatchStockTotalChange"
+                        />
                     </el-form-item>
                     <el-form-item label="已售库存" prop="stock_sold">
-                        <el-input-number v-model="batchStockForm.stock_sold" :min="0" style="width: 100%" />
+                        <el-input-number 
+                            v-model="batchStockForm.stock_sold" 
+                            :min="0" 
+                            style="width: 100%"
+                            @change="handleBatchStockSoldChange"
+                        />
+                    </el-form-item>
+                    <el-form-item label="可用库存" prop="stock_available">
+                        <el-input-number 
+                            v-model="batchStockForm.stock_available" 
+                            :min="0" 
+                            style="width: 100%"
+                            @change="handleBatchStockAvailableChange"
+                        />
+                        <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                            可用库存可人工编辑，推送到OTA时使用此字段。如果未设置，系统将自动计算（总库存 - 已售库存）
+                        </div>
                     </el-form-item>
                 </el-form>
                 <template #footer>
@@ -300,10 +321,32 @@
                         <el-input-number v-model="stockForm.sale_price" :min="0" :precision="2" style="width: 100%" />
                     </el-form-item>
                     <el-form-item label="总库存" prop="stock_total">
-                        <el-input-number v-model="stockForm.stock_total" :min="0" style="width: 100%" />
+                        <el-input-number 
+                            v-model="stockForm.stock_total" 
+                            :min="0" 
+                            style="width: 100%"
+                            @change="handleStockTotalChange"
+                        />
                     </el-form-item>
                     <el-form-item label="已售库存" prop="stock_sold">
-                        <el-input-number v-model="stockForm.stock_sold" :min="0" style="width: 100%" />
+                        <el-input-number 
+                            v-model="stockForm.stock_sold" 
+                            :min="0" 
+                            style="width: 100%"
+                            @change="handleStockSoldChange"
+                        />
+                    </el-form-item>
+                    <el-form-item label="可用库存" prop="stock_available">
+                        <el-input-number 
+                            v-model="stockForm.stock_available" 
+                            :min="0" 
+                            style="width: 100%"
+                            @change="handleStockAvailableChange"
+                            :disabled="false"
+                        />
+                        <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                            可用库存可人工编辑，推送到OTA时使用此字段。如果未设置，系统将自动计算（总库存 - 已售库存）
+                        </div>
                     </el-form-item>
                     <el-form-item label="来源" v-if="isEditStock">
                         <el-tag :type="stockForm.source === 'manual' ? 'primary' : 'success'">
@@ -392,6 +435,7 @@ const batchStockForm = ref({
     sale_price: 0,
     stock_total: 0,
     stock_sold: 0,
+    stock_available: 0,
 });
 
 const stockForm = ref({
@@ -400,8 +444,12 @@ const stockForm = ref({
     sale_price: 0,
     stock_total: 0,
     stock_sold: 0,
+    stock_available: 0,
     source: 'manual',
 });
+
+// 标记用户是否手动设置过可用库存
+const userSetStockAvailable = ref(false);
 
 const roomTypeRules = {
     name: [
@@ -657,6 +705,12 @@ const handleSubmitBatchStock = async () => {
                 return;
             }
 
+            // 验证可用库存不能超过总库存
+            if (batchStockForm.value.stock_available > batchStockForm.value.stock_total) {
+                ElMessage.error('可用库存不能超过总库存');
+                return;
+            }
+
             batchStockSubmitting.value = true;
             try {
                 await axios.post('/res-hotel-daily-stocks/batch', {
@@ -668,6 +722,7 @@ const handleSubmitBatchStock = async () => {
                     sale_price: batchStockForm.value.sale_price,
                     stock_total: batchStockForm.value.stock_total,
                     stock_sold: batchStockForm.value.stock_sold || 0,
+                    stock_available: batchStockForm.value.stock_available,
                 });
 
                 ElMessage.success('批量设置成功');
@@ -686,6 +741,7 @@ const handleSubmitBatchStock = async () => {
 
 const handleAddStock = () => {
     editingStockId.value = null;
+    userSetStockAvailable.value = false;
     resetStockForm();
     stockFormDialogVisible.value = true;
 };
@@ -697,12 +753,14 @@ const handleEditStock = (row) => {
     }
 
     editingStockId.value = row.id;
+    userSetStockAvailable.value = row.stock_available !== null && row.stock_available !== undefined;
     stockForm.value = {
         biz_date: row.biz_date,
         cost_price: row.cost_price,
         sale_price: row.sale_price,
         stock_total: row.stock_total,
         stock_sold: row.stock_sold,
+        stock_available: row.stock_available ?? (row.stock_total - row.stock_sold),
         source: row.source,
     };
     stockFormDialogVisible.value = true;
@@ -722,6 +780,12 @@ const handleSubmitStock = async () => {
             // 验证已售库存不能超过总库存
             if (stockForm.value.stock_sold > stockForm.value.stock_total) {
                 ElMessage.error('已售库存不能超过总库存');
+                return;
+            }
+
+            // 验证可用库存不能超过总库存
+            if (stockForm.value.stock_available > stockForm.value.stock_total) {
+                ElMessage.error('可用库存不能超过总库存');
                 return;
             }
 
@@ -826,6 +890,46 @@ const handleDeleteStock = async (row) => {
     }
 };
 
+// 字段联动函数：批量设置表单
+const handleBatchStockTotalChange = () => {
+    // 如果用户未手动设置可用库存，自动计算
+    batchStockForm.value.stock_available = Math.max(0, batchStockForm.value.stock_total - batchStockForm.value.stock_sold);
+};
+
+const handleBatchStockSoldChange = () => {
+    // 如果用户未手动设置可用库存，自动计算
+    batchStockForm.value.stock_available = Math.max(0, batchStockForm.value.stock_total - batchStockForm.value.stock_sold);
+};
+
+const handleBatchStockAvailableChange = () => {
+    // 用户手动设置可用库存，自动计算已售库存
+    batchStockForm.value.stock_sold = Math.max(0, batchStockForm.value.stock_total - batchStockForm.value.stock_available);
+};
+
+// 字段联动函数：单个编辑表单
+const handleStockTotalChange = () => {
+    // 如果用户未手动设置可用库存，自动计算
+    if (!userSetStockAvailable.value) {
+        stockForm.value.stock_available = Math.max(0, stockForm.value.stock_total - stockForm.value.stock_sold);
+    } else {
+        // 如果用户已手动设置过，重新计算已售库存
+        stockForm.value.stock_sold = Math.max(0, stockForm.value.stock_total - stockForm.value.stock_available);
+    }
+};
+
+const handleStockSoldChange = () => {
+    // 如果用户未手动设置可用库存，自动计算
+    if (!userSetStockAvailable.value) {
+        stockForm.value.stock_available = Math.max(0, stockForm.value.stock_total - stockForm.value.stock_sold);
+    }
+};
+
+const handleStockAvailableChange = () => {
+    // 用户手动设置可用库存，标记并自动计算已售库存
+    userSetStockAvailable.value = true;
+    stockForm.value.stock_sold = Math.max(0, stockForm.value.stock_total - stockForm.value.stock_available);
+};
+
 const resetBatchStockForm = () => {
     batchStockForm.value = {
         dateRange: null,
@@ -833,6 +937,7 @@ const resetBatchStockForm = () => {
         sale_price: 0,
         stock_total: 0,
         stock_sold: 0,
+        stock_available: 0,
     };
     batchStockFormRef.value?.clearValidate();
 };
@@ -844,8 +949,10 @@ const resetStockForm = () => {
         sale_price: 0,
         stock_total: 0,
         stock_sold: 0,
+        stock_available: 0,
         source: 'manual',
     };
+    userSetStockAvailable.value = false;
     stockFormRef.value?.clearValidate();
     editingStockId.value = null;
 };

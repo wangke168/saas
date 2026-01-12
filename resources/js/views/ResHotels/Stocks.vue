@@ -125,8 +125,28 @@
                     <el-input-number 
                         v-model="batchForm.stock_total" 
                         :min="0" 
-                        style="width: 100%" 
+                        style="width: 100%"
+                        @change="handleBatchStockTotalChange"
                     />
+                </el-form-item>
+                <el-form-item label="已售库存" prop="stock_sold">
+                    <el-input-number 
+                        v-model="batchForm.stock_sold" 
+                        :min="0" 
+                        style="width: 100%"
+                        @change="handleBatchStockSoldChange"
+                    />
+                </el-form-item>
+                <el-form-item label="可用库存" prop="stock_available">
+                    <el-input-number 
+                        v-model="batchForm.stock_available" 
+                        :min="0" 
+                        style="width: 100%"
+                        @change="handleBatchStockAvailableChange"
+                    />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        可用库存可人工编辑，推送到OTA时使用此字段。如果未设置，系统将自动计算（总库存 - 已售库存）
+                    </div>
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -179,15 +199,28 @@
                     <el-input-number 
                         v-model="editForm.stock_total" 
                         :min="0" 
-                        style="width: 100%" 
+                        style="width: 100%"
+                        @change="handleEditStockTotalChange"
                     />
                 </el-form-item>
                 <el-form-item label="已售库存" prop="stock_sold">
                     <el-input-number 
                         v-model="editForm.stock_sold" 
                         :min="0" 
-                        style="width: 100%" 
+                        style="width: 100%"
+                        @change="handleEditStockSoldChange"
                     />
+                </el-form-item>
+                <el-form-item label="可用库存" prop="stock_available">
+                    <el-input-number 
+                        v-model="editForm.stock_available" 
+                        :min="0" 
+                        style="width: 100%"
+                        @change="handleEditStockAvailableChange"
+                    />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        可用库存可人工编辑，推送到OTA时使用此字段。如果未设置，系统将自动计算（总库存 - 已售库存）
+                    </div>
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -230,6 +263,8 @@ const batchForm = reactive({
     cost_price: 0,
     sale_price: 0,
     stock_total: 0,
+    stock_sold: 0,
+    stock_available: 0,
 });
 
 const batchRules = {
@@ -251,7 +286,11 @@ const editForm = reactive({
     sale_price: 0,
     stock_total: 0,
     stock_sold: 0,
+    stock_available: 0,
 });
+
+// 标记用户是否手动设置过可用库存
+const userSetStockAvailable = ref(false);
 
 const editRules = {
     cost_price: [{ required: true, message: '请输入结算价', trigger: 'blur' }],
@@ -350,25 +389,30 @@ const handleSubmitBatch = async () => {
             return;
         }
         
+        // 验证已售库存 <= 总库存
+        if (batchForm.stock_sold > batchForm.stock_total) {
+            ElMessage.warning('已售库存不能超过总库存');
+            return;
+        }
+        
+        // 验证可用库存 <= 总库存
+        if (batchForm.stock_available > batchForm.stock_total) {
+            ElMessage.warning('可用库存不能超过总库存');
+            return;
+        }
+        
         batchSubmitting.value = true;
         try {
-            // 生成日期数组
-            const startDate = new Date(batchForm.dateRange[0]);
-            const endDate = new Date(batchForm.dateRange[1]);
-            const stocks = [];
-            
-            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-                stocks.push({
-                    date: d.toISOString().split('T')[0],
-                    cost_price: batchForm.cost_price,
-                    sale_price: batchForm.sale_price,
-                    stock_total: batchForm.stock_total,
-                });
-            }
-            
             await resHotelDailyStocksApi.batchStore({
+                hotel_id: hotelId.value,
                 room_type_id: batchForm.room_type_id,
-                stocks: stocks,
+                start_date: batchForm.dateRange[0],
+                end_date: batchForm.dateRange[1],
+                cost_price: batchForm.cost_price,
+                sale_price: batchForm.sale_price,
+                stock_total: batchForm.stock_total,
+                stock_sold: batchForm.stock_sold || 0,
+                stock_available: batchForm.stock_available,
             });
             
             ElMessage.success('批量更新成功');
@@ -386,12 +430,14 @@ const handleSubmitBatch = async () => {
 // 编辑单日价格库存
 const handleEdit = (row) => {
     editingId.value = row.id;
+    userSetStockAvailable.value = row.stock_available !== null && row.stock_available !== undefined;
     Object.assign(editForm, {
         biz_date: row.biz_date,
         cost_price: parseFloat(row.cost_price) || 0,
         sale_price: parseFloat(row.sale_price) || 0,
         stock_total: row.stock_total || 0,
         stock_sold: row.stock_sold || 0,
+        stock_available: row.stock_available ?? (row.stock_total - row.stock_sold),
     });
     editDialogVisible.value = true;
 };
@@ -415,6 +461,12 @@ const handleSubmitEdit = async () => {
             return;
         }
         
+        // 验证可用库存 <= 总库存
+        if (editForm.stock_available > editForm.stock_total) {
+            ElMessage.warning('可用库存不能超过总库存');
+            return;
+        }
+        
         editSubmitting.value = true;
         try {
             await resHotelDailyStocksApi.update(editingId.value, {
@@ -422,6 +474,7 @@ const handleSubmitEdit = async () => {
                 sale_price: editForm.sale_price,
                 stock_total: editForm.stock_total,
                 stock_sold: editForm.stock_sold,
+                stock_available: editForm.stock_available,
             });
             
             ElMessage.success('更新成功');
@@ -467,6 +520,39 @@ const handleDateRangeChange = () => {
     fetchStocks();
 };
 
+// 字段联动函数：批量表单
+const handleBatchStockTotalChange = () => {
+    batchForm.stock_available = Math.max(0, batchForm.stock_total - batchForm.stock_sold);
+};
+
+const handleBatchStockSoldChange = () => {
+    batchForm.stock_available = Math.max(0, batchForm.stock_total - batchForm.stock_sold);
+};
+
+const handleBatchStockAvailableChange = () => {
+    batchForm.stock_sold = Math.max(0, batchForm.stock_total - batchForm.stock_available);
+};
+
+// 字段联动函数：编辑表单
+const handleEditStockTotalChange = () => {
+    if (!userSetStockAvailable.value) {
+        editForm.stock_available = Math.max(0, editForm.stock_total - editForm.stock_sold);
+    } else {
+        editForm.stock_sold = Math.max(0, editForm.stock_total - editForm.stock_available);
+    }
+};
+
+const handleEditStockSoldChange = () => {
+    if (!userSetStockAvailable.value) {
+        editForm.stock_available = Math.max(0, editForm.stock_total - editForm.stock_sold);
+    }
+};
+
+const handleEditStockAvailableChange = () => {
+    userSetStockAvailable.value = true;
+    editForm.stock_sold = Math.max(0, editForm.stock_total - editForm.stock_available);
+};
+
 // 重置批量表单
 const resetBatchForm = () => {
     Object.assign(batchForm, {
@@ -475,6 +561,8 @@ const resetBatchForm = () => {
         cost_price: 0,
         sale_price: 0,
         stock_total: 0,
+        stock_sold: 0,
+        stock_available: 0,
     });
     if (batchFormRef.value) {
         batchFormRef.value.clearValidate();
@@ -489,7 +577,9 @@ const resetEditForm = () => {
         sale_price: 0,
         stock_total: 0,
         stock_sold: 0,
+        stock_available: 0,
     });
+    userSetStockAvailable.value = false;
     editingId.value = null;
     if (editFormRef.value) {
         editFormRef.value.clearValidate();

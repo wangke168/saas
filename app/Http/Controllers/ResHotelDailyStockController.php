@@ -61,6 +61,7 @@ class ResHotelDailyStockController extends Controller
             'sale_price' => 'required|numeric|min:0',
             'stock_total' => 'nullable|integer|min:0',
             'stock_sold' => 'nullable|integer|min:0',
+            'stock_available' => 'nullable|integer|min:0',
         ]);
 
         // 验证房型是否属于指定酒店
@@ -78,18 +79,37 @@ class ResHotelDailyStockController extends Controller
             ], 422);
         }
 
-        // 验证已售库存不能超过总库存
+        // 处理库存字段
         $stockTotal = $validated['stock_total'] ?? 0;
-        $stockSold = $validated['stock_sold'] ?? 0;
-        if ($stockSold > $stockTotal) {
-            return response()->json([
-                'message' => '已售库存不能超过总库存',
-            ], 422);
+        $stockSold = $validated['stock_sold'] ?? null;
+        $stockAvailable = $validated['stock_available'] ?? null;
+
+        // 如果设置了可用库存，计算已售库存
+        if ($stockAvailable !== null) {
+            if ($stockAvailable > $stockTotal) {
+                return response()->json([
+                    'message' => '可用库存不能超过总库存',
+                ], 422);
+            }
+            $stockSold = $stockTotal - $stockAvailable;
+        } elseif ($stockSold !== null) {
+            // 如果只设置了已售库存，验证并计算可用库存
+            if ($stockSold > $stockTotal) {
+                return response()->json([
+                    'message' => '已售库存不能超过总库存',
+                ], 422);
+            }
+            $stockAvailable = $stockTotal - $stockSold;
+        } else {
+            // 如果都没设置，默认值
+            $stockSold = 0;
+            $stockAvailable = $stockTotal;
         }
 
-        // 设置默认值
+        // 设置最终值
         $validated['stock_total'] = $stockTotal;
         $validated['stock_sold'] = $stockSold;
+        $validated['stock_available'] = $stockAvailable;
         $validated['source'] = PriceSource::MANUAL->value;
         $validated['version'] = 0;
 
@@ -116,6 +136,7 @@ class ResHotelDailyStockController extends Controller
             'sale_price' => 'required|numeric|min:0',
             'stock_total' => 'nullable|integer|min:0',
             'stock_sold' => 'nullable|integer|min:0',
+            'stock_available' => 'nullable|integer|min:0',
         ]);
 
         // 验证日期范围合理性（不超过1年）
@@ -142,13 +163,31 @@ class ResHotelDailyStockController extends Controller
             ], 422);
         }
 
-        // 验证已售库存不能超过总库存
+        // 处理库存字段
         $stockTotal = $validated['stock_total'] ?? 0;
-        $stockSold = $validated['stock_sold'] ?? 0;
-        if ($stockSold > $stockTotal) {
-            return response()->json([
-                'message' => '已售库存不能超过总库存',
-            ], 422);
+        $stockSold = $validated['stock_sold'] ?? null;
+        $stockAvailable = $validated['stock_available'] ?? null;
+
+        // 如果设置了可用库存，计算已售库存
+        if ($stockAvailable !== null) {
+            if ($stockAvailable > $stockTotal) {
+                return response()->json([
+                    'message' => '可用库存不能超过总库存',
+                ], 422);
+            }
+            $stockSold = $stockTotal - $stockAvailable;
+        } elseif ($stockSold !== null) {
+            // 如果只设置了已售库存，验证并计算可用库存
+            if ($stockSold > $stockTotal) {
+                return response()->json([
+                    'message' => '已售库存不能超过总库存',
+                ], 422);
+            }
+            $stockAvailable = $stockTotal - $stockSold;
+        } else {
+            // 如果都没设置，默认值
+            $stockSold = 0;
+            $stockAvailable = $stockTotal;
         }
 
         DB::beginTransaction();
@@ -169,6 +208,7 @@ class ResHotelDailyStockController extends Controller
                         'sale_price' => $validated['sale_price'],
                         'stock_total' => $stockTotal,
                         'stock_sold' => $stockSold,
+                        'stock_available' => $stockAvailable,
                         'source' => PriceSource::MANUAL->value,
                         'version' => 0,
                     ]
@@ -184,6 +224,7 @@ class ResHotelDailyStockController extends Controller
                             'sale_price' => $validated['sale_price'],
                             'stock_total' => $stockTotal,
                             'stock_sold' => $stockSold,
+                            'stock_available' => $stockAvailable,
                         ]);
                         $updatedCount++;
                     }
@@ -227,6 +268,7 @@ class ResHotelDailyStockController extends Controller
             'sale_price' => 'sometimes|required|numeric|min:0',
             'stock_total' => 'nullable|integer|min:0',
             'stock_sold' => 'nullable|integer|min:0',
+            'stock_available' => 'nullable|integer|min:0',
         ]);
 
         // 验证售价不能低于成本价
@@ -238,14 +280,37 @@ class ResHotelDailyStockController extends Controller
             ], 422);
         }
 
-        // 验证已售库存不能超过总库存
+        // 处理库存字段
         $stockTotal = $validated['stock_total'] ?? $resHotelDailyStock->stock_total;
-        $stockSold = $validated['stock_sold'] ?? $resHotelDailyStock->stock_sold;
-        if ($stockSold > $stockTotal) {
-            return response()->json([
-                'message' => '已售库存不能超过总库存',
-            ], 422);
+        $stockSold = $validated['stock_sold'] ?? null;
+        $stockAvailable = $validated['stock_available'] ?? null;
+
+        // 如果设置了可用库存，计算已售库存
+        if ($stockAvailable !== null) {
+            if ($stockAvailable > $stockTotal) {
+                return response()->json([
+                    'message' => '可用库存不能超过总库存',
+                ], 422);
+            }
+            $stockSold = $stockTotal - $stockAvailable;
+        } elseif ($stockSold !== null) {
+            // 如果只设置了已售库存，验证并计算可用库存
+            if ($stockSold > $stockTotal) {
+                return response()->json([
+                    'message' => '已售库存不能超过总库存',
+                ], 422);
+            }
+            $stockAvailable = $stockTotal - $stockSold;
+        } else {
+            // 如果都没设置，使用现有值或计算
+            $stockSold = $resHotelDailyStock->stock_sold ?? 0;
+            $stockAvailable = $resHotelDailyStock->stock_available ?? ($stockTotal - $stockSold);
         }
+
+        // 更新数据
+        $validated['stock_total'] = $stockTotal;
+        $validated['stock_sold'] = $stockSold;
+        $validated['stock_available'] = $stockAvailable;
 
         $resHotelDailyStock->update($validated);
         $resHotelDailyStock->load(['hotel.scenicSpot', 'roomType']);

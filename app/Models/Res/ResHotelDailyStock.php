@@ -21,6 +21,7 @@ class ResHotelDailyStock extends Model
         'sale_price',
         'stock_total',
         'stock_sold',
+        'stock_available',
         'version',
         'source',
         'is_closed',
@@ -34,6 +35,7 @@ class ResHotelDailyStock extends Model
             'sale_price' => 'decimal:2',
             'stock_total' => 'integer',
             'stock_sold' => 'integer',
+            'stock_available' => 'integer',
             'version' => 'integer',
             'source' => PriceSource::class,
             'is_closed' => 'boolean',
@@ -57,11 +59,20 @@ class ResHotelDailyStock extends Model
     }
 
     /**
-     * 获取可用库存（计算字段）
+     * 获取可用库存（如果未设置，则计算）
+     * 
+     * 注意：如果 stock_available 字段值为 NULL，则计算 stock_total - stock_sold
+     * 如果字段值不为 NULL，直接返回字段值
      */
-    public function getStockAvailableAttribute(): int
+    public function getStockAvailableAttribute($value): int
     {
-        return $this->stock_total - $this->stock_sold;
+        // 如果字段值不为空，直接返回（普通字段的值）
+        if ($value !== null && $value !== '') {
+            return (int) $value;
+        }
+        
+        // 如果字段值为空，计算并返回（向后兼容）
+        return max(0, ($this->attributes['stock_total'] ?? 0) - ($this->attributes['stock_sold'] ?? 0));
     }
 
     /**
