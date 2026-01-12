@@ -9,3 +9,4 @@ stdout_logfile=/var/www/html/storage/logs/horizon.log
 stopwaitsecs=3600
 
 
+

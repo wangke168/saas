@@ -20,10 +20,10 @@
                         </el-tag>
                     </el-descriptions-item>
                     <el-descriptions-item label="销售开始日期">
-                        {{ product.sale_start_date || '不限制' }}
+                        {{ formatDateOnly(product.sale_start_date) || '不限制' }}
                     </el-descriptions-item>
                     <el-descriptions-item label="销售结束日期">
-                        {{ product.sale_end_date || '不限制' }}
+                        {{ formatDateOnly(product.sale_end_date) || '不限制' }}
                     </el-descriptions-item>
                     <el-descriptions-item label="创建时间">{{ formatDate(product.created_at) }}</el-descriptions-item>
                     <el-descriptions-item label="描述" :span="2">
@@ -92,6 +92,17 @@ const formatDate = (date) => {
     const minutes = String(d.getMinutes()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:${minutes}`;
 };
+
+
+const formatDateOnly = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 
 const goBack = () => {
     router.push('/pkg-products');

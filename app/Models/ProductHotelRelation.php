@@ -60,3 +60,4 @@ class ProductHotelRelation extends Model
     }
 }
 
+

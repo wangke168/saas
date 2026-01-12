@@ -274,4 +274,42 @@ class ResHotelDailyStockController extends Controller
             'message' => '价库记录删除成功',
         ]);
     }
+
+    /**
+     * 关闭价库（人工关闭）
+     */
+    public function close(ResHotelDailyStock $resHotelDailyStock): JsonResponse
+    {
+        // 接口推送的数据不允许关闭
+        if ($resHotelDailyStock->source === PriceSource::API) {
+            return response()->json([
+                'message' => '接口推送的价库数据不允许关闭',
+            ], 403);
+        }
+
+        $resHotelDailyStock->update(['is_closed' => true]);
+
+        return response()->json([
+            'message' => '价库已关闭',
+        ]);
+    }
+
+    /**
+     * 开启价库
+     */
+    public function open(ResHotelDailyStock $resHotelDailyStock): JsonResponse
+    {
+        // 接口推送的数据不允许开启
+        if ($resHotelDailyStock->source === PriceSource::API) {
+            return response()->json([
+                'message' => '接口推送的价库数据不允许开启',
+            ], 403);
+        }
+
+        $resHotelDailyStock->update(['is_closed' => false]);
+
+        return response()->json([
+            'message' => '价库已开启',
+        ]);
+    }
 }

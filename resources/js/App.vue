@@ -2,7 +2,7 @@
     <el-container>
         <el-header v-if="isAuthenticated">
             <div class="header-content">
-                <h1>OTA酒景套餐分销系统</h1>
+                <h1>酒速通</h1>
                 <div class="user-info">
                     <span>{{ user?.display_name || user?.name }}</span>
                     <el-button text @click="handleLogout">退出</el-button>
@@ -32,6 +32,15 @@
                         <el-icon><House /></el-icon>
                         <span>酒店管理</span>
                     </el-menu-item>
+                    <el-sub-menu v-if="isAdmin" index="pkg-settings">
+                        <template #title>
+                            <el-icon><Goods /></el-icon>
+                            <span>打包产品</span>
+                        </template>
+                    <el-menu-item index="/pkg-products">
+                        <el-icon><Goods /></el-icon>
+                        <span>打包产品管理</span>
+                    </el-menu-item>
                     <el-menu-item index="/tickets">
                         <el-icon><Ticket /></el-icon>
                         <span>门票管理</span>
@@ -40,30 +49,33 @@
                         <el-icon><OfficeBuilding /></el-icon>
                         <span>打包酒店管理</span>
                     </el-menu-item>
-                    <el-menu-item index="/pkg-products">
-                        <el-icon><Goods /></el-icon>
-                        <span>打包产品管理</span>
-                    </el-menu-item>
-                    <el-menu-item v-if="isAdmin" index="/resource-providers">
-                        <el-icon><Connection /></el-icon>
-                        <span>资源方管理</span>
-                    </el-menu-item>
-                    <el-menu-item v-if="isAdmin" index="/scenic-spots">
-                        <el-icon><Location /></el-icon>
-                        <span>景区管理</span>
-                    </el-menu-item>
-                    <el-menu-item v-if="isAdmin" index="/users">
-                        <el-icon><User /></el-icon>
-                        <span>用户管理</span>
-                    </el-menu-item>
-                    <el-menu-item v-if="isAdmin" index="/software-providers">
-                        <el-icon><Connection /></el-icon>
-                        <span>软件服务商</span>
-                    </el-menu-item>
-                    <el-menu-item v-if="isAdmin" index="/ota-platforms">
-                        <el-icon><DataLine /></el-icon>
-                        <span>OTA平台管理</span>
-                    </el-menu-item>
+                    </el-sub-menu>
+                    <el-sub-menu v-if="isAdmin" index="other-settings">
+                        <template #title>
+                            <el-icon><Tools /></el-icon>
+                            <span>其他设置</span>
+                        </template>
+                        <el-menu-item index="/resource-providers">
+                            <el-icon><Connection /></el-icon>
+                            <span>资源方管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="/scenic-spots">
+                            <el-icon><Location /></el-icon>
+                            <span>景区管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="/software-providers">
+                            <el-icon><Connection /></el-icon>
+                            <span>软件服务商管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="/ota-platforms">
+                            <el-icon><DataLine /></el-icon>
+                            <span>OTA平台管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="/users">
+                            <el-icon><User /></el-icon>
+                            <span>用户管理</span>
+                        </el-menu-item>
+                    </el-sub-menu>
                     <el-menu-item index="/profile">
                         <el-icon><Setting /></el-icon>
                         <span>账号设置</span>
@@ -84,7 +96,7 @@
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
-import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine, Ticket, OfficeBuilding, Goods } from '@element-plus/icons-vue';
+import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine, Ticket, OfficeBuilding, Goods, Tools } from '@element-plus/icons-vue';
 
 const router = useRouter();
 const authStore = useAuthStore();

@@ -44,7 +44,11 @@
                         </div>
 
                         <el-table :data="prices" v-loading="priceLoading" border>
-                            <el-table-column prop="date" label="日期" width="120" />
+                            <el-table-column prop="date" label="日期" width="120" align="right">
+                            <template #default="{ row }">
+                                {{ formatDateOnly(row.date) }}
+                            </template>
+                            </el-table-column>
                             <el-table-column prop="cost_price" label="成本价" width="120" align="right">
                                 <template #default="{ row }">
                                     ¥{{ formatPrice(row.cost_price) }}
@@ -63,6 +67,18 @@
                                 </template>
                             </el-table-column>
                         </el-table>
+
+                        <el-pagination
+                            v-if="pricePagination.total > 0"
+                            v-model:current-page="pricePagination.current_page"
+                            v-model:page-size="pricePagination.per_page"
+                            :page-sizes="[10, 20, 50, 100]"
+                            :total="pricePagination.total"
+                            layout="total, sizes, prev, pager, next, jumper"
+                            style="margin-top: 20px; justify-content: flex-end;"
+                            @size-change="handlePriceSizeChange"
+                            @current-change="handlePricePageChange"
+                        />
 
                         <el-empty v-if="!priceLoading && prices.length === 0" description="暂无价格数据" />
 
@@ -173,6 +189,12 @@ const activeTab = ref('prices'); // 默认激活价库管理
 const prices = ref([]);
 const priceLoading = ref(false);
 const priceDateRange = ref([]);
+const pricePagination = ref({
+    current_page: 1,
+    per_page: 50,
+    total: 0,
+    last_page: 1,
+});
 
 const batchPriceDialogVisible = ref(false);
 const batchPriceFormRef = ref(null);
@@ -270,11 +292,13 @@ const fetchTicketDetail = async () => {
 
 const fetchPrices = async () => {
     if (!ticket.value) return;
-    
+
     priceLoading.value = true;
     try {
         const params = {
             ticket_id: ticket.value.id,
+            page: pricePagination.value.current_page,
+            per_page: pricePagination.value.per_page,
         };
         if (priceDateRange.value && priceDateRange.value.length === 2) {
             params.start_date = priceDateRange.value[0];
@@ -282,6 +306,15 @@ const fetchPrices = async () => {
         }
         const response = await axios.get(`/ticket-prices`, { params });
         prices.value = response.data.data || [];
+        // 更新分页信息
+        if (response.data.current_page !== undefined) {
+            pricePagination.value = {
+                current_page: response.data.current_page,
+                per_page: response.data.per_page,
+                total: response.data.total,
+                last_page: response.data.last_page,
+            };
+        }
     } catch (error) {
         ElMessage.error('获取价库列表失败');
         console.error(error);
@@ -292,6 +325,18 @@ const fetchPrices = async () => {
 
 const resetPriceFilter = () => {
     priceDateRange.value = [];
+    pricePagination.value.current_page = 1;
+    fetchPrices();
+};
+
+const handlePricePageChange = (page) => {
+    pricePagination.value.current_page = page;
+    fetchPrices();
+};
+
+const handlePriceSizeChange = (size) => {
+    pricePagination.value.per_page = size;
+    pricePagination.value.current_page = 1;
     fetchPrices();
 };
 
@@ -317,6 +362,7 @@ const handleSubmitBatchPrice = async () => {
                 await axios.post(`/ticket-prices/batch`, data);
                 ElMessage.success('批量设置价库成功');
                 batchPriceDialogVisible.value = false;
+                pricePagination.value.current_page = 1;
                 await fetchPrices();
             } catch (error) {
                 const message = error.response?.data?.message || error.message || '操作失败';
@@ -354,6 +400,7 @@ const handleSubmitPrice = async () => {
                 await axios.put(`/ticket-prices/${editingPriceId.value}`, data);
                 ElMessage.success('价库更新成功');
                 priceFormDialogVisible.value = false;
+                // 编辑后保持在当前页
                 await fetchPrices();
             } catch (error) {
                 const message = error.response?.data?.message || error.message || '操作失败';
@@ -373,6 +420,10 @@ const handleDeletePrice = async (row) => {
         });
         await axios.delete(`/ticket-prices/${row.id}`);
         ElMessage.success('删除成功');
+        // 如果当前页没有数据了，回到上一页
+        if (prices.value.length === 1 && pricePagination.value.current_page > 1) {
+            pricePagination.value.current_page--;
+        }
         await fetchPrices();
     } catch (error) {
         if (error !== 'cancel') {
@@ -402,6 +453,16 @@ const resetPriceForm = () => {
         stock_available: 0,
     };
 };
+
+const formatDateOnly = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 
 onMounted(() => {
     fetchTicketDetail();

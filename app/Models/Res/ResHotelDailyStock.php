@@ -23,6 +23,7 @@ class ResHotelDailyStock extends Model
         'stock_sold',
         'version',
         'source',
+        'is_closed',
     ];
 
     protected function casts(): array
@@ -35,6 +36,7 @@ class ResHotelDailyStock extends Model
             'stock_sold' => 'integer',
             'version' => 'integer',
             'source' => PriceSource::class,
+            'is_closed' => 'boolean',
         ];
     }
 

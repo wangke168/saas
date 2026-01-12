@@ -169,18 +169,41 @@
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="200" fixed="right">
+                <el-table-column prop="is_closed" label="状态" width="100">
                     <template #default="{ row }">
-                        <el-button 
-                            size="small" 
+                        <el-tag :type="row.is_closed ? 'danger' : 'success'">
+                            {{ row.is_closed ? '已关闭' : '正常' }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="350" fixed="right">
+                    <template #default="{ row }">
+                        <el-button
+                            size="small"
                             @click="handleEditStock(row)"
                             :disabled="row.source === 'api'"
                         >
                             编辑
                         </el-button>
-                        <el-button 
-                            size="small" 
-                            type="danger" 
+                        <el-button
+                            size="small"
+                            :type="row.is_closed ? 'success' : 'warning'"
+                            @click="handleToggleStockStatus(row)"
+                            :disabled="row.source === 'api'"
+                        >
+                            {{ row.is_closed ? '开启' : '关房' }}
+                        </el-button>
+                        <el-button
+                            size="small"
+                            type="primary"
+                            @click="handlePushStockToOta(row)"
+                            :loading="pushingStocks[row.id]"
+                        >
+                            推送到OTA
+                        </el-button>
+                        <el-button
+                            size="small"
+                            type="danger"
                             @click="handleDeleteStock(row)"
                             :disabled="row.source === 'api'"
                         >
@@ -189,6 +212,18 @@
                     </template>
                 </el-table-column>
             </el-table>
+
+            <el-pagination
+                v-if="stockPagination.total > 0"
+                v-model:current-page="stockPagination.current_page"
+                v-model:page-size="stockPagination.per_page"
+                :page-sizes="[10, 20, 50, 100]"
+                :total="stockPagination.total"
+                layout="total, sizes, prev, pager, next, jumper"
+                style="margin-top: 20px; justify-content: flex-end;"
+                @size-change="handleStockSizeChange"
+                @current-change="handleStockPageChange"
+            />
 
             <!-- 批量设置价库对话框 -->
             <el-dialog
@@ -281,9 +316,9 @@
                 </el-form>
                 <template #footer>
                     <el-button @click="stockFormDialogVisible = false">取消</el-button>
-                    <el-button 
-                        type="primary" 
-                        @click="handleSubmitStock" 
+                    <el-button
+                        type="primary"
+                        @click="handleSubmitStock"
                         :loading="stockSubmitting"
                         :disabled="stockForm.source === 'api'"
                     >
@@ -319,6 +354,12 @@ const stocks = ref([]);
 const stockLoading = ref(false);
 const currentRoomType = ref(null);
 const stockDateRange = ref(null);
+const stockPagination = ref({
+    current_page: 1,
+    per_page: 15,
+    total: 0,
+    last_page: 1,
+});
 const batchStockDialogVisible = ref(false);
 const batchStockFormRef = ref(null);
 const batchStockSubmitting = ref(false);
@@ -326,6 +367,7 @@ const stockFormDialogVisible = ref(false);
 const stockFormRef = ref(null);
 const stockSubmitting = ref(false);
 const editingStockId = ref(null);
+const pushingStocks = ref({});
 
 const isEditRoomType = computed(() => editingRoomTypeId.value !== null);
 const roomTypeFormTitle = computed(() => isEditRoomType.value ? '编辑房型' : '添加房型');
@@ -464,7 +506,7 @@ const handleEditRoomType = (row) => {
 
 const handleSubmitRoomType = async () => {
     if (!roomTypeFormRef.value) return;
-    
+
     await roomTypeFormRef.value.validate(async (valid) => {
         if (valid) {
             roomTypeSubmitting.value = true;
@@ -473,7 +515,7 @@ const handleSubmitRoomType = async () => {
                     ...roomTypeForm.value,
                     hotel_id: route.params.id,
                 };
-                
+
                 if (isEditRoomType.value) {
                     await axios.put(`/res-room-types/${editingRoomTypeId.value}`, data);
                     ElMessage.success('房型更新成功');
@@ -504,7 +546,7 @@ const handleDeleteRoomType = async (row) => {
                 cancelButtonText: '取消'
             }
         );
-        
+
         await axios.delete(`/res-room-types/${row.id}`);
         ElMessage.success('删除成功');
         await fetchRoomTypes();
@@ -540,18 +582,29 @@ const handleManageStock = async (roomType) => {
 const fetchStocks = async (roomTypeId) => {
     stockLoading.value = true;
     try {
-        const params = { 
+        const params = {
             hotel_id: route.params.id,
-            room_type_id: roomTypeId 
+            room_type_id: roomTypeId,
+            page: stockPagination.value.current_page,
+            per_page: stockPagination.value.per_page,
         };
-        
+
         if (stockDateRange.value && stockDateRange.value.length === 2) {
             params.start_date = stockDateRange.value[0];
             params.end_date = stockDateRange.value[1];
         }
-        
+
         const response = await axios.get('/res-hotel-daily-stocks', { params });
         stocks.value = response.data.data || [];
+        // 更新分页信息
+        if (response.data.current_page !== undefined) {
+            stockPagination.value = {
+                current_page: response.data.current_page,
+                per_page: response.data.per_page,
+                total: response.data.total,
+                last_page: response.data.last_page,
+            };
+        }
     } catch (error) {
         ElMessage.error('获取价库列表失败');
         console.error(error);
@@ -561,6 +614,22 @@ const fetchStocks = async (roomTypeId) => {
 };
 
 const handleStockDateRangeChange = () => {
+    if (currentRoomType.value) {
+        stockPagination.value.current_page = 1;
+        fetchStocks(currentRoomType.value.id);
+    }
+};
+
+const handleStockPageChange = (page) => {
+    stockPagination.value.current_page = page;
+    if (currentRoomType.value) {
+        fetchStocks(currentRoomType.value.id);
+    }
+};
+
+const handleStockSizeChange = (size) => {
+    stockPagination.value.per_page = size;
+    stockPagination.value.current_page = 1;
     if (currentRoomType.value) {
         fetchStocks(currentRoomType.value.id);
     }
@@ -573,7 +642,7 @@ const handleBatchAddStock = () => {
 
 const handleSubmitBatchStock = async () => {
     if (!batchStockFormRef.value) return;
-    
+
     await batchStockFormRef.value.validate(async (valid) => {
         if (valid) {
             // 验证售价不能低于成本价
@@ -600,9 +669,10 @@ const handleSubmitBatchStock = async () => {
                     stock_total: batchStockForm.value.stock_total,
                     stock_sold: batchStockForm.value.stock_sold || 0,
                 });
-                
+
                 ElMessage.success('批量设置成功');
                 batchStockDialogVisible.value = false;
+                stockPagination.value.current_page = 1;
                 await fetchStocks(currentRoomType.value.id);
             } catch (error) {
                 const message = error.response?.data?.message || '操作失败';
@@ -625,7 +695,7 @@ const handleEditStock = (row) => {
         ElMessage.warning('接口推送的价库数据不可编辑');
         return;
     }
-    
+
     editingStockId.value = row.id;
     stockForm.value = {
         biz_date: row.biz_date,
@@ -640,7 +710,7 @@ const handleEditStock = (row) => {
 
 const handleSubmitStock = async () => {
     if (!stockFormRef.value) return;
-    
+
     await stockFormRef.value.validate(async (valid) => {
         if (valid) {
             // 验证售价不能低于成本价
@@ -662,13 +732,17 @@ const handleSubmitStock = async () => {
                     room_type_id: currentRoomType.value.id,
                     ...stockForm.value,
                 };
-                
+
                 if (isEditStock.value) {
                     await axios.put(`/res-hotel-daily-stocks/${editingStockId.value}`, data);
                     ElMessage.success('价库更新成功');
                 } else {
                     await axios.post('/res-hotel-daily-stocks', data);
                     ElMessage.success('价库创建成功');
+                    // 新建后跳转到最后一页
+                    if (stockPagination.value.last_page > 0) {
+                        stockPagination.value.current_page = stockPagination.value.last_page;
+                    }
                 }
                 stockFormDialogVisible.value = false;
                 await fetchStocks(currentRoomType.value.id);
@@ -680,6 +754,44 @@ const handleSubmitStock = async () => {
             }
         }
     });
+};
+
+const handleToggleStockStatus = async (row) => {
+    if (row.source === 'api') {
+        ElMessage.warning('接口推送的价库数据不可关闭/开启');
+        return;
+    }
+
+    try {
+        const action = row.is_closed ? 'open' : 'close';
+        await axios.post(`/res-hotel-daily-stocks/${row.id}/${action}`);
+        ElMessage.success(row.is_closed ? '价库已开启' : '价库已关闭');
+        await fetchStocks(currentRoomType.value.id);
+    } catch (error) {
+        const message = error.response?.data?.message || '操作失败';
+        ElMessage.error(message);
+        console.error(error);
+    }
+};
+
+const handlePushStockToOta = async (row) => {
+    try {
+        pushingStocks.value[row.id] = true;
+
+        const response = await axios.post(`/res-hotel-daily-stocks/${row.id}/push-to-ota`);
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '推送任务已提交，正在后台处理中');
+        } else {
+            ElMessage.error(response.data.message || '推送失败');
+        }
+    } catch (error) {
+        const message = error.response?.data?.message || '推送失败';
+        ElMessage.error(message);
+        console.error(error);
+    } finally {
+        pushingStocks.value[row.id] = false;
+    }
 };
 
 const handleDeleteStock = async (row) => {
@@ -698,9 +810,13 @@ const handleDeleteStock = async (row) => {
                 cancelButtonText: '取消'
             }
         );
-        
+
         await axios.delete(`/res-hotel-daily-stocks/${row.id}`);
         ElMessage.success('删除成功');
+        // 如果当前页没有数据了，回到上一页
+        if (stocks.value.length === 1 && stockPagination.value.current_page > 1) {
+            stockPagination.value.current_page--;
+        }
         await fetchStocks(currentRoomType.value.id);
     } catch (error) {
         if (error !== 'cancel') {
@@ -739,6 +855,12 @@ const resetStockDialog = () => {
     stocks.value = [];
     stockDateRange.value = null;
     editingStockId.value = null;
+    stockPagination.value = {
+        current_page: 1,
+        per_page: 15,
+        total: 0,
+        last_page: 1,
+    };
 };
 
 const formatDate = (date) => {

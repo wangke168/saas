@@ -257,6 +257,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/batch', [\App\Http\Controllers\ResHotelDailyStockController::class, 'batchStore']); // 批量设置
         Route::put('/{resHotelDailyStock}', [\App\Http\Controllers\ResHotelDailyStockController::class, 'update']);
         Route::delete('/{resHotelDailyStock}', [\App\Http\Controllers\ResHotelDailyStockController::class, 'destroy']);
+        Route::post('/{resHotelDailyStock}/close', [\App\Http\Controllers\ResHotelDailyStockController::class, 'close']);
+        Route::post('/{resHotelDailyStock}/open', [\App\Http\Controllers\ResHotelDailyStockController::class, 'open']);
+        // 打包酒店价库推送到OTA
+        Route::post('/{resHotelDailyStock}/push-to-ota', [\App\Http\Controllers\ResHotelStockPushController::class, 'pushStock']);
     });
 
     // 打包产品管理
@@ -267,13 +271,30 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'update']);
         Route::delete('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'destroy']);
         
-        // 价格管理路由（需要操作员或管理员权限）
-        Route::prefix('{pkgProduct}/prices')->middleware('role:admin,operator')->group(function () {
-            Route::post('/calculate', [\App\Http\Controllers\PkgProductPriceController::class, 'calculate']);
-            Route::post('/recalculate', [\App\Http\Controllers\PkgProductPriceController::class, 'recalculate']);
-            Route::post('/sync-to-ota', [\App\Http\Controllers\PkgProductPriceController::class, 'syncToOta']);
+        // OTA绑定路由（需要在 prices 之前定义，避免路由冲突）
+        Route::post('/{pkgProduct}/bind-ota', [\App\Http\Controllers\PkgOtaProductController::class, 'bindOta']);
+        
+        // 价格管理路由
+        Route::prefix('{pkgProduct}/prices')->group(function () {
+            // 价格日历查询（所有已认证用户可查看）
             Route::get('/calendar', [\App\Http\Controllers\PkgProductPriceController::class, 'getPriceCalendar']);
+            
+            // 价格管理操作（需要操作员或管理员权限）
+            Route::middleware('role:admin,operator')->group(function () {
+                Route::post('/calculate', [\App\Http\Controllers\PkgProductPriceController::class, 'calculate']);
+                Route::post('/recalculate', [\App\Http\Controllers\PkgProductPriceController::class, 'recalculate']);
+                // 废弃：直接推送接口（保留以保持向后兼容，但推荐使用 OTA 绑定方式）
+                Route::post('/sync-to-ota', [\App\Http\Controllers\PkgProductPriceController::class, 'syncToOta'])->name('pkg-products.prices.sync-to-ota');
+            });
         });
+    });
+
+    // 打包产品OTA管理
+    Route::prefix('pkg-ota-products')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PkgOtaProductController::class, 'index']);
+        Route::post('/{pkgOtaProduct}/push', [\App\Http\Controllers\PkgOtaProductController::class, 'push']);
+        Route::put('/{pkgOtaProduct}', [\App\Http\Controllers\PkgOtaProductController::class, 'update']);
+        Route::delete('/{pkgOtaProduct}', [\App\Http\Controllers\PkgOtaProductController::class, 'destroy']);
     });
 
     // OTA平台管理（只读）

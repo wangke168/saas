@@ -1,7 +1,7 @@
 <template>
     <div class="login-container">
         <el-card class="login-card">
-            <h2>OTA酒景套餐分销系统</h2>
+            <h2>酒速通-OTA酒景套餐分销系统</h2>
             <el-form :model="form" :rules="rules" ref="formRef" @submit.prevent="handleLogin">
                 <el-form-item label="邮箱" prop="email">
                     <el-input v-model="form.email" type="email" />
@@ -49,10 +49,10 @@ const rules = {
 
 const handleLogin = () => {
     if (!formRef.value) return;
-    
+
     formRef.value.validate(async (valid) => {
         if (!valid) return;
-        
+
         loading.value = true;
         try {
             await authStore.login(form.email, form.password);

@@ -39,3 +39,4 @@ class SalesProductPrice extends Model
     }
 }
 
+

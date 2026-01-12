@@ -19,7 +19,7 @@ class PkgProductController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = PkgProduct::with(['scenicSpot', 'bundleItems.ticket', 'hotelRoomTypes.hotel', 'hotelRoomTypes.roomType']);
+        $query = PkgProduct::with(['scenicSpot', 'bundleItems.ticket', 'hotelRoomTypes.hotel', 'hotelRoomTypes.roomType', 'otaProducts.otaPlatform']);
 
         // 权限控制：运营只能查看所属资源方下的所有景区下的产品
         if ($request->user()->isOperator()) {
@@ -66,6 +66,7 @@ class PkgProductController extends Controller
             'bundleItems.ticket',
             'hotelRoomTypes.hotel',
             'hotelRoomTypes.roomType',
+            'otaProducts.otaPlatform',
         ]);
         
         return response()->json([

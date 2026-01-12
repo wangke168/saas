@@ -40,7 +40,7 @@
                     </template>
                 </el-input>
             </div>
-            
+
             <el-table :data="products" v-loading="loading" border>
                 <el-table-column prop="product_name" label="产品名称" width="200" />
                 <el-table-column prop="product_code" label="产品编码" width="150" />
@@ -371,7 +371,7 @@ const rules = {
         { type: 'number', min: 1, max: 30, message: '入住天数必须在1-30天之间', trigger: 'blur' }
     ],
     bundle_items: [
-        { 
+        {
             validator: (rule, value, callback) => {
                 if (!value || value.length === 0) {
                     callback(new Error('请至少添加一个关联门票'));
@@ -437,19 +437,19 @@ const fetchProducts = async () => {
             page: currentPage.value,
             per_page: pageSize.value,
         };
-        
+
         if (filterScenicSpotId.value) {
             params.scenic_spot_id = filterScenicSpotId.value;
         }
-        
+
         if (filterStatus.value !== null) {
             params.status = filterStatus.value;
         }
-        
+
         if (searchKeyword.value) {
             params.search = searchKeyword.value;
         }
-        
+
         const response = await axios.get('/pkg-products', { params });
         products.value = response.data.data || [];
         total.value = response.data.total || 0;
@@ -501,20 +501,56 @@ const handlePriceManagement = (row) => {
     router.push(`/pkg-products/${row.id}/price-management`);
 };
 
+// 格式化日期为 YYYY-MM-DD 格式（兼容多种输入格式，避免时区问题）
+const formatDateForPicker = (dateString) => {
+    if (!dateString) return null;
+    
+    // 如果已经是 YYYY-MM-DD 格式，直接返回（后端已使用 serializeDate 返回此格式）
+    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+        return dateString;
+    }
+    
+    // 如果是 ISO 8601 格式（包含 T），提取日期部分（避免时区问题）
+    if (typeof dateString === 'string' && dateString.includes('T')) {
+        // 直接提取日期部分，不进行时区转换
+        return dateString.split('T')[0];
+    }
+    
+    // 如果是 Date 对象，使用 UTC 日期部分（避免时区问题）
+    if (dateString instanceof Date) {
+        const year = dateString.getUTCFullYear();
+        const month = String(dateString.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(dateString.getUTCDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+    
+    // 其他情况：尝试解析为日期字符串
+    if (typeof dateString === 'string') {
+        // 如果是日期字符串，尝试提取日期部分
+        const dateMatch = dateString.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (dateMatch) {
+            return dateMatch[1];
+        }
+    }
+    
+    // 其他情况返回原值
+    return dateString;
+};
+
 const handleEdit = async (row) => {
     editingId.value = row.id;
     try {
         const response = await axios.get(`/pkg-products/${row.id}`);
         const product = response.data.data;
-        
+
         form.value = {
             scenic_spot_id: product.scenic_spot_id,
             product_name: product.product_name,
             stay_days: product.stay_days || 1,
             description: product.description || '',
             status: product.status,
-            sale_start_date: product.sale_start_date || null,
-            sale_end_date: product.sale_end_date || null,
+            sale_start_date: formatDateForPicker(product.sale_start_date),
+            sale_end_date: formatDateForPicker(product.sale_end_date),
             bundle_items: (product.bundle_items || []).map(item => ({
                 ticket_id: item.ticket_id,
                 quantity: item.quantity || 1,
@@ -524,14 +560,14 @@ const handleEdit = async (row) => {
                 room_type_id: hrt.room_type_id,
             })),
         };
-        
+
         // 加载相关的数据
         if (form.value.scenic_spot_id) {
             await fetchTickets(form.value.scenic_spot_id);
             await fetchHotels(form.value.scenic_spot_id);
             await fetchRoomTypes();
         }
-        
+
         dialogVisible.value = true;
     } catch (error) {
         ElMessage.error('获取产品信息失败');
@@ -550,7 +586,7 @@ const handleDelete = async (row) => {
                 cancelButtonText: '取消'
             }
         );
-        
+
         await axios.delete(`/pkg-products/${row.id}`);
         ElMessage.success('删除成功');
         fetchProducts();
@@ -685,9 +721,9 @@ const fetchRoomTypes = async () => {
 const handleSubmit = async () => {
     try {
         await formRef.value.validate();
-        
+
         submitting.value = true;
-        
+
         const payload = {
             scenic_spot_id: form.value.scenic_spot_id,
             product_name: form.value.product_name,
@@ -705,7 +741,7 @@ const handleSubmit = async () => {
                 room_type_id: hrt.room_type_id,
             })),
         };
-        
+
         if (isEdit.value) {
             await axios.put(`/pkg-products/${editingId.value}`, payload);
             ElMessage.success('更新成功');
@@ -713,7 +749,7 @@ const handleSubmit = async () => {
             await axios.post('/pkg-products', payload);
             ElMessage.success('创建成功');
         }
-        
+
         dialogVisible.value = false;
         fetchProducts();
     } catch (error) {
@@ -745,6 +781,17 @@ const resetForm = () => {
     allRoomTypes.value = [];
     formRef.value?.clearValidate();
 };
+
+
+const formatDateOnly = (date) => {
+    if (!date) return '';
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 
 onMounted(() => {
     fetchProducts();

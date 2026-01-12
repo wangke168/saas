@@ -38,6 +38,15 @@ class PkgProduct extends Model
     }
 
     /**
+     * 序列化日期格式为 Y-m-d（与前端日期选择器的 value-format 一致）
+     * 避免时区问题导致的日期偏移
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d');
+    }
+
+    /**
      * 所属景区
      */
     public function scenicSpot(): BelongsTo
@@ -101,6 +110,14 @@ class PkgProduct extends Model
     public function orders(): HasMany
     {
         return $this->hasMany(PkgOrder::class, 'pkg_product_id');
+    }
+
+    /**
+     * OTA产品绑定列表
+     */
+    public function otaProducts(): HasMany
+    {
+        return $this->hasMany(PkgOtaProduct::class, 'pkg_product_id');
     }
 
     /**
