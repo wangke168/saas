@@ -1308,15 +1308,114 @@ class OrderOperationService
                 ],
             ];
 
-            // 如果是实名制订单，传credentialList
+            // 核销时间（格式：YYYY-MM-DD HH:MM:SS）
+            $voucherInvalidTime = now()->format('Y-m-d H:i:s');
+            
+            // 收集已核销的凭证码（用于构建 voucherList）
+            $usedVouchers = [];
+            $usedCredentials = [];
+            
+            // 如果是实名制订单，传credentialList和voucherList
             if ($order->real_name_type === 1 && !empty($order->credential_list)) {
+                $credentialList = $order->credential_list;
+                
+                // 处理部分核销场景：只传递已核销的凭证码和证件信息
+                // 如果 useQuantity < quantity，只取前 useQuantity 个凭证码和证件信息
+                $credentialListToUse = array_slice($credentialList, 0, $useQuantity);
+                
                 $requestData['body']['credentialList'] = [];
-                foreach ($order->credential_list as $credential) {
+                foreach ($credentialListToUse as $credential) {
+                    $voucher = $credential['voucher'] ?? '';
+                    
+                    // 如果凭证码为空，尝试生成（兼容旧数据）
+                    if (empty($voucher)) {
+                        // 根据订单号和索引生成凭证码
+                        $index = count($usedVouchers);
+                        $roomCount = $order->room_count ?? 1;
+                        if ($roomCount === 1) {
+                            $voucher = strtoupper($order->order_no);
+                        } else {
+                            $voucher = strtoupper($order->order_no) . '-' . ($index + 1);
+                        }
+                    }
+                    
+                    // 收集已核销的凭证码
+                    if (!empty($voucher) && !in_array($voucher, $usedVouchers)) {
+                        $usedVouchers[] = $voucher;
+                    }
+                    
+                    // 构建credentialList（必须包含status字段）
                     $requestData['body']['credentialList'][] = [
                         'credentialType' => $credential['credentialType'] ?? 0,
                         'credentialNo' => $credential['credentialNo'] ?? '',
-                        'voucher' => $credential['voucher'] ?? '',
+                        'voucher' => $voucher,
+                        'status' => 1,  // 1=已使用（核销时必填）
                     ];
+                    
+                    $usedCredentials[] = [
+                        'voucher' => $voucher,
+                        'credentialNo' => $credential['credentialNo'] ?? '',
+                    ];
+                }
+            } else {
+                // 非实名制订单，也需要构建voucherList（如果需要码核销）
+                // 从订单的credential_list中提取凭证码，或根据订单号生成
+                if (!empty($order->credential_list)) {
+                    // 如果有credential_list，提取凭证码
+                    $credentialList = $order->credential_list;
+                    $credentialListToUse = array_slice($credentialList, 0, $useQuantity);
+                    
+                    foreach ($credentialListToUse as $credential) {
+                        $voucher = $credential['voucher'] ?? '';
+                        if (!empty($voucher) && !in_array($voucher, $usedVouchers)) {
+                            $usedVouchers[] = $voucher;
+                        }
+                    }
+                }
+                
+                // 如果还是没有凭证码，根据订单号生成（兼容旧数据）
+                if (empty($usedVouchers)) {
+                    $roomCount = $order->room_count ?? 1;
+                    if ($roomCount === 1) {
+                        $usedVouchers[] = strtoupper($order->order_no);
+                    } else {
+                        // 部分核销时，只生成已核销数量的凭证码
+                        for ($i = 0; $i < $useQuantity; $i++) {
+                            $usedVouchers[] = strtoupper($order->order_no) . '-' . ($i + 1);
+                        }
+                    }
+                }
+            }
+            
+            // 构建voucherList（需要码核销的订单必传）
+            // 根据文档，需要码核销的订单必须传入voucherList
+            if (!empty($usedVouchers)) {
+                $requestData['body']['voucherList'] = [];
+                
+                // 计算每个凭证码对应的数量
+                // 如果是一码一验，每个凭证码对应1张票
+                // 如果是一码多验，可能需要合并相同凭证码
+                $voucherQuantityMap = [];
+                foreach ($usedVouchers as $voucher) {
+                    $voucherQuantityMap[$voucher] = ($voucherQuantityMap[$voucher] ?? 0) + 1;
+                }
+                
+                // 生成凭证码图片链接（可选）
+                $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
+                
+                foreach ($voucherQuantityMap as $voucher => $quantity) {
+                    $voucherItem = [
+                        'voucher' => $voucher,
+                        'voucherInvalidTime' => $voucherInvalidTime,  // 必填：核销时间
+                        'quantity' => $quantity,  // 必填：该凭证码对应的数量
+                        'status' => 1,  // 必填：1=已使用
+                    ];
+                    
+                    // voucherPics 可选，如果有凭证码图片链接则添加
+                    $voucherPic = $baseUrl . '/vouchers/' . urlencode($voucher) . '.png';
+                    $voucherItem['voucherPics'] = $voucherPic;
+                    
+                    $requestData['body']['voucherList'][] = $voucherItem;
                 }
             }
 
