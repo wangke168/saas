@@ -206,6 +206,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{order}/reject-cancel', [\App\Http\Controllers\OrderController::class, 'rejectCancel']);
     });
 
+    // 打包订单管理
+    Route::prefix('pkg-orders')->group(function () {
+        Route::get('/', [\App\Http\Controllers\PkgOrderController::class, 'index']);
+        Route::get('/{pkgOrder}', [\App\Http\Controllers\PkgOrderController::class, 'show']);
+    });
+
     // 异常订单处理
     Route::prefix('exception-orders')->group(function () {
         Route::get('/', [\App\Http\Controllers\ExceptionOrderController::class, 'index']);

@@ -20,6 +20,10 @@
                         <el-icon><Document /></el-icon>
                         <span>订单管理</span>
                     </el-menu-item>
+                    <el-menu-item index="/pkg-orders">
+                        <el-icon><Document /></el-icon>
+                        <span>打包订单</span>
+                    </el-menu-item>
                     <el-menu-item index="/exception-orders">
                         <el-icon><Warning /></el-icon>
                         <span>异常订单</span>

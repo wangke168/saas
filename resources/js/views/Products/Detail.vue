@@ -105,7 +105,7 @@
                                     <el-table :data="group.dateRanges" border size="small" style="margin-top: 10px;">
                                         <el-table-column label="日期范围" width="200">
                                             <template #default="{ row }">
-                                                <span v-if="row.start === row.end">{{ row.start }}</span>
+                                                <span v-if="row.start === row.end">{{ formatDateOnly(row.start) }}</span>
                                                 <span v-else>{{ formatDateOnly(row.start) }} 至 {{ formatDateOnly(row.end) }}</span>
                                             </template>
                                         </el-table-column>
@@ -852,7 +852,7 @@ const groupedPrices = computed(() => {
     Object.values(groups).forEach(group => {
         if (group.prices.length > 0) {
             const dates = group.prices.map(p => p.date).sort();
-            group.dateRange = `${dates[0]} 至 ${dates[dates.length - 1]}`;
+            group.dateRange = `${formatDateOnly(dates[0])} 至 ${formatDateOnly(dates[dates.length - 1])}`;
         } else {
             group.dateRange = '-';
         }
@@ -1036,7 +1036,7 @@ const handleDeletePriceRange = async (group, range) => {
         if (pricesInRange.length === 0) return;
 
         await ElMessageBox.confirm(
-            `确定要删除该日期范围（${range.start} 至 ${range.end}）的 ${pricesInRange.length} 条价格记录吗？`,
+            `确定要删除该日期范围（${formatDateOnly(range.start)} 至 ${formatDateOnly(range.end)}）的 ${pricesInRange.length} 条价格记录吗？`,
             '提示',
             {
                 type: 'warning',

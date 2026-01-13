@@ -19,6 +19,18 @@ const routes = [
         meta: { requiresAuth: true }
     },
     {
+        path: '/pkg-orders',
+        name: 'PkgOrders',
+        component: () => import('../views/PkgOrders/Index.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
+        path: '/pkg-orders/:id',
+        name: 'PkgOrderDetail',
+        component: () => import('../views/PkgOrders/Detail.vue'),
+        meta: { requiresAuth: true }
+    },
+    {
         path: '/exception-orders',
         name: 'ExceptionOrders',
         component: () => import('../views/ExceptionOrders/Index.vue'),
