@@ -761,10 +761,17 @@ class MeituanController extends Controller
 
             // 异步处理景区方接口调用
             if ($isSystemConnected) {
-                // 系统直连：异步调用景区方接口接单（超时时间已在 Job 类中定义：10秒）
+                // 系统直连：先更新状态为CONFIRMING（触发通知），然后异步调用景区方接口接单
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CONFIRMING,
+                    '美团订单出票，等待向景区下发订单'
+                );
+                
+                // 异步调用景区方接口接单（超时时间已在 Job 类中定义：10秒）
                 \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
                 
-                Log::info('美团订单出票：已派发接单Job', [
+                Log::info('美团订单出票：已更新状态为确认中并派发接单Job', [
                     'order_id' => $order->id,
                 ]);
             } else {

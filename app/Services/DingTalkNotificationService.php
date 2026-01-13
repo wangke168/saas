@@ -344,8 +344,8 @@ class DingTalkNotificationService
         $message .= "**景区：** {$scenicSpotName}\n";
         $message .= "**产品：** {$productName}\n\n";
         $message .= "**入住信息：**\n";
-        $message .= "- 入住日期：{$order->check_in_date}\n";
-        $message .= "- 离店日期：{$order->check_out_date}\n";
+        $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
+        $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
         $message .= "- 房间数：{$order->room_count}\n";
         $message .= "- 客人数量：{$order->guest_count}\n\n";
         $message .= "**联系信息：**\n";
@@ -386,8 +386,8 @@ class DingTalkNotificationService
         $message .= "- 取消类型：{$cancelTypeLabel}\n";
         $message .= "- 申请时间：{$order->updated_at}\n\n";
         $message .= "**原订单信息：**\n";
-        $message .= "- 入住日期：{$order->check_in_date}\n";
-        $message .= "- 离店日期：{$order->check_out_date}\n";
+        $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
+        $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
         $message .= "- 房间数：{$order->room_count}\n";
         $message .= "- 订单金额：¥{$totalAmount}元\n\n";
         $message .= "**订单状态：** 申请取消中\n\n";
@@ -426,8 +426,8 @@ class DingTalkNotificationService
         }
         $message .= "**取消时间：** {$cancelledAt}\n\n";
         $message .= "**原订单信息：**\n";
-        $message .= "- 入住日期：{$order->check_in_date}\n";
-        $message .= "- 离店日期：{$order->check_out_date}\n";
+        $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
+        $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
         $message .= "- 房间数：{$order->room_count}\n";
         $message .= "- 订单金额：¥{$totalAmount}元\n\n";
         $message .= "**订单状态：** {$statusLabel}\n\n";

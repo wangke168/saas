@@ -210,6 +210,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('pkg-orders')->group(function () {
         Route::get('/', [\App\Http\Controllers\PkgOrderController::class, 'index']);
         Route::get('/{pkgOrder}', [\App\Http\Controllers\PkgOrderController::class, 'show']);
+        
+        // 订单项操作
+        Route::post('/{pkgOrder}/items/{item}/confirm', [\App\Http\Controllers\PkgOrderController::class, 'confirmOrderItem']);
+        Route::post('/{pkgOrder}/items/{item}/verify', [\App\Http\Controllers\PkgOrderController::class, 'verifyOrderItem']);
+        Route::post('/{pkgOrder}/items/{item}/retry', [\App\Http\Controllers\PkgOrderController::class, 'retryOrderItem']);
     });
 
     // 异常订单处理

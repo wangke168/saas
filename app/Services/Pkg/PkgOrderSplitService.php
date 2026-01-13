@@ -67,12 +67,24 @@ class PkgOrderSplitService
             // 2.1 创建门票订单项（必选）
             foreach ($bundleItems as $item) {
                 $ticket = $item->ticket;
+                
+                // 计算门票价格
+                $ticketPrice = \App\Models\TicketPrice::where('ticket_id', $ticket->id)
+                    ->where('date', $order->check_in_date)
+                    ->first();
+                
+                // 价格单位：分转元（sale_price是decimal:2，存储为分，需要转换为元）
+                $unitPrice = $ticketPrice ? (floatval($ticketPrice->sale_price) / 100) : 0;
+                $totalPrice = $unitPrice * $item->quantity;
+                
                 $orderItem = PkgOrderItem::create([
                     'order_id' => $order->id,
                     'item_type' => PkgOrderItemType::TICKET,
                     'resource_id' => $item->ticket_id,
                     'resource_name' => $ticket->name ?? '',
                     'quantity' => $item->quantity,
+                    'unit_price' => $unitPrice,
+                    'total_price' => $totalPrice,
                     'status' => PkgOrderItemStatus::PENDING,
                 ]);
                 $orderItems[] = $orderItem;
@@ -80,12 +92,27 @@ class PkgOrderSplitService
             
             // 2.2 创建酒店订单项
             $roomType = $order->roomType;
+            
+            // 计算酒店价格（从PkgProductDailyPrice获取，按入住天数计算总价）
+            $pkgDailyPrice = \App\Models\Pkg\PkgProductDailyPrice::where('pkg_product_id', $order->pkg_product_id)
+                ->where('hotel_id', $order->hotel_id)
+                ->where('room_type_id', $order->room_type_id)
+                ->where('biz_date', $order->check_in_date)
+                ->first();
+            
+            // 价格单位：分转元（sale_price是decimal:2，存储为分，需要转换为元）
+            $unitPrice = $pkgDailyPrice ? (floatval($pkgDailyPrice->sale_price) / 100) : 0;
+            // 酒店价格按天计算，总价 = 单价 * 入住天数
+            $totalPrice = $unitPrice * ($order->stay_days ?? 1);
+            
             $orderItem = PkgOrderItem::create([
                 'order_id' => $order->id,
                 'item_type' => PkgOrderItemType::HOTEL,
                 'resource_id' => $order->room_type_id,
                 'resource_name' => $roomType->name ?? '',
                 'quantity' => 1,
+                'unit_price' => $unitPrice,
+                'total_price' => $totalPrice,
                 'status' => PkgOrderItemStatus::PENDING,
             ]);
             $orderItems[] = $orderItem;
