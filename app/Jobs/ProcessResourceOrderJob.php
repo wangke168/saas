@@ -283,6 +283,22 @@ class ProcessResourceOrderJob implements ShouldQueue
                 'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
             ]);
         } else {
+            // 检查是否需要转人工操作（自我游接单失败时，直接转人工，不重试）
+            $needManual = $result['need_manual'] ?? false;
+            
+            if ($needManual) {
+                // 自我游接单失败，直接转人工操作，不重试
+                Log::info('ProcessResourceOrderJob: 自我游接单失败，直接转人工操作', [
+                    'order_id' => $this->order->id,
+                    'error' => $result['message'] ?? '未知错误',
+                    'attempt' => $this->attempts(),
+                ]);
+                
+                // 创建异常订单（ZiwoyouService 已经创建了，这里确保创建）
+                $this->createExceptionOrder($result);
+                return; // 直接返回，不重试
+            }
+            
             // 判断是否是临时性错误
             $isTemporaryError = $this->isTemporaryErrorFromResult($result);
             

@@ -92,14 +92,27 @@ class Order extends Model
     }
 
     /**
-     * 序列化日期格式为 Y-m-d（与前端日期选择器的 value-format 一致）
-     * 确保 check_in_date 和 check_out_date 以正确的格式返回
-     * 注意：这会影响所有日期字段的序列化格式，包括 datetime 类型字段
-     * 前端 formatDateTime 函数使用 new Date() 可以正确解析 Y-m-d 格式的日期字符串
+     * 重写 toArray 方法，确保日期字段以正确格式序列化
+     * - check_in_date 和 check_out_date 使用 Y-m-d 格式（与前端日期选择器一致）
+     * - created_at、updated_at 等 datetime 字段使用完整的 ISO 8601 格式（包含时间）
      */
-    protected function serializeDate(\DateTimeInterface $date): string
+    public function toArray(): array
     {
-        return $date->format('Y-m-d');
+        $array = parent::toArray();
+        
+        // 只对 date 类型的字段（check_in_date, check_out_date）使用 Y-m-d 格式
+        if (isset($array['check_in_date']) && $this->check_in_date) {
+            $array['check_in_date'] = $this->check_in_date->format('Y-m-d');
+        }
+        
+        if (isset($array['check_out_date']) && $this->check_out_date) {
+            $array['check_out_date'] = $this->check_out_date->format('Y-m-d');
+        }
+        
+        // datetime 字段（created_at, updated_at, paid_at 等）保持默认的 ISO 8601 格式
+        // 这样前端可以正确解析完整的时间信息
+        
+        return $array;
     }
 
     /**

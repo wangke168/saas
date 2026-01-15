@@ -36,24 +36,73 @@
                     @clear="handleFilter"
                     @keyup.enter="handleFilter"
                 />
+                <el-input
+                    v-model="filters.contact_name"
+                    placeholder="客人姓名"
+                    clearable
+                    style="width: 150px;"
+                    @clear="handleFilter"
+                    @keyup.enter="handleFilter"
+                />
+                <el-select
+                    v-model="filters.ota_platform_id"
+                    placeholder="渠道"
+                    clearable
+                    style="width: 150px;"
+                    @change="handleFilter"
+                >
+                    <el-option
+                        v-for="platform in otaPlatforms"
+                        :key="platform.id"
+                        :label="platform.name"
+                        :value="platform.id"
+                    />
+                </el-select>
+                <el-select
+                    v-model="filters.scenic_spot_id"
+                    placeholder="景区"
+                    clearable
+                    style="width: 150px;"
+                    @change="handleFilter"
+                >
+                    <el-option
+                        v-for="spot in scenicSpots"
+                        :key="spot.id"
+                        :label="spot.name"
+                        :value="spot.id"
+                    />
+                </el-select>
                 <el-date-picker
-                    v-model="filters.check_in_date"
-                    type="date"
-                    placeholder="入住日期"
+                    v-model="filters.check_in_date_range"
+                    type="daterange"
+                    range-separator="至"
+                    start-placeholder="入住日期开始"
+                    end-placeholder="入住日期结束"
                     format="YYYY-MM-DD"
                     value-format="YYYY-MM-DD"
-                    style="width: 150px;"
+                    style="width: 240px;"
+                    @change="handleFilter"
+                />
+                <el-date-picker
+                    v-model="filters.created_at_range"
+                    type="daterange"
+                    range-separator="至"
+                    start-placeholder="预定日期开始"
+                    end-placeholder="预定日期结束"
+                    format="YYYY-MM-DD"
+                    value-format="YYYY-MM-DD"
+                    style="width: 240px;"
                     @change="handleFilter"
                 />
                 <el-button @click="handleFilter">筛选</el-button>
                 <el-button @click="resetFilter">重置</el-button>
             </div>
-            
+
             <!-- 订单列表 -->
             <div v-loading="loading" class="order-list">
-                <div 
-                    v-for="order in orders" 
-                    :key="order.id" 
+                <div
+                    v-for="order in orders"
+                    :key="order.id"
                     class="order-item"
                 >
                     <!-- 顶部信息条 -->
@@ -75,22 +124,22 @@
                             <span class="value">{{ order.ota_platform?.name || '-' }}</span>
                         </span>
                     </div>
-                    
+
                     <!-- 主体内容区 -->
                     <div class="order-body">
                         <!-- 第一列：选择框 -->
                         <div class="body-col col-checkbox">
-                            <el-checkbox 
+                            <el-checkbox
                                 :model-value="selectedOrders.includes(order.id)"
                                 @update:model-value="toggleOrderSelection(order.id, $event)"
                             />
                         </div>
-                        
+
                         <!-- 第二列：产品名称及景区标签 -->
                         <div class="body-col col-product">
                             <div class="product-name">{{ order.product?.name || '-' }}</div>
-                        <el-tag 
-                                v-if="order.product?.scenic_spot?.name" 
+                        <el-tag
+                                v-if="order.product?.scenic_spot?.name"
                             size="small"
                                 type="info"
                                 class="scenic-tag"
@@ -98,7 +147,7 @@
                                 {{ order.product.scenic_spot.name }}
                         </el-tag>
                         </div>
-                        
+
                         <!-- 第三列：酒店信息 -->
                         <div class="body-col col-hotel">
                             <div class="hotel-name">{{ order.hotel?.name || '-' }}</div>
@@ -112,13 +161,13 @@
                                 </div>
                             </div>
                         </div>
-                        
+
                         <!-- 第四列：入住人及联系电话 -->
                         <div class="body-col col-guest">
                             <div class="guest-name">{{ order.contact_name || '-' }}</div>
                             <div class="guest-phone">{{ order.contact_phone || '-' }}</div>
                         </div>
-                        
+
                         <!-- 第五列：金额信息 -->
                         <div class="body-col col-amount">
                             <div class="amount-item">
@@ -134,83 +183,83 @@
                                 <span class="amount-value estimated">¥{{ formatPrice(calculateEstimatedRevenue(order)) }}</span>
                             </div>
                         </div>
-                        
+
                         <!-- 第六列：订单状态 -->
                         <div class="body-col col-status">
-                            <el-tag 
-                                :type="getStatusType(order.status)" 
+                            <el-tag
+                                :type="getStatusType(order.status)"
                                 size="small"
                                 class="status-tag"
                             >
                                 {{ getStatusLabel(order.status) }}
                             </el-tag>
                         </div>
-                        
+
                         <!-- 操作列 -->
                         <div class="body-col col-actions">
-                            <el-button 
-                                size="small" 
-                                text 
+                            <el-button
+                                size="small"
+                                text
                                 type="primary"
                                 @click="viewDetail(order)"
                                 class="action-btn-text"
                             >
                                 详情
                             </el-button>
-                        
+
                         <!-- 接单按钮（待确认或确认中状态） -->
-                        <el-button 
-                                v-if="['paid_pending', 'confirming'].includes(order.status)" 
-                            size="small" 
-                            type="success" 
+                        <el-button
+                                v-if="['paid_pending', 'confirming'].includes(order.status)"
+                            size="small"
+                            type="success"
                                 @click="handleConfirmOrder(order)"
                                 :loading="operating[order.id] === 'confirm'"
                                 class="action-btn-primary"
                         >
                             接单
                         </el-button>
-                        
+
                         <!-- 拒单按钮（待确认或确认中状态） -->
-                        <el-button 
-                                v-if="['paid_pending', 'confirming'].includes(order.status)" 
-                            size="small" 
-                            type="danger" 
+                        <el-button
+                                v-if="['paid_pending', 'confirming'].includes(order.status)"
+                            size="small"
+                            type="danger"
                                 @click="handleRejectOrder(order)"
                                 :loading="operating[order.id] === 'reject'"
                                 class="action-btn-primary"
                         >
                             拒单
                         </el-button>
-                        
+
                         <!-- 核销按钮（已确认状态） -->
-                        <el-button 
-                                v-if="order.status === 'confirmed'" 
-                            size="small" 
-                            type="primary" 
+                        <el-button
+                                v-if="order.status === 'confirmed'"
+                            size="small"
+                            type="primary"
                                 @click="handleVerifyOrder(order)"
                                 :loading="operating[order.id] === 'verify'"
                                 class="action-btn-primary"
                         >
                             核销
                         </el-button>
-                        
+
                         <!-- 同意取消按钮（申请取消中状态） -->
-                        <el-button 
-                                v-if="order.status === 'cancel_requested' || order.status?.value === 'cancel_requested'" 
-                            size="small" 
-                            type="success" 
+                        <el-button
+                                v-if="order.status === 'cancel_requested' || order.status?.value === 'cancel_requested'"
+                            size="small"
+                            type="success"
                                 @click="handleApproveCancel(order)"
                                 :loading="operating[order.id] === 'approveCancel'"
                                 class="action-btn-primary"
                         >
                             同意取消
                         </el-button>
-                        
+
                         <!-- 拒绝取消按钮（申请取消中状态） -->
-                        <el-button 
-                                v-if="order.status === 'cancel_requested' || order.status?.value === 'cancel_requested'" 
-                            size="small" 
-                            type="danger" 
+                        <el-button
+                                v-if="order.status === 'cancel_requested' || order.status?.value === 'cancel_requested'"
+                            size="small"
+                            type="danger"
                                 @click="handleRejectCancel(order)"
                                 :loading="operating[order.id] === 'rejectCancel'"
                                 class="action-btn-primary"
@@ -221,7 +270,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <el-pagination
                 v-model:current-page="currentPage"
                 v-model:page-size="pageSize"
@@ -250,6 +299,8 @@ const pageSize = ref(15);
 const total = ref(0);
 const operating = ref({});
 const selectedOrders = ref([]);
+const otaPlatforms = ref([]);
+const scenicSpots = ref([]);
 
 // 响应式分页布局
 const paginationLayout = ref('total, sizes, prev, pager, next, jumper');
@@ -269,7 +320,11 @@ const filters = ref({
     status: null,
     order_no: '',
     ota_order_no: '',
-    check_in_date: null,
+    contact_name: '',
+    ota_platform_id: null,
+    scenic_spot_id: null,
+    check_in_date_range: null,
+    created_at_range: null,
 });
 
 const fetchOrders = async () => {
@@ -279,7 +334,7 @@ const fetchOrders = async () => {
             page: currentPage.value,
             per_page: pageSize.value,
         };
-        
+
         // 添加筛选条件
         if (filters.value.status) {
             params.status = filters.value.status;
@@ -290,14 +345,30 @@ const fetchOrders = async () => {
         if (filters.value.ota_order_no) {
             params.ota_order_no = filters.value.ota_order_no;
         }
-        if (filters.value.check_in_date) {
-            params.check_in_date = filters.value.check_in_date;
+        if (filters.value.contact_name) {
+            params.contact_name = filters.value.contact_name;
         }
-        
+        if (filters.value.ota_platform_id) {
+            params.ota_platform_id = filters.value.ota_platform_id;
+        }
+        if (filters.value.scenic_spot_id) {
+            params.scenic_spot_id = filters.value.scenic_spot_id;
+        }
+        // 入住日期范围
+        if (filters.value.check_in_date_range && filters.value.check_in_date_range.length === 2) {
+            params.check_in_date_start = filters.value.check_in_date_range[0];
+            params.check_in_date_end = filters.value.check_in_date_range[1];
+        }
+        // 预定日期范围
+        if (filters.value.created_at_range && filters.value.created_at_range.length === 2) {
+            params.created_at_start = filters.value.created_at_range[0];
+            params.created_at_end = filters.value.created_at_range[1];
+        }
+
         const response = await axios.get('/orders', { params });
         orders.value = response.data.data;
         total.value = response.data.total;
-        
+
         // 调试：检查订单日期数据
         if (orders.value.length > 0) {
             const firstOrder = orders.value[0];
@@ -325,7 +396,11 @@ const resetFilter = () => {
         status: null,
         order_no: '',
         ota_order_no: '',
-        check_in_date: null,
+        contact_name: '',
+        ota_platform_id: null,
+        scenic_spot_id: null,
+        check_in_date_range: null,
+        created_at_range: null,
     };
     handleFilter();
 };
@@ -361,11 +436,11 @@ const formatDateRange = (checkIn, checkOut, roomCount) => {
     try {
         // 如果两个日期都不存在，返回空
         if (!checkIn && !checkOut) return '';
-        
+
         // 处理日期字符串，提取日期部分（处理可能带时间的情况）
         const parseDate = (dateValue) => {
             if (!dateValue) return null;
-            
+
             // 如果是字符串，提取日期部分
             if (typeof dateValue === 'string') {
                 // 处理 YYYY-MM-DD 格式
@@ -376,7 +451,7 @@ const formatDateRange = (checkIn, checkOut, roomCount) => {
                 // 处理其他格式
                 return dateValue.split(' ')[0].split('T')[0];
             }
-            
+
             // 如果是日期对象，转换为字符串
             if (dateValue instanceof Date) {
                 const year = dateValue.getFullYear();
@@ -384,13 +459,13 @@ const formatDateRange = (checkIn, checkOut, roomCount) => {
                 const day = String(dateValue.getDate()).padStart(2, '0');
                 return `${year}-${month}-${day}`;
             }
-            
+
             return String(dateValue);
         };
-        
+
         const checkInStr = parseDate(checkIn);
         const checkOutStr = parseDate(checkOut);
-        
+
         // 如果只有一个日期，只显示该日期
         if (!checkInStr && checkOutStr) {
             return `离店：${checkOutStr.replace(/-/g, '/')}`;
@@ -398,20 +473,20 @@ const formatDateRange = (checkIn, checkOut, roomCount) => {
         if (checkInStr && !checkOutStr) {
             return `入住：${checkInStr.replace(/-/g, '/')}`;
         }
-        
+
         // 如果两个日期都存在，计算日期范围
         if (checkInStr && checkOutStr) {
             const checkInDate = new Date(checkInStr + 'T00:00:00');
             const checkOutDate = new Date(checkOutStr + 'T00:00:00');
-            
+
             // 验证日期是否有效
             if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime())) {
                 return `${checkInStr.replace(/-/g, '/')}~${checkOutStr.replace(/-/g, '/')}`;
             }
-            
+
             const nights = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
             const nightsText = nights > 0 ? `${nights}晚` : '1晚';
-            
+
             const formatDate = (date) => {
                 const d = new Date(date);
                 const year = d.getFullYear();
@@ -419,10 +494,10 @@ const formatDateRange = (checkIn, checkOut, roomCount) => {
                 const day = String(d.getDate()).padStart(2, '0');
                 return `${year}/${month}/${day}`;
             };
-            
+
             return `${formatDate(checkInDate)}~${formatDate(checkOutDate)} ${nightsText} ${roomCount || 1}间`;
         }
-        
+
         return '';
     } catch (error) {
         console.error('格式化日期范围错误:', error, { checkIn, checkOut, roomCount });
@@ -498,7 +573,7 @@ const viewDetail = (row) => {
 const handleConfirmOrder = async (row) => {
     try {
         await ElMessageBox.confirm(
-            row.hotel?.scenic_spot?.is_system_connected 
+            row.hotel?.scenic_spot?.is_system_connected
                 ? '确定要接单吗？系统将自动调用资源方接口确认订单。'
                 : '确定要接单吗？',
             '接单确认',
@@ -581,7 +656,7 @@ const handleVerifyOrder = async (row) => {
         };
 
         await ElMessageBox.confirm(
-            row.hotel?.scenic_spot?.is_system_connected 
+            row.hotel?.scenic_spot?.is_system_connected
                 ? '确定要核销订单吗？系统将自动调用资源方接口核销订单。'
                 : '确定要核销订单吗？',
             '核销确认',
@@ -684,8 +759,37 @@ const handleRejectCancel = async (row) => {
     }
 };
 
+const fetchOtaPlatforms = async () => {
+    try {
+        const response = await axios.get('/ota-platforms', {
+            params: {
+                active_only: true,
+            },
+        });
+        otaPlatforms.value = response.data.data || [];
+    } catch (error) {
+        console.error('获取渠道列表失败', error);
+    }
+};
+
+const fetchScenicSpots = async () => {
+    try {
+        const response = await axios.get('/scenic-spots', {
+            params: {
+                per_page: 1000, // 获取所有景区
+            },
+        });
+        scenicSpots.value = response.data.data || [];
+    } catch (error) {
+        console.error('获取景区列表失败', error);
+        // 如果用户没有权限，忽略错误
+    }
+};
+
 onMounted(() => {
     fetchOrders();
+    fetchOtaPlatforms();
+    fetchScenicSpots();
     updatePaginationLayout();
     window.addEventListener('resize', updatePaginationLayout);
 });
@@ -722,7 +826,7 @@ onUnmounted(() => {
     .order-list {
         min-width: 1400px; /* 确保PC端有足够宽度显示所有列 */
     }
-    
+
     .order-body {
         overflow-x: visible;
         grid-template-columns: 50px 15% 20% 15% 20% 15% auto;
@@ -735,7 +839,7 @@ onUnmounted(() => {
     .order-list {
         min-width: auto;
     }
-    
+
     .order-body {
         overflow-x: visible;
     }
@@ -1013,12 +1117,12 @@ onUnmounted(() => {
     .order-body {
         grid-template-columns: 50px 14% 18% 14% 18% 14% auto;
     }
-    
+
     .col-actions {
         flex-wrap: wrap;
         gap: 6px;
     }
-    
+
     .col-actions .el-button {
         font-size: 12px;
         padding: 5px 10px;
@@ -1033,12 +1137,12 @@ onUnmounted(() => {
         gap: 8px;
         padding: 12px;
     }
-    
+
     .header-item {
         width: 100%;
         margin-bottom: 4px;
     }
-    
+
     .order-body {
         display: flex;
         flex-direction: column;
@@ -1047,7 +1151,7 @@ onUnmounted(() => {
         gap: 12px;
         grid-template-columns: 1fr;
     }
-    
+
     .body-col {
         width: 100% !important;
         border-right: none;
@@ -1056,16 +1160,16 @@ onUnmounted(() => {
         justify-content: flex-start;
         min-height: auto;
     }
-    
+
     .body-col:last-child {
         border-bottom: none;
     }
-    
+
     .col-checkbox {
         justify-content: flex-start;
         padding: 8px 0;
     }
-    
+
     .col-product,
     .col-hotel,
     .col-guest,
@@ -1075,25 +1179,25 @@ onUnmounted(() => {
         align-items: flex-start;
         gap: 8px;
     }
-    
+
     .col-actions {
         flex-direction: column;
         gap: 8px;
         align-items: stretch;
     }
-    
+
     .col-actions .el-button {
         width: 100%;
         margin: 0;
     }
-    
+
     /* 移动端金额信息横向排列 */
     .col-amount {
         flex-direction: row;
         flex-wrap: wrap;
         gap: 12px;
     }
-    
+
     .amount-item {
         flex: 0 0 auto;
         min-width: calc(50% - 6px);
@@ -1116,13 +1220,13 @@ onUnmounted(() => {
         align-items: stretch;
         gap: 12px;
     }
-    
+
     .filter-bar .el-select,
     .filter-bar .el-input,
     .filter-bar .el-date-picker {
         width: 100% !important;
     }
-    
+
     .filter-bar .el-button {
         width: 100%;
     }
@@ -1134,39 +1238,39 @@ onUnmounted(() => {
         font-size: 11px;
         padding: 10px;
     }
-    
+
     .header-item .label,
     .header-item .value {
         font-size: 11px;
     }
-    
+
     .order-body {
         padding: 10px;
     }
-    
+
     .product-name,
     .hotel-name,
     .guest-name {
         font-size: 12px;
     }
-    
+
     .hotel-details,
     .guest-phone,
     .amount-label,
     .amount-value {
         font-size: 11px;
     }
-    
+
     .col-amount {
         flex-direction: column;
         align-items: flex-start;
     }
-    
+
     .amount-item {
         width: 100%;
         min-width: 100%;
     }
-    
+
     .filter-bar {
         gap: 10px;
     }
@@ -1183,11 +1287,11 @@ onUnmounted(() => {
     .pagination-container {
         margin-top: 15px;
     }
-    
+
     .pagination-container :deep(.el-pagination) {
         justify-content: center;
     }
-    
+
     .pagination-container :deep(.el-pagination .el-pager li),
     .pagination-container :deep(.el-pagination .btn-prev),
     .pagination-container :deep(.el-pagination .btn-next) {

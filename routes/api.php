@@ -37,6 +37,9 @@ Route::prefix('webhooks')->group(function () {
     // 资源方订单核销状态推送路由（每个服务商使用不同路径）
     Route::post('/resource/{api_type}/order-verification', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleOrderVerification']);
     
+    // 自我游回调通知（统一回调地址）
+    Route::post('/ziwoyou', [\App\Http\Controllers\Webhooks\ZiwoyouController::class, 'callback']);
+    
     // 测试接口（仅开发环境使用）
     if (app()->environment(['local', 'testing'])) {
         Route::post('/test/resource-inventory-push', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);

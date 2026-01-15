@@ -4,7 +4,10 @@ namespace App\Services\Resource;
 
 use App\Models\Order;
 use App\Models\ResourceConfig;
+use App\Models\SoftwareProvider;
 use App\Services\Resource\HengdianService;
+use App\Services\Resource\ZiwoyouService;
+use App\Services\ZiwoyouProductMappingService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -101,6 +104,82 @@ class ResourceServiceFactory
                 ]);
                 return null; // 不直连，返回null，走手工流程或其他系统
             }
+            
+            // 订单下发服务商分离：如果配置了 order_provider，使用指定的服务商
+            // 注意：order_provider 存储的是服务商ID，需要通过ID查找服务商
+            $orderProviderId = $config->extra_config['order_provider'] ?? null;
+            if ($orderProviderId) {
+                // 通过ID查找订单下发服务商
+                $orderSoftwareProvider = SoftwareProvider::find($orderProviderId);
+                if (!$orderSoftwareProvider) {
+                    Log::warning('ResourceServiceFactory: 订单下发服务商不存在', [
+                        'order_id' => $order->id,
+                        'order_provider_id' => $orderProviderId,
+                    ]);
+                } elseif ($orderSoftwareProvider->api_type !== $softwareProvider->api_type) {
+                    // 只有订单下发服务商与产品服务商不同时，才切换
+                    Log::info('ResourceServiceFactory: 检测到订单下发服务商分离配置', [
+                        'order_id' => $order->id,
+                        'inventory_provider' => $softwareProvider->api_type,
+                        'order_provider' => $orderSoftwareProvider->api_type,
+                        'order_provider_id' => $orderProviderId,
+                    ]);
+                    
+                    // 查找订单下发服务商的配置
+                    $orderConfig = ResourceConfig::with('softwareProvider')
+                        ->where('scenic_spot_id', $scenicSpot->id)
+                        ->where('software_provider_id', $orderSoftwareProvider->id)
+                        ->first();
+                    
+                    if ($orderConfig && !empty($orderConfig->api_url)) {
+                        Log::info('ResourceServiceFactory: 使用订单下发服务商配置', [
+                            'order_id' => $order->id,
+                            'order_provider' => $orderSoftwareProvider->api_type,
+                            'order_provider_id' => $orderProviderId,
+                            'order_config_id' => $orderConfig->id,
+                        ]);
+                        
+                        $softwareProvider = $orderSoftwareProvider;
+                        $config = $orderConfig;
+                    } else {
+                        Log::warning('ResourceServiceFactory: 订单下发服务商配置不存在或API地址未配置，使用原服务商', [
+                            'order_id' => $order->id,
+                            'order_provider' => $orderSoftwareProvider->api_type,
+                            'order_provider_id' => $orderProviderId,
+                            'has_config' => $orderConfig !== null,
+                            'has_api_url' => $orderConfig?->api_url ?? false,
+                        ]);
+                    }
+                }
+                
+                // 产品级别控制：如果订单下发服务商是自我游，检查产品是否有映射关系
+                if ($softwareProvider->api_type === 'ziwoyou') {
+                    $mappingService = app(ZiwoyouProductMappingService::class);
+                    $hasMapping = $mappingService->hasMapping(
+                        $order->product_id,
+                        $order->hotel_id,
+                        $order->room_type_id
+                    );
+                    
+                    if (!$hasMapping) {
+                        Log::info('ResourceServiceFactory: 产品没有自我游映射关系，走手工流程', [
+                            'order_id' => $order->id,
+                            'product_id' => $order->product_id,
+                            'hotel_id' => $order->hotel_id,
+                            'room_type_id' => $order->room_type_id,
+                            'scenic_spot_id' => $scenicSpot->id,
+                        ]);
+                        return null; // 没有映射关系，返回null，走手工流程
+                    }
+                    
+                    Log::info('ResourceServiceFactory: 产品有自我游映射关系，使用自我游服务', [
+                        'order_id' => $order->id,
+                        'product_id' => $order->product_id,
+                        'hotel_id' => $order->hotel_id,
+                        'room_type_id' => $order->room_type_id,
+                    ]);
+                }
+            }
             // $orderMode === 'auto' 时，继续执行，返回资源方服务
         } elseif ($operation === 'inventory') {
             // 库存操作：检查 inventory 配置
@@ -116,10 +195,10 @@ class ResourceServiceFactory
         }
 
         // 根据软件服务商类型返回对应的服务，并设置配置
-        // 注意：$softwareProvider 已经在上面获取过了（第38行）
+        // 注意：$softwareProvider 可能已经被订单下发服务商分离逻辑修改
         $service = match($softwareProvider->api_type) {
             'hengdian' => app(HengdianService::class)->setConfig($config),
-            // 未来可以扩展其他资源方
+            'ziwoyou' => app(ZiwoyouService::class)->setConfig($config),
             default => null,
         };
 

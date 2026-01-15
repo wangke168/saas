@@ -347,23 +347,28 @@
                         <el-option label="其他系统" value="other" />
                     </el-select>
                     <div style="font-size: 12px; color: #909399; margin-top: 5px;">
-                        选择"系统直连"后，订单将自动调用资源方接口；选择"其他系统"需要指定系统服务商
+                        选择"系统直连"后，订单将自动调用资源方接口；如果库存推送和订单下发使用不同的服务商，请在下方配置订单下发服务商
                     </div>
                 </el-form-item>
 
                 <el-form-item 
-                    label="订单系统服务商" 
+                    label="订单下发服务商" 
                     prop="order_provider"
-                    v-if="resourceConfigForm.sync_mode.order === 'other'"
+                    v-if="resourceConfigForm.sync_mode.order === 'auto' || resourceConfigForm.sync_mode.order === 'other'"
                 >
-                    <el-select v-model="resourceConfigForm.order_provider" placeholder="请选择系统服务商" style="width: 100%">
+                    <el-select v-model="resourceConfigForm.order_provider" placeholder="请选择订单下发服务商（可选）" clearable style="width: 100%">
                         <el-option 
                             v-for="provider in softwareProviders" 
                             :key="provider.id" 
-                            :label="provider.name" 
+                            :label="`${provider.name} (${provider.api_type || '无类型'})`" 
                             :value="provider.id" 
                         />
                     </el-select>
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        如果库存推送和订单下发使用不同的服务商，请在此选择订单下发服务商。留空则使用产品配置的服务商。
+                        <br />
+                        例如：库存推送使用横店，订单下发使用自我游，则在此选择自我游服务商。
+                    </div>
                 </el-form-item>
 
                 <el-divider>OTA平台认证信息</el-divider>

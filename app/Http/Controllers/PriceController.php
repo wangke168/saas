@@ -54,16 +54,31 @@ class PriceController extends Controller
 
         $prices = [];
         foreach ($validated['prices'] as $priceData) {
-            $prices[] = Price::updateOrCreate(
-                [
+            // 先检查是否存在（包括软删除的记录）
+            // 因为唯一约束不考虑 deleted_at，如果存在软删除的记录，直接插入会冲突
+            $price = Price::withTrashed()
+                ->where('product_id', $validated['product_id'])
+                ->where('room_type_id', $validated['room_type_id'])
+                ->where('date', $priceData['date'])
+                ->first();
+
+            if ($price) {
+                // 如果存在（包括软删除的），恢复并更新
+                if ($price->trashed()) {
+                    $price->restore();
+                }
+                $price->update(array_merge($priceData, [
+                    'source' => PriceSource::MANUAL,
+                ]));
+                $prices[] = $price;
+            } else {
+                // 如果不存在，创建新记录
+                $prices[] = Price::create(array_merge($priceData, [
                     'product_id' => $validated['product_id'],
                     'room_type_id' => $validated['room_type_id'],
-                    'date' => $priceData['date'],
-                ],
-                array_merge($priceData, [
                     'source' => PriceSource::MANUAL,
-                ])
-            );
+                ]));
+            }
         }
 
         return response()->json([

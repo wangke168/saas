@@ -54,8 +54,32 @@ class OrderController extends Controller
             $query->where('product_id', $request->product_id);
         }
 
-        if ($request->has('check_in_date')) {
-            $query->where('check_in_date', $request->check_in_date);
+        // 入住日期范围查询
+        if ($request->has('check_in_date_start')) {
+            $query->where('check_in_date', '>=', $request->check_in_date_start);
+        }
+        if ($request->has('check_in_date_end')) {
+            $query->where('check_in_date', '<=', $request->check_in_date_end);
+        }
+
+        // 预定日期范围查询
+        if ($request->has('created_at_start')) {
+            $query->whereDate('created_at', '>=', $request->created_at_start);
+        }
+        if ($request->has('created_at_end')) {
+            $query->whereDate('created_at', '<=', $request->created_at_end);
+        }
+
+        // 客人姓名查询
+        if ($request->has('contact_name')) {
+            $query->where('contact_name', 'like', '%' . $request->contact_name . '%');
+        }
+
+        // 景区查询（通过product关联）
+        if ($request->has('scenic_spot_id')) {
+            $query->whereHas('product', function ($q) use ($request) {
+                $q->where('scenic_spot_id', $request->scenic_spot_id);
+            });
         }
 
         if ($request->has('order_no')) {
