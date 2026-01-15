@@ -96,18 +96,40 @@ class ResourceServiceFactory
         if ($operation === 'order') {
             // 订单操作：检查 order 配置
             $orderMode = $syncMode['order'] ?? 'manual';
-            if ($orderMode === 'manual' || $orderMode === 'other') {
-                Log::info('ResourceServiceFactory: 订单处理方式不是系统直连', [
-                    'order_id' => $order->id,
-                    'order_mode' => $orderMode,
-                    'scenic_spot_id' => $scenicSpot->id,
-                ]);
-                return null; // 不直连，返回null，走手工流程或其他系统
-            }
             
             // 订单下发服务商分离：如果配置了 order_provider，使用指定的服务商
             // 注意：order_provider 存储的是服务商ID，需要通过ID查找服务商
             $orderProviderId = $config->extra_config['order_provider'] ?? null;
+            
+            // 如果订单处理方式是 manual，直接返回 null（走手工流程）
+            if ($orderMode === 'manual') {
+                Log::info('ResourceServiceFactory: 订单处理方式是手工操作', [
+                    'order_id' => $order->id,
+                    'order_mode' => $orderMode,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+                return null; // 手工操作，返回null
+            }
+            
+            // 如果订单处理方式是 other（其他系统），需要检查是否配置了订单下发服务商
+            if ($orderMode === 'other') {
+                if (!$orderProviderId) {
+                    // 没有配置订单下发服务商，返回 null（走其他系统的手工流程）
+                    Log::info('ResourceServiceFactory: 订单处理方式是其他系统，但未配置订单下发服务商', [
+                        'order_id' => $order->id,
+                        'order_mode' => $orderMode,
+                        'scenic_spot_id' => $scenicSpot->id,
+                    ]);
+                    return null;
+                }
+                // 如果配置了订单下发服务商，继续执行订单下发服务商分离逻辑
+                Log::info('ResourceServiceFactory: 订单处理方式是其他系统，已配置订单下发服务商', [
+                    'order_id' => $order->id,
+                    'order_mode' => $orderMode,
+                    'order_provider_id' => $orderProviderId,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            }
             if ($orderProviderId) {
                 // 通过ID查找订单下发服务商
                 $orderSoftwareProvider = SoftwareProvider::find($orderProviderId);
