@@ -157,8 +157,41 @@ class ZiwoyouService implements ResourceServiceInterface
                 'response_data' => $result['data'] ?? null,
             ]);
             
-            if ($result['success'] ?? false && ($result['state'] ?? 0) === 0) {
-                $data = $result['data'] ?? [];
+            // 检查响应是否真正成功
+            // 即使 state=0，如果 msg 中包含错误信息，也应该判断为失败
+            $msg = $result['msg'] ?? '';
+            $data = $result['data'] ?? null;
+            
+            // 严格检查：必须有 orderId 才算成功（订单创建成功的标志）
+            $hasOrderId = !empty($data['orderId']);
+            
+            // 检查是否有有效数据（不能是 null 或空数组）
+            $hasValidData = !empty($data) && is_array($data) && !empty($data);
+            
+            // 检查错误消息
+            $isErrorMsg = $this->isErrorMessage($msg);
+            
+            // 综合判断：必须同时满足所有条件才算成功
+            $isRealSuccess = ($result['success'] ?? false) 
+                && ($result['state'] ?? 0) === 0 
+                && !$isErrorMsg
+                && $hasOrderId; // 必须有 orderId 才算成功
+            
+            // 详细记录判断过程
+            Log::info('ZiwoyouService::confirmOrder: 判断订单是否真正成功', [
+                'order_id' => $order->id,
+                'result_success' => $result['success'] ?? false,
+                'result_state' => $result['state'] ?? null,
+                'msg' => $msg,
+                'is_error_msg' => $isErrorMsg,
+                'has_valid_data' => $hasValidData,
+                'has_order_id' => $hasOrderId,
+                'data' => $data,
+                'is_real_success' => $isRealSuccess,
+            ]);
+            
+            if ($isRealSuccess) {
+                // 此时 $data 已经在上面的判断中提取，且已验证有 orderId
                 $ziwoyouOrderId = $data['orderId'] ?? null;
                 $orderState = $data['orderState'] ?? null;
                 $payType = $data['payType'] ?? null;
@@ -208,10 +241,20 @@ class ZiwoyouService implements ResourceServiceInterface
                 ];
             } else {
                 // 订单创建失败，转人工操作
-                $errorMsg = $result['msg'] ?? '订单创建失败';
+                // 优先使用 msg 中的错误信息，如果没有则使用默认消息
+                $errorMsg = $msg ?: ($result['msg'] ?? '订单创建失败');
+                
+                // 如果 state=0 但 msg 包含错误信息，说明是特殊情况（如IP白名单）
+                if (($result['state'] ?? 0) === 0 && $this->isErrorMessage($msg)) {
+                    $errorMsg = "自我游接口返回 state=0 但包含错误信息：{$msg}";
+                }
+                
                 Log::error('ZiwoyouService::confirmOrder: 订单创建失败，转人工操作', [
                     'order_id' => $order->id,
                     'error' => $errorMsg,
+                    'state' => $result['state'] ?? null,
+                    'msg' => $msg,
+                    'has_data' => !empty($result['data']),
                     'result' => $result,
                 ]);
                 
@@ -341,6 +384,52 @@ class ZiwoyouService implements ResourceServiceInterface
     {
         // 默认不校验，可以根据实际情况调整
         // 例如：酒店产品需要校验，其他产品不需要
+        return false;
+    }
+
+    /**
+     * 判断消息是否为错误信息
+     * 即使 state=0，如果 msg 中包含错误关键词，也应该判断为失败
+     * 
+     * @param string $msg 响应消息
+     * @return bool
+     */
+    protected function isErrorMessage(string $msg): bool
+    {
+        if (empty($msg)) {
+            return false;
+        }
+        
+        // 错误关键词列表
+        $errorKeywords = [
+            '失败',
+            '下单失败',  // 新增：明确的下单失败消息
+            '错误',
+            '异常',
+            '白名单',
+            '不在白名单',
+            'IP不在白名单',
+            '未授权',
+            '无权限',
+            '拒绝',
+            '不允许',
+            '无效',
+            '不存在',
+            '不正确',  // 新增：如"账号或密钥不正确"
+            '超时',
+            '网络错误',
+        ];
+        
+        foreach ($errorKeywords as $keyword) {
+            if (mb_strpos($msg, $keyword) !== false) {
+                Log::warning('ZiwoyouService: 检测到错误消息关键词', [
+                    'msg' => $msg,
+                    'keyword' => $keyword,
+                ]);
+                return true;
+            }
+        }
+        
         return false;
     }
 
