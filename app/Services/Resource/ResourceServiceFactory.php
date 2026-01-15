@@ -318,17 +318,122 @@ class ResourceServiceFactory
         
         if ($operation === 'order') {
             $orderMode = $syncMode['order'] ?? 'manual';
-            $isConnected = $orderMode === 'auto';
             
-            Log::info('ResourceServiceFactory::isSystemConnected: 订单操作检查结果', [
+            // 如果订单处理方式是 manual，直接返回 false
+            if ($orderMode === 'manual') {
+                Log::info('ResourceServiceFactory::isSystemConnected: 订单处理方式是手工操作', [
+                    'order_id' => $order->id,
+                    'scenic_spot_id' => $scenicSpot->id,
+                    'order_mode' => $orderMode,
+                    'is_connected' => false,
+                ]);
+                return false;
+            }
+            
+            // 如果订单处理方式是 auto，直接返回 true
+            if ($orderMode === 'auto') {
+                Log::info('ResourceServiceFactory::isSystemConnected: 订单处理方式是系统直连', [
+                    'order_id' => $order->id,
+                    'scenic_spot_id' => $scenicSpot->id,
+                    'order_mode' => $orderMode,
+                    'is_connected' => true,
+                ]);
+                return true;
+            }
+            
+            // 如果订单处理方式是 other（其他系统），需要检查是否配置了订单下发服务商
+            if ($orderMode === 'other') {
+                $orderProviderId = $config->extra_config['order_provider'] ?? null;
+                
+                if (!$orderProviderId) {
+                    // 没有配置订单下发服务商，返回 false（走其他系统的手工流程）
+                    Log::info('ResourceServiceFactory::isSystemConnected: 订单处理方式是其他系统，但未配置订单下发服务商', [
+                        'order_id' => $order->id,
+                        'scenic_spot_id' => $scenicSpot->id,
+                        'order_mode' => $orderMode,
+                        'is_connected' => false,
+                    ]);
+                    return false;
+                }
+                
+                // 如果配置了订单下发服务商，检查订单下发服务商是否存在且配置正确
+                $orderSoftwareProvider = SoftwareProvider::find($orderProviderId);
+                if (!$orderSoftwareProvider) {
+                    Log::info('ResourceServiceFactory::isSystemConnected: 订单下发服务商不存在', [
+                        'order_id' => $order->id,
+                        'scenic_spot_id' => $scenicSpot->id,
+                        'order_mode' => $orderMode,
+                        'order_provider_id' => $orderProviderId,
+                        'is_connected' => false,
+                    ]);
+                    return false;
+                }
+                
+                // 查找订单下发服务商的配置
+                $orderConfig = ResourceConfig::with('softwareProvider')
+                    ->where('scenic_spot_id', $scenicSpot->id)
+                    ->where('software_provider_id', $orderSoftwareProvider->id)
+                    ->first();
+                
+                if (!$orderConfig || empty($orderConfig->api_url)) {
+                    Log::info('ResourceServiceFactory::isSystemConnected: 订单下发服务商配置不存在或API地址未配置', [
+                        'order_id' => $order->id,
+                        'scenic_spot_id' => $scenicSpot->id,
+                        'order_mode' => $orderMode,
+                        'order_provider_id' => $orderProviderId,
+                        'order_provider_api_type' => $orderSoftwareProvider->api_type,
+                        'has_config' => $orderConfig !== null,
+                        'has_api_url' => $orderConfig?->api_url ?? false,
+                        'is_connected' => false,
+                    ]);
+                    return false;
+                }
+                
+                // 如果订单下发服务商是自我游，还需要检查产品是否有映射关系
+                if ($orderSoftwareProvider->api_type === 'ziwoyou') {
+                    $mappingService = app(ZiwoyouProductMappingService::class);
+                    $hasMapping = $mappingService->hasMapping(
+                        $order->product_id,
+                        $order->hotel_id,
+                        $order->room_type_id
+                    );
+                    
+                    if (!$hasMapping) {
+                        Log::info('ResourceServiceFactory::isSystemConnected: 订单下发服务商是自我游，但产品没有映射关系', [
+                            'order_id' => $order->id,
+                            'scenic_spot_id' => $scenicSpot->id,
+                            'order_mode' => $orderMode,
+                            'order_provider_id' => $orderProviderId,
+                            'order_provider_api_type' => $orderSoftwareProvider->api_type,
+                            'product_id' => $order->product_id,
+                            'hotel_id' => $order->hotel_id,
+                            'room_type_id' => $order->room_type_id,
+                            'is_connected' => false,
+                        ]);
+                        return false;
+                    }
+                }
+                
+                // 配置了订单下发服务商且配置正确，返回 true
+                Log::info('ResourceServiceFactory::isSystemConnected: 订单处理方式是其他系统，已配置订单下发服务商且配置正确', [
+                    'order_id' => $order->id,
+                    'scenic_spot_id' => $scenicSpot->id,
+                    'order_mode' => $orderMode,
+                    'order_provider_id' => $orderProviderId,
+                    'order_provider_api_type' => $orderSoftwareProvider->api_type,
+                    'is_connected' => true,
+                ]);
+                return true;
+            }
+            
+            // 其他情况返回 false
+            Log::info('ResourceServiceFactory::isSystemConnected: 未知的订单处理方式', [
                 'order_id' => $order->id,
                 'scenic_spot_id' => $scenicSpot->id,
                 'order_mode' => $orderMode,
-                'is_connected' => $isConnected,
-                'sync_mode' => $syncMode,
+                'is_connected' => false,
             ]);
-            
-            return $isConnected;
+            return false;
         } elseif ($operation === 'inventory') {
             $inventoryMode = $syncMode['inventory'] ?? 'manual';
             $isConnected = $inventoryMode === 'push';
