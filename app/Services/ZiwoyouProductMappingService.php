@@ -17,6 +17,12 @@ class ZiwoyouProductMappingService
      */
     public function getZiwoyouProductId(int $productId, int $hotelId, int $roomTypeId): ?string
     {
+        Log::info('ZiwoyouProductMappingService: 开始验证映射关系', [
+            'product_id' => $productId,
+            'hotel_id' => $hotelId,
+            'room_type_id' => $roomTypeId,
+        ]);
+        
         $mapping = ZiwoyouProductMapping::where('product_id', $productId)
             ->where('hotel_id', $hotelId)
             ->where('room_type_id', $roomTypeId)
@@ -24,13 +30,21 @@ class ZiwoyouProductMappingService
             ->first();
             
         if (!$mapping) {
-            Log::warning('自我游产品映射：未找到映射关系', [
+            Log::warning('ZiwoyouProductMappingService: 未找到映射关系', [
                 'product_id' => $productId,
                 'hotel_id' => $hotelId,
                 'room_type_id' => $roomTypeId,
             ]);
             return null;
         }
+        
+        Log::info('ZiwoyouProductMappingService: 映射关系验证成功', [
+            'product_id' => $productId,
+            'hotel_id' => $hotelId,
+            'room_type_id' => $roomTypeId,
+            'ziwoyou_product_id' => $mapping->ziwoyou_product_id,
+            'mapping_id' => $mapping->id,
+        ]);
         
         return $mapping->ziwoyou_product_id;
     }
@@ -45,11 +59,26 @@ class ZiwoyouProductMappingService
      */
     public function hasMapping(int $productId, int $hotelId, int $roomTypeId): bool
     {
-        return ZiwoyouProductMapping::where('product_id', $productId)
+        Log::info('ZiwoyouProductMappingService: 检查映射关系是否存在', [
+            'product_id' => $productId,
+            'hotel_id' => $hotelId,
+            'room_type_id' => $roomTypeId,
+        ]);
+        
+        $exists = ZiwoyouProductMapping::where('product_id', $productId)
             ->where('hotel_id', $hotelId)
             ->where('room_type_id', $roomTypeId)
             ->where('is_active', true)
             ->exists();
+        
+        Log::info('ZiwoyouProductMappingService: 映射关系检查结果', [
+            'product_id' => $productId,
+            'hotel_id' => $hotelId,
+            'room_type_id' => $roomTypeId,
+            'has_mapping' => $exists,
+        ]);
+        
+        return $exists;
     }
     
     /**

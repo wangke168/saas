@@ -79,6 +79,13 @@ class ZiwoyouService implements ResourceServiceInterface
             }
 
             // 1. 获取自我游产品ID
+            Log::info('ZiwoyouService::confirmOrder: 开始获取自我游产品ID', [
+                'order_id' => $order->id,
+                'product_id' => $order->product_id,
+                'hotel_id' => $order->hotel_id,
+                'room_type_id' => $order->room_type_id,
+            ]);
+            
             $ziwoyouProductId = $this->mappingService->getZiwoyouProductId(
                 $order->product_id,
                 $order->hotel_id,
@@ -86,8 +93,19 @@ class ZiwoyouService implements ResourceServiceInterface
             );
             
             if (!$ziwoyouProductId) {
+                Log::error('ZiwoyouService::confirmOrder: 未找到自我游产品映射关系', [
+                    'order_id' => $order->id,
+                    'product_id' => $order->product_id,
+                    'hotel_id' => $order->hotel_id,
+                    'room_type_id' => $order->room_type_id,
+                ]);
                 throw new \Exception('未找到自我游产品映射关系');
             }
+            
+            Log::info('ZiwoyouService::confirmOrder: 获取自我游产品ID成功', [
+                'order_id' => $order->id,
+                'ziwoyou_product_id' => $ziwoyouProductId,
+            ]);
             
             // 2. 构建订单请求数据
             $requestData = $this->buildOrderRequest($order, $ziwoyouProductId);
@@ -95,11 +113,22 @@ class ZiwoyouService implements ResourceServiceInterface
             // 3. 可选：订单校验（根据实际情况决定是否调用）
             $shouldValidate = $this->shouldValidateOrder($order);
             if ($shouldValidate) {
-                Log::info('ZiwoyouService::confirmOrder: 开始订单校验', [
+                Log::info('ZiwoyouService::confirmOrder: 开始调用自我游订单校验接口', [
                     'order_id' => $order->id,
+                    'order_no' => $order->order_no ?? $order->ota_order_no,
+                    'ziwoyou_product_id' => $ziwoyouProductId,
+                    'request_data' => $requestData,
                 ]);
                 
                 $validateResult = $this->getClient()->validateOrder($requestData);
+                
+                Log::info('ZiwoyouService::confirmOrder: 自我游订单校验接口响应', [
+                    'order_id' => $order->id,
+                    'success' => $validateResult['success'] ?? false,
+                    'state' => $validateResult['state'] ?? null,
+                    'msg' => $validateResult['msg'] ?? '',
+                ]);
+                
                 if (!($validateResult['success'] ?? false) || ($validateResult['state'] ?? 0) !== 0) {
                     $errorMsg = $validateResult['msg'] ?? '订单校验失败';
                     throw new \Exception('订单校验失败：' . $errorMsg);
@@ -111,12 +140,22 @@ class ZiwoyouService implements ResourceServiceInterface
             }
             
             // 4. 创建订单
-            Log::info('ZiwoyouService::confirmOrder: 开始创建订单', [
+            Log::info('ZiwoyouService::confirmOrder: 开始调用自我游创建订单接口', [
                 'order_id' => $order->id,
+                'order_no' => $order->order_no ?? $order->ota_order_no,
                 'ziwoyou_product_id' => $ziwoyouProductId,
+                'request_data' => $requestData,
             ]);
             
             $result = $this->getClient()->createOrder($requestData);
+            
+            Log::info('ZiwoyouService::confirmOrder: 自我游创建订单接口响应', [
+                'order_id' => $order->id,
+                'success' => $result['success'] ?? false,
+                'state' => $result['state'] ?? null,
+                'msg' => $result['msg'] ?? '',
+                'response_data' => $result['data'] ?? null,
+            ]);
             
             if ($result['success'] ?? false && ($result['state'] ?? 0) === 0) {
                 $data = $result['data'] ?? [];

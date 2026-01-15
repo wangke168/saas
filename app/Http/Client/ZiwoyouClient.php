@@ -117,10 +117,12 @@ class ZiwoyouClient
             
             $fullUrl = rtrim($apiUrl, '/') . $endpoint;
             
-            Log::info('ZiwoyouClient: 发送请求', [
+            Log::info('ZiwoyouClient: 发送请求到自我游接口', [
                 'url' => $fullUrl,
                 'endpoint' => $endpoint,
+                'method' => 'POST',
                 'request_data_keys' => array_keys($requestData),
+                'request_data' => $requestData, // 记录完整请求数据（敏感信息已处理）
             ]);
             
             // 发送请求
@@ -235,6 +237,13 @@ class ZiwoyouClient
      */
     public function validateOrder(array $data): array
     {
+        Log::info('ZiwoyouClient: 调用订单校验接口', [
+            'endpoint' => '/api/thirdPaty/order/check',
+            'order_source_id' => $data['orderSourceId'] ?? null,
+            'product_id' => $data['infoId'] ?? null,
+            'request_data_keys' => array_keys($data),
+        ]);
+        
         return $this->request('/api/thirdPaty/order/check', $data);
     }
 
@@ -246,6 +255,15 @@ class ZiwoyouClient
      */
     public function createOrder(array $data): array
     {
+        Log::info('ZiwoyouClient: 调用创建订单接口', [
+            'endpoint' => '/api/thirdPaty/order/add',
+            'order_source_id' => $data['orderSourceId'] ?? null,
+            'product_id' => $data['infoId'] ?? null,
+            'num' => $data['num'] ?? null,
+            'travel_date' => $data['travelDate'] ?? null,
+            'request_data_keys' => array_keys($data),
+        ]);
+        
         return $this->request('/api/thirdPaty/order/add', $data);
     }
 
@@ -262,6 +280,13 @@ class ZiwoyouClient
         if ($orderId) {
             $data['orderId'] = $orderId;
         }
+        
+        Log::info('ZiwoyouClient: 调用查询订单接口', [
+            'endpoint' => '/api/thirdPaty/order/detail',
+            'order_source_id' => $orderSourceId,
+            'ziwoyou_order_id' => $orderId,
+        ]);
+        
         return $this->request('/api/thirdPaty/order/detail', $data);
     }
 
@@ -274,6 +299,12 @@ class ZiwoyouClient
      */
     public function cancelOrder(int $orderId, string $reason): array
     {
+        Log::info('ZiwoyouClient: 调用取消订单接口', [
+            'endpoint' => '/api/thirdPaty/order/cancel',
+            'ziwoyou_order_id' => $orderId,
+            'reason' => $reason,
+        ]);
+        
         return $this->request('/api/thirdPaty/order/cancel', [
             'orderId' => $orderId,
             'cancelMemo' => $reason,

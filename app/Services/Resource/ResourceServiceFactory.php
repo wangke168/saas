@@ -176,6 +176,14 @@ class ResourceServiceFactory
                 
                 // 产品级别控制：如果订单下发服务商是自我游，检查产品是否有映射关系
                 if ($softwareProvider->api_type === 'ziwoyou') {
+                    Log::info('ResourceServiceFactory: 订单下发服务商是自我游，开始验证产品映射关系', [
+                        'order_id' => $order->id,
+                        'product_id' => $order->product_id,
+                        'hotel_id' => $order->hotel_id,
+                        'room_type_id' => $order->room_type_id,
+                        'scenic_spot_id' => $scenicSpot->id,
+                    ]);
+                    
                     $mappingService = app(ZiwoyouProductMappingService::class);
                     $hasMapping = $mappingService->hasMapping(
                         $order->product_id,
