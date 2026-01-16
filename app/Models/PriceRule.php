@@ -39,6 +39,14 @@ class PriceRule extends Model
     }
 
     /**
+     * 序列化日期格式为 Y-m-d（与前端日期选择器的 value-format 一致）
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return $date->format('Y-m-d');
+    }
+
+    /**
      * 所属产品
      */
     public function product(): BelongsTo

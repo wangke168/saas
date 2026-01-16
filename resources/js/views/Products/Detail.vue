@@ -297,7 +297,7 @@
                                         周{{ formatWeekdays(row.weekdays) }}
                                     </span>
                                     <span v-else>
-                                        {{ formatDate(row.start_date) }} 至 {{ formatDate(row.end_date) }}
+                                        {{ formatDateOnly(row.start_date) }} 至 {{ formatDateOnly(row.end_date) }}
                                     </span>
                                 </template>
                             </el-table-column>

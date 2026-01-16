@@ -65,8 +65,20 @@ class PriceRuleController extends Controller
                 'is_active' => $validated['is_active'] ?? true,
             ]);
 
+            // 对 items 进行去重，避免重复的 hotel_id 和 room_type_id 组合
+            $uniqueItems = [];
+            $seen = [];
             foreach ($validated['items'] as $item) {
-                $rule->items()->create([
+                $key = $item['hotel_id'] . '_' . $item['room_type_id'];
+                if (!isset($seen[$key])) {
+                    $uniqueItems[] = $item;
+                    $seen[$key] = true;
+                }
+            }
+
+            // 使用 firstOrCreate 避免唯一约束冲突
+            foreach ($uniqueItems as $item) {
+                $rule->items()->firstOrCreate([
                     'hotel_id' => $item['hotel_id'],
                     'room_type_id' => $item['room_type_id'],
                 ]);
@@ -117,8 +129,19 @@ class PriceRuleController extends Controller
             $priceRule->update($validated);
 
             if (isset($validated['items'])) {
-                $priceRule->items()->delete();
+                // 对 items 进行去重，避免重复的 hotel_id 和 room_type_id 组合
+                $uniqueItems = [];
+                $seen = [];
                 foreach ($validated['items'] as $item) {
+                    $key = $item['hotel_id'] . '_' . $item['room_type_id'];
+                    if (!isset($seen[$key])) {
+                        $uniqueItems[] = $item;
+                        $seen[$key] = true;
+                    }
+                }
+
+                $priceRule->items()->delete();
+                foreach ($uniqueItems as $item) {
                     $priceRule->items()->create([
                         'hotel_id' => $item['hotel_id'],
                         'room_type_id' => $item['room_type_id'],
