@@ -660,8 +660,8 @@ class MeituanController extends Controller
                 'guest_info' => $guestInfo, // 使用构建好的 guest_info，包含 name 和 idCode
                 'real_name_type' => $realNameType,
                 'credential_list' => $credentialListData,
-                'total_amount' => intval($salePrice * $quantity * 100), // 转换为分
-                'settlement_amount' => intval($settlementPrice * $quantity * 100), // 转换为分
+                'total_amount' => intval($salePrice * $quantity), // prices表已是以分为单位，直接使用
+                'settlement_amount' => intval($settlementPrice * $quantity), // prices表已是以分为单位，直接使用
                 'paid_at' => null, // 订单创建时还未支付
             ]);
 

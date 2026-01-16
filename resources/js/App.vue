@@ -16,6 +16,10 @@
                     router
                     mode="vertical"
                 >
+                    <el-menu-item index="/operation-report">
+                        <el-icon><DataBoard /></el-icon>
+                        <span>运营快报</span>
+                    </el-menu-item>
                     <el-menu-item index="/orders">
                         <el-icon><Document /></el-icon>
                         <span>订单管理</span>
@@ -28,6 +32,7 @@
                         <el-icon><Warning /></el-icon>
                         <span>异常订单</span>
                     </el-menu-item>
+
                     <el-menu-item index="/products">
                         <el-icon><Box /></el-icon>
                         <span>产品管理</span>
@@ -100,7 +105,7 @@
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
-import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine, Ticket, OfficeBuilding, Goods, Tools } from '@element-plus/icons-vue';
+import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine, Ticket, OfficeBuilding, Goods, Tools, DataBoard } from '@element-plus/icons-vue';
 
 const router = useRouter();
 const authStore = useAuthStore();

@@ -228,6 +228,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{exceptionOrder}/resolve', [\App\Http\Controllers\ExceptionOrderController::class, 'resolve']);
     });
 
+    // 运营快报
+    Route::prefix('operation-report')->group(function () {
+        Route::get('/', [\App\Http\Controllers\OperationReportController::class, 'index']);
+    });
+
     // 门票管理
     Route::prefix('tickets')->group(function () {
         Route::get('/', [\App\Http\Controllers\TicketController::class, 'index']);
