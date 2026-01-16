@@ -350,10 +350,30 @@ class FliggyDistributionClient
             }
             
             $value = $params[$part] ?? '';
+            
             // 如果参数为空，根据文档说明可能不拼接
-            if ($value !== '') {
-                $signParts[] = (string)$value;
+            if ($value === '') {
+                continue;
             }
+            
+            // 处理数组类型的参数（如 productIds）
+            if (is_array($value)) {
+                // 对于数组参数，根据参数名特殊处理
+                if ($part === 'productIds' && !empty($value)) {
+                    // productIds 使用第一个元素
+                    $value = $value[0];
+                } else {
+                    // 其他数组参数，转换为 JSON 字符串（但通常不应该出现在签名公式中）
+                    Log::warning('飞猪签名：数组参数出现在签名公式中', [
+                        'param_name' => $part,
+                        'formula' => $formula,
+                    ]);
+                    continue; // 跳过数组参数，避免错误
+                }
+            }
+            
+            // 转换为字符串
+            $signParts[] = (string)$value;
         }
         
         $signString = implode('_', $signParts);
@@ -432,16 +452,18 @@ class FliggyDistributionClient
         
         $url = $this->baseUrl . '/api/v1/hotelticket/queryProductBaseInfoByIds?format=json';
         
-        // 构建签名字符串（使用第一个productId）
+        // 根据文档，签名公式使用第一个productId
+        // 注意：虽然参数名是 productIds（数组），但签名时使用第一个 productId
         $firstProductId = $productIds[0] ?? '';
-        $params = $this->buildParams([
-            'productIds' => $productIds,
-        ], 'distributorId_timestamp_productIds');
         
-        // 注意：如果签名公式是 productIds（复数），可能需要特殊处理
-        // 根据文档，这里使用第一个productId构建签名
-        $signString = $this->distributorId . '_' . $params['timestamp'] . '_' . $firstProductId;
-        $params['sign'] = $this->sign($signString);
+        // 构建参数：签名公式中使用 productId（单数），但请求参数中使用 productIds（数组）
+        $params = $this->buildParams([
+            'productIds' => $productIds,  // 请求参数：数组
+            'productId' => $firstProductId, // 用于签名：第一个ID
+        ], 'distributorId_timestamp_productId');
+        
+        // 移除用于签名的 productId，只保留 productIds 数组
+        unset($params['productId']);
         
         return $this->request($url, $params);
     }
