@@ -25,13 +25,13 @@ class OperationReportController extends Controller
         // 计算时间范围
         $startDate = match($period) {
             'realtime' => now()->startOfDay(), // 今天 00:00:00
-            'day' => now()->subDay(),
-            'week' => now()->subWeek(),
-            'month' => now()->subMonth(),
+            'day' => now()->subDay()->startOfDay(), // 昨天 00:00:00
+            'week' => now()->subWeek()->startOfDay(), // 7天前 00:00:00
+            'month' => now()->subMonth()->startOfDay(), // 1个月前 00:00:00
             'custom' => $request->input('start_date') 
                 ? \Carbon\Carbon::parse($request->input('start_date'))->startOfDay()
-                : now()->subDay(),
-            default => now()->subDay(),
+                : now()->subDay()->startOfDay(),
+            default => now()->subDay()->startOfDay(),
         };
         
         // 自定义日期范围的结束时间
@@ -40,8 +40,14 @@ class OperationReportController extends Controller
             $endDate = \Carbon\Carbon::parse($request->input('end_date'))->endOfDay();
         } elseif ($period === 'realtime') {
             $endDate = now(); // 实时模式：到今天当前时间
+        } elseif ($period === 'day') {
+            $endDate = now()->subDay()->endOfDay(); // 过去一天：昨天 23:59:59
+        } elseif ($period === 'week') {
+            $endDate = now()->subDay()->endOfDay(); // 过去一周：昨天 23:59:59
+        } elseif ($period === 'month') {
+            $endDate = now()->subDay()->endOfDay(); // 过去一月：昨天 23:59:59
         } else {
-            $endDate = now(); // 其他模式：到现在
+            $endDate = now(); // 默认：到现在
         }
 
         // 获取权限过滤条件
@@ -112,12 +118,10 @@ class OperationReportController extends Controller
      */
     private function getOrderStats($query)
     {
-        $baseQuery = (clone $query);
-
         return [
-            'total_orders' => $baseQuery->count(),
-            'total_amount' => (float)$baseQuery->sum('total_amount') ?? 0,
-            'total_settlement_amount' => (float)$baseQuery->sum('settlement_amount') ?? 0,
+            'total_orders' => (clone $query)->count(),
+            'total_amount' => (float)(clone $query)->sum('total_amount') ?? 0,
+            'total_settlement_amount' => (float)(clone $query)->sum('settlement_amount') ?? 0,
             'confirmed_orders' => (clone $query)->where('status', OrderStatus::CONFIRMED->value)->count(),
             'verified_orders' => (clone $query)->where('status', OrderStatus::VERIFIED->value)->count(),
             'cancelled_orders' => (clone $query)->where('status', OrderStatus::CANCEL_APPROVED->value)->count(),
@@ -129,12 +133,10 @@ class OperationReportController extends Controller
      */
     private function getPkgOrderStats($query)
     {
-        $baseQuery = (clone $query);
-
         return [
-            'total_orders' => $baseQuery->count(),
-            'total_amount' => (float)$baseQuery->sum('total_amount') ?? 0,
-            'total_settlement_amount' => (float)$baseQuery->sum('settlement_amount') ?? 0,
+            'total_orders' => (clone $query)->count(),
+            'total_amount' => (float)(clone $query)->sum('total_amount') ?? 0,
+            'total_settlement_amount' => (float)(clone $query)->sum('settlement_amount') ?? 0,
             'confirmed_orders' => (clone $query)->where('status', PkgOrderStatus::CONFIRMED->value)->count(),
             'cancelled_orders' => (clone $query)->where('status', PkgOrderStatus::CANCELLED->value)->count(),
         ];
