@@ -1987,10 +1987,22 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '参数不完整', $partnerId, $encryptResponse);
             }
 
+            // 判断产品类型：根据产品编号是否以 "pkg" 开头
+            $isPkgProduct = strpos($partnerDealId, 'pkg') === 0;
+
             // 查找产品
-            $product = \App\Models\Product::where('code', $partnerDealId)->first();
-            if (!$product) {
-                return $this->errorResponse(505, '产品不存在', $partnerId, $encryptResponse);
+            if ($isPkgProduct) {
+                // 打包产品：查找 PkgProduct
+                $pkgProduct = \App\Models\Pkg\PkgProduct::where('product_code', $partnerDealId)->first();
+                if (!$pkgProduct) {
+                    return $this->errorResponse(505, '打包产品不存在', $partnerId, $encryptResponse);
+                }
+            } else {
+                // 常规产品：查找 Product
+                $product = \App\Models\Product::where('code', $partnerDealId)->first();
+                if (!$product) {
+                    return $this->errorResponse(505, '产品不存在', $partnerId, $encryptResponse);
+                }
             }
             
             // 如果异步拉取，返回code=999，然后通过"多层价格日历变化通知V2"推送
@@ -2008,85 +2020,172 @@ class MeituanController extends Controller
             }
 
             // 同步拉取：直接返回价格日历数据
-            // 获取产品的所有"产品-酒店-房型"组合
-            $prices = $product->prices()
-                ->whereBetween('date', [$startTime, $endTime])
-                ->with(['roomType.hotel'])
-                ->get();
-
             $responseBody = [];
-            foreach ($prices as $price) {
-                $roomType = $price->roomType;
-                $hotel = $roomType->hotel ?? null;
 
-                if (!$hotel || !$roomType) {
-                    continue;
-                }
+            if ($isPkgProduct) {
+                // 打包产品：获取 PkgProductDailyPrice
+                $dailyPrices = \App\Models\Pkg\PkgProductDailyPrice::where('pkg_product_id', $pkgProduct->id)
+                    ->whereBetween('biz_date', [$startTime, $endTime])
+                    ->with(['hotel', 'roomType'])
+                    ->get();
 
-                $priceData = app(\App\Services\ProductService::class)->calculatePrice(
-                    $product,
-                    $roomType->id,
-                    $price->date->format('Y-m-d')
-                );
+                foreach ($dailyPrices as $dailyPrice) {
+                    $hotel = $dailyPrice->hotel;
+                    $roomType = $dailyPrice->roomType;
 
-                // 获取库存
-                $inventory = \App\Models\Inventory::where('room_type_id', $roomType->id)
-                    ->where('date', $price->date)
-                    ->first();
+                    if (!$hotel || !$roomType) {
+                        continue;
+                    }
 
-                $stock = 0;
-                if ($inventory && !$inventory->is_closed) {
-                    // 检查销售日期范围
-                    $isInSalePeriod = true;
-                    if ($product->sale_start_date || $product->sale_end_date) {
-                        $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
-                        $saleEndDate = $product->sale_end_date ? $product->sale_end_date->format('Y-m-d') : null;
-                        $date = $price->date->format('Y-m-d');
+                    $date = $dailyPrice->biz_date->format('Y-m-d');
+
+                    // 获取库存
+                    $dailyStock = \App\Models\Res\ResHotelDailyStock::where('hotel_id', $hotel->id)
+                        ->where('room_type_id', $roomType->id)
+                        ->where('biz_date', $date)
+                        ->first();
+
+                    $stock = 0;
+                    if ($dailyStock && !$dailyStock->is_closed) {
+                        // 检查销售日期范围
+                        $isInSalePeriod = true;
+                        if ($pkgProduct->sale_start_date || $pkgProduct->sale_end_date) {
+                            $saleStartDate = $pkgProduct->sale_start_date ? $pkgProduct->sale_start_date->format('Y-m-d') : null;
+                            $saleEndDate = $pkgProduct->sale_end_date ? $pkgProduct->sale_end_date->format('Y-m-d') : null;
+                            
+                            if ($saleStartDate && $date < $saleStartDate) {
+                                $isInSalePeriod = false;
+                            }
+                            if ($saleEndDate && $date > $saleEndDate) {
+                                $isInSalePeriod = false;
+                            }
+                        }
                         
-                        if ($saleStartDate && $date < $saleStartDate) {
-                            $isInSalePeriod = false;
-                        }
-                        if ($saleEndDate && $date > $saleEndDate) {
-                            $isInSalePeriod = false;
+                        if ($isInSalePeriod) {
+                            $stock = $dailyStock->stock_available;
                         }
                     }
-                    
-                    if ($isInSalePeriod) {
-                        $stock = $inventory->available_quantity;
-                    }
-                }
 
-                // 生成partnerPrimaryKey
-                $partnerPrimaryKey = app(\App\Services\OTA\MeituanService::class)->generatePartnerPrimaryKey(
-                    $hotel->id,
-                    $roomType->id,
-                    $price->date->format('Y-m-d')
-                );
+                    // 生成partnerPrimaryKey
+                    $partnerPrimaryKey = app(\App\Services\OTA\MeituanService::class)->generatePartnerPrimaryKey(
+                        $hotel->id,
+                        $roomType->id,
+                        $date
+                    );
 
-                $responseBody[] = [
-                    'partnerPrimaryKey' => $partnerPrimaryKey,
-                    'skuInfo' => [
-                        'startTime' => '14:00',
-                        'endTime' => '16:00',
-                        'levelInfoList' => [
-                            [
-                                'levelNo' => 1,
-                                'levelName' => $hotel->name,
-                            ],
-                            [
-                                'levelNo' => 2,
-                                'levelName' => $roomType->name,
+                    // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
+                    // dailyPrice->sale_price 已经是 decimal:2，单位是分（例如 2.00 表示 2分 = 0.02元）
+                    // 转换为元：除以100，保留两位小数
+                    $salePriceInYuan = round(floatval($dailyPrice->sale_price) / 100, 2);
+                    $marketPriceInYuan = $salePriceInYuan; // 打包产品通常市场价等于售价
+                    $settlementPriceInYuan = $dailyPrice->cost_price 
+                        ? round(floatval($dailyPrice->cost_price) / 100, 2) 
+                        : $salePriceInYuan; // 如果没有成本价，使用售价
+
+                    $responseBody[] = [
+                        'partnerPrimaryKey' => $partnerPrimaryKey,
+                        'skuInfo' => [
+                            'startTime' => '14:00',
+                            'endTime' => '16:00',
+                            'levelInfoList' => [
+                                [
+                                    'levelNo' => 1,
+                                    'levelName' => $hotel->name,
+                                ],
+                                [
+                                    'levelNo' => 2,
+                                    'levelName' => $roomType->name,
+                                ],
                             ],
                         ],
-                    ],
-                    'priceDate' => $price->date->format('Y-m-d'),
-                    // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
-                    'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']) / 100, 2),
-                    'mtPrice' => round(floatval($priceData['sale_price']) / 100, 2),
-                    'settlementPrice' => round(floatval($priceData['settlement_price']) / 100, 2),
-                    'stock' => $stock,
-                    'attr' => null,
-                ];
+                        'priceDate' => $date,
+                        'marketPrice' => $marketPriceInYuan,
+                        'mtPrice' => $salePriceInYuan,
+                        'settlementPrice' => $settlementPriceInYuan,
+                        'stock' => $stock,
+                        'attr' => null,
+                    ];
+                }
+            } else {
+                // 常规产品：获取产品的所有"产品-酒店-房型"组合
+                $prices = $product->prices()
+                    ->whereBetween('date', [$startTime, $endTime])
+                    ->with(['roomType.hotel'])
+                    ->get();
+
+                foreach ($prices as $price) {
+                    $roomType = $price->roomType;
+                    $hotel = $roomType->hotel ?? null;
+
+                    if (!$hotel || !$roomType) {
+                        continue;
+                    }
+
+                    $priceData = app(\App\Services\ProductService::class)->calculatePrice(
+                        $product,
+                        $roomType->id,
+                        $price->date->format('Y-m-d')
+                    );
+
+                    // 获取库存
+                    $inventory = \App\Models\Inventory::where('room_type_id', $roomType->id)
+                        ->where('date', $price->date)
+                        ->first();
+
+                    $stock = 0;
+                    if ($inventory && !$inventory->is_closed) {
+                        // 检查销售日期范围
+                        $isInSalePeriod = true;
+                        if ($product->sale_start_date || $product->sale_end_date) {
+                            $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
+                            $saleEndDate = $product->sale_end_date ? $product->sale_end_date->format('Y-m-d') : null;
+                            $date = $price->date->format('Y-m-d');
+                            
+                            if ($saleStartDate && $date < $saleStartDate) {
+                                $isInSalePeriod = false;
+                            }
+                            if ($saleEndDate && $date > $saleEndDate) {
+                                $isInSalePeriod = false;
+                            }
+                        }
+                        
+                        if ($isInSalePeriod) {
+                            $stock = $inventory->available_quantity;
+                        }
+                    }
+
+                    // 生成partnerPrimaryKey
+                    $partnerPrimaryKey = app(\App\Services\OTA\MeituanService::class)->generatePartnerPrimaryKey(
+                        $hotel->id,
+                        $roomType->id,
+                        $price->date->format('Y-m-d')
+                    );
+
+                    $responseBody[] = [
+                        'partnerPrimaryKey' => $partnerPrimaryKey,
+                        'skuInfo' => [
+                            'startTime' => '14:00',
+                            'endTime' => '16:00',
+                            'levelInfoList' => [
+                                [
+                                    'levelNo' => 1,
+                                    'levelName' => $hotel->name,
+                                ],
+                                [
+                                    'levelNo' => 2,
+                                    'levelName' => $roomType->name,
+                                ],
+                            ],
+                        ],
+                        'priceDate' => $price->date->format('Y-m-d'),
+                        // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
+                        'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']) / 100, 2),
+                        'mtPrice' => round(floatval($priceData['sale_price']) / 100, 2),
+                        'settlementPrice' => round(floatval($priceData['settlement_price']) / 100, 2),
+                        'stock' => $stock,
+                        'attr' => null,
+                    ];
+                }
             }
 
             // 返回成功响应，传递 partnerId 和 partnerDealId
