@@ -1987,8 +1987,8 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '参数不完整', $partnerId, $encryptResponse);
             }
 
-            // 判断产品类型：根据产品编号是否以 "pkg" 开头
-            $isPkgProduct = strpos($partnerDealId, 'pkg') === 0;
+            // 判断产品类型：根据产品编号是否以 "pkg" 开头（不区分大小写）
+            $isPkgProduct = strtolower(substr($partnerDealId, 0, 3)) === 'pkg';
 
             // 查找产品
             if ($isPkgProduct) {
