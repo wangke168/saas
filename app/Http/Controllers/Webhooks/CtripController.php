@@ -1382,16 +1382,16 @@ class CtripController extends Controller
                 
                 // 检查连续入住天数的库存是否足够（使用打包酒店库存表）
                 $inventoryCheck = $this->checkResHotelStockForStayDays($resRoomType->id, $checkInDate, $stayDays, $quantity);
-                if (!$inventoryCheck['success']) {
-                    DB::rollBack();
-                    Log::warning('携程直接下单：打包产品库存检查失败', [
+                $hasInventoryIssue = !$inventoryCheck['success'];
+                
+                if ($hasInventoryIssue) {
+                    Log::warning('携程直接下单：打包产品库存检查失败，将创建订单并标记为异常', [
                         'room_type_id' => $resRoomType->id,
                         'check_in_date' => $checkInDate->format('Y-m-d'),
                         'stay_days' => $stayDays,
                         'quantity' => $quantity,
                         'error_message' => $inventoryCheck['message'],
                     ]);
-                    return $this->errorResponse('1003', $inventoryCheck['message']);
                 }
                 
                 // 如果没有从 items 中获取价格，则从价格表获取
@@ -1423,6 +1423,11 @@ class CtripController extends Controller
                 }
                 
                 // 创建打包订单（直接下单，已支付）
+                // 如果有库存问题，状态设为待确认，等待人工处理
+                $pkgOrderStatus = $hasInventoryIssue 
+                    ? \App\Enums\PkgOrderStatus::PAID_PENDING 
+                    : \App\Enums\PkgOrderStatus::CONFIRMED;
+                
                 $pkgOrder = PkgOrder::create([
                     'order_no' => $this->generateOrderNo(),
                     'ota_order_no' => $ctripOrderId,
@@ -1430,7 +1435,7 @@ class CtripController extends Controller
                     'pkg_product_id' => $pkgProduct->id,
                     'hotel_id' => $resHotel->id,
                     'room_type_id' => $resRoomType->id,
-                    'status' => \App\Enums\PkgOrderStatus::CONFIRMED, // 直接下单，已确认
+                    'status' => $pkgOrderStatus,
                     'check_in_date' => $useStartDate,
                     'check_out_date' => $checkOutDate,
                     'stay_days' => $stayDays,
@@ -1440,43 +1445,102 @@ class CtripController extends Controller
                     'contact_phone' => $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '',
                     'contact_email' => $contactInfo['email'] ?? '',
                     'paid_at' => now(), // 直接下单，已支付
-                    'confirmed_at' => now(), // 直接下单，已确认
+                    'confirmed_at' => $hasInventoryIssue ? null : now(), // 有库存问题时暂不确认
                 ]);
                 
                 // 锁定库存（直接下单的核心目的就是锁库存）
-                $lockResult = $this->lockResHotelStockForPreOrder($pkgOrder, $pkgProduct->stay_days, $quantity);
-                if (!$lockResult['success']) {
-                    DB::rollBack();
-                    Log::error('携程直接下单：打包产品库存锁定失败', [
-                        'pkg_order_id' => $pkgOrder->id,
-                        'error' => $lockResult['message'],
-                    ]);
-                    return $this->errorResponse('1003', '库存锁定失败：' . $lockResult['message']);
+                // 如果有库存问题，跳过锁定，后续人工处理
+                $lockResult = ['success' => true, 'message' => ''];
+                if (!$hasInventoryIssue) {
+                    $lockResult = $this->lockResHotelStockForPreOrder($pkgOrder, $pkgProduct->stay_days, $quantity);
+                    if (!$lockResult['success']) {
+                        // 库存锁定失败，标记为异常订单
+                        $hasInventoryIssue = true;
+                        Log::warning('携程直接下单：打包产品库存锁定失败，将标记为异常订单', [
+                            'pkg_order_id' => $pkgOrder->id,
+                            'error' => $lockResult['message'],
+                        ]);
+                    }
                 }
                 
-                DB::commit();
-                
-                Log::info('携程直接下单成功（打包产品）', [
-                    'ctrip_order_id' => $ctripOrderId,
-                    'pkg_order_no' => $pkgOrder->order_no,
-                    'product_code' => $supplierOptionId,
-                ]);
-                
-                // 触发订单拆分和处理
-                $splitService = new \App\Services\Pkg\PkgOrderSplitService();
-                $splitResult = $splitService->splitAndProcess($pkgOrder);
-                
-                if (!$splitResult['success']) {
-                    Log::error('携程直接下单：打包订单拆分失败', [
-                        'pkg_order_id' => $pkgOrder->id,
-                        'error' => $splitResult['message'] ?? '未知错误',
+                // 如果有库存问题，创建异常订单记录
+                if ($hasInventoryIssue) {
+                    // 更新订单状态为待确认
+                    $pkgOrder->update([
+                        'status' => \App\Enums\PkgOrderStatus::PAID_PENDING,
+                        'confirmed_at' => null,
                     ]);
-                    // 拆分失败不影响响应，但需要记录日志
+                    
+                    // 创建异常订单（需要先拆分订单，因为异常订单关联的是Order，不是PkgOrder）
+                    // 先提交事务，然后拆分订单并创建异常订单
+                    DB::commit();
+                    
+                    // 触发订单拆分
+                    $splitService = new \App\Services\Pkg\PkgOrderSplitService();
+                    $splitResult = $splitService->splitAndProcess($pkgOrder);
+                    
+                    if ($splitResult['success'] && !empty($splitResult['order_items'])) {
+                        // 为每个拆分出的订单创建异常订单记录
+                        foreach ($splitResult['order_items'] as $orderItem) {
+                            $order = Order::find($orderItem['order_id'] ?? null);
+                            if ($order) {
+                                ExceptionOrder::create([
+                                    'order_id' => $order->id,
+                                    'exception_type' => ExceptionOrderType::INVENTORY_MISMATCH,
+                                    'exception_message' => $inventoryCheck['message'] ?? '库存不足',
+                                    'exception_data' => [
+                                        'pkg_order_id' => $pkgOrder->id,
+                                        'inventory_check_message' => $inventoryCheck['message'] ?? '',
+                                        'lock_result_message' => $lockResult['message'] ?? '',
+                                    ],
+                                    'status' => ExceptionOrderStatus::PENDING,
+                                ]);
+                                
+                                Log::info('携程直接下单：为订单创建库存不匹配异常记录', [
+                                    'order_id' => $order->id,
+                                    'pkg_order_id' => $pkgOrder->id,
+                                ]);
+                            }
+                        }
+                    } else {
+                        Log::warning('携程直接下单：打包订单拆分失败，无法创建异常订单记录', [
+                            'pkg_order_id' => $pkgOrder->id,
+                            'split_result' => $splitResult,
+                        ]);
+                    }
                 } else {
-                    Log::info('携程直接下单：打包订单拆分成功', [
-                        'pkg_order_id' => $pkgOrder->id,
-                        'order_items_count' => count($splitResult['order_items'] ?? []),
+                    DB::commit();
+                }
+                
+                if ($hasInventoryIssue) {
+                    Log::info('携程直接下单：打包产品订单已创建（库存不足，待人工处理）', [
+                        'ctrip_order_id' => $ctripOrderId,
+                        'pkg_order_no' => $pkgOrder->order_no,
+                        'product_code' => $supplierOptionId,
                     ]);
+                } else {
+                    Log::info('携程直接下单成功（打包产品）', [
+                        'ctrip_order_id' => $ctripOrderId,
+                        'pkg_order_no' => $pkgOrder->order_no,
+                        'product_code' => $supplierOptionId,
+                    ]);
+                    
+                    // 触发订单拆分和处理（正常流程）
+                    $splitService = new \App\Services\Pkg\PkgOrderSplitService();
+                    $splitResult = $splitService->splitAndProcess($pkgOrder);
+                    
+                    if (!$splitResult['success']) {
+                        Log::error('携程直接下单：打包订单拆分失败', [
+                            'pkg_order_id' => $pkgOrder->id,
+                            'error' => $splitResult['message'] ?? '未知错误',
+                        ]);
+                        // 拆分失败不影响响应，但需要记录日志
+                    } else {
+                        Log::info('携程直接下单：打包订单拆分成功', [
+                            'pkg_order_id' => $pkgOrder->id,
+                            'order_items_count' => count($splitResult['order_items'] ?? []),
+                        ]);
+                    }
                 }
                 
                 // 构建响应数据
@@ -1565,9 +1629,16 @@ class CtripController extends Controller
                 $checkInDate = \Carbon\Carbon::parse($useStartDate);
                 
                 $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
-                if (!$inventoryCheck['success']) {
-                    DB::rollBack();
-                    return $this->errorResponse('1003', $inventoryCheck['message']);
+                $hasInventoryIssue = !$inventoryCheck['success'];
+                
+                if ($hasInventoryIssue) {
+                    Log::warning('携程直接下单：常规产品库存检查失败，将创建订单并标记为异常', [
+                        'room_type_id' => $roomType->id,
+                        'check_in_date' => $checkInDate->format('Y-m-d'),
+                        'stay_days' => $stayDays,
+                        'quantity' => $quantity,
+                        'error_message' => $inventoryCheck['message'],
+                    ]);
                 }
 
                 // 如果没有从 items 中获取价格，则从价格表获取
@@ -1629,56 +1700,87 @@ class CtripController extends Controller
                 ]);
 
                 // 锁定库存
-                $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
-                if (!$lockResult['success']) {
-                    DB::rollBack();
-                    Log::error('携程直接下单：库存锁定失败', [
+                // 如果有库存问题，跳过锁定，后续人工处理
+                $lockResult = ['success' => true, 'message' => ''];
+                if (!$hasInventoryIssue) {
+                    $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
+                    if (!$lockResult['success']) {
+                        // 库存锁定失败，标记为异常订单
+                        $hasInventoryIssue = true;
+                        Log::warning('携程直接下单：常规产品库存锁定失败，将标记为异常订单', [
+                            'order_id' => $order->id,
+                            'error' => $lockResult['message'],
+                        ]);
+                    }
+                }
+                
+                // 如果有库存问题，创建异常订单记录
+                if ($hasInventoryIssue) {
+                    ExceptionOrder::create([
                         'order_id' => $order->id,
-                        'error' => $lockResult['message'],
+                        'exception_type' => ExceptionOrderType::INVENTORY_MISMATCH,
+                        'exception_message' => $inventoryCheck['message'] ?? $lockResult['message'] ?? '库存不足',
+                        'exception_data' => [
+                            'inventory_check_message' => $inventoryCheck['message'] ?? '',
+                            'lock_result_message' => $lockResult['message'] ?? '',
+                        ],
+                        'status' => ExceptionOrderStatus::PENDING,
                     ]);
-                    return $this->errorResponse('1003', '库存锁定失败：' . $lockResult['message']);
+                    
+                    Log::info('携程直接下单：为订单创建库存不匹配异常记录', [
+                        'order_id' => $order->id,
+                        'ctrip_order_id' => $ctripOrderId,
+                    ]);
                 }
 
                 DB::commit();
 
-                Log::info('携程直接下单成功', [
-                    'ctrip_order_id' => $ctripOrderId,
-                    'order_no' => $order->order_no,
-                    'product_code' => $supplierOptionId,
-                ]);
-
-                // 检查是否系统直连，如果是则立即调用横店接口接单
-                $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
-                $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
-                
-                if ($isSystemConnected) {
-                    // 系统直连：更新状态为确认中，然后异步调用景区方接口接单
-                    Log::info('携程直接下单：系统直连，准备派发队列', [
-                        'order_id' => $order->id,
+                if ($hasInventoryIssue) {
+                    Log::info('携程直接下单：常规产品订单已创建（库存不足，待人工处理）', [
+                        'ctrip_order_id' => $ctripOrderId,
+                        'order_no' => $order->order_no,
+                        'product_code' => $supplierOptionId,
                     ]);
-                    
-                    $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程直接下单成功，等待向景区下发订单');
-                    
-                    // 异步处理景区方接口调用
-                    try {
-                        \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
-                        
-                        Log::info('携程直接下单：已成功派发 ProcessResourceOrderJob', [
-                            'order_id' => $order->id,
-                        ]);
-                    } catch (\Exception $e) {
-                        Log::error('携程直接下单：派发 ProcessResourceOrderJob 失败', [
-                            'order_id' => $order->id,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
                 } else {
-                    // 非系统直连：同步确认
-                    Log::info('携程直接下单：非系统直连，同步确认', [
-                        'order_id' => $order->id,
+                    Log::info('携程直接下单成功', [
+                        'ctrip_order_id' => $ctripOrderId,
+                        'order_no' => $order->order_no,
+                        'product_code' => $supplierOptionId,
                     ]);
+
+                    // 检查是否系统直连，如果是则立即调用横店接口接单
+                    $order->load(['hotel.scenicSpot.resourceConfig', 'hotel.scenicSpot.softwareProvider']);
+                    $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
                     
-                    $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程直接下单成功（同步确认）');
+                    if ($isSystemConnected) {
+                        // 系统直连：更新状态为确认中，然后异步调用景区方接口接单
+                        Log::info('携程直接下单：系统直连，准备派发队列', [
+                            'order_id' => $order->id,
+                        ]);
+                        
+                        $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程直接下单成功，等待向景区下发订单');
+                        
+                        // 异步处理景区方接口调用
+                        try {
+                            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
+                            
+                            Log::info('携程直接下单：已成功派发 ProcessResourceOrderJob', [
+                                'order_id' => $order->id,
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error('携程直接下单：派发 ProcessResourceOrderJob 失败', [
+                                'order_id' => $order->id,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    } else {
+                        // 非系统直连：同步确认
+                        Log::info('携程直接下单：非系统直连，同步确认', [
+                            'order_id' => $order->id,
+                        ]);
+                        
+                        $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMED, '携程直接下单成功（同步确认）');
+                    }
                 }
 
                 // 构建响应数据

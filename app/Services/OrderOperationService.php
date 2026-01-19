@@ -40,17 +40,25 @@ class OrderOperationService
      */
     public function confirmOrder(Order $order, ?string $remark = null, ?int $operatorId = null): array
     {
-        // 检查是否是异常订单
+        // 检查是否是异常订单（包括库存不匹配异常）
         $exceptionOrder = ExceptionOrder::where('order_id', $order->id)
             ->where('status', ExceptionOrderStatus::PENDING)
-            ->where('exception_data->operation', 'confirm')
+            ->where(function ($query) {
+                $query->where('exception_data->operation', 'confirm')
+                    ->orWhere('exception_type', \App\Enums\ExceptionOrderType::INVENTORY_MISMATCH);
+            })
             ->first();
 
         $resourceService = ResourceServiceFactory::getService($order, 'order');
 
         if ($exceptionOrder) {
             // 异常订单处理：直接走人工流程，不再调用资源方接口，直接对接OTA平台
-            return $this->confirmOrderManually($order, $remark ?? '异常订单人工处理：接单', $operatorId, $exceptionOrder);
+            // 如果是库存不匹配异常，备注中说明跳过库存检查
+            $finalRemark = $remark;
+            if ($exceptionOrder->exception_type === \App\Enums\ExceptionOrderType::INVENTORY_MISMATCH) {
+                $finalRemark = ($remark ?? '') . '（库存不匹配异常订单，跳过库存检查）';
+            }
+            return $this->confirmOrderManually($order, $finalRemark ?? '异常订单人工处理：接单', $operatorId, $exceptionOrder);
         } else if ($resourceService) {
             // 正常流程：系统直连时，不应该走到这里（已在 PayPreOrder 中异步处理）
             // 这里保留作为兜底逻辑，但记录警告日志

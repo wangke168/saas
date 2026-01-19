@@ -303,6 +303,17 @@
                     </el-table-column>
                 </el-table>
 
+                <el-pagination
+                    v-model:current-page="inventoryCurrentPage"
+                    v-model:page-size="inventoryPageSize"
+                    :page-sizes="[30, 50, 100]"
+                    :total="inventoryTotal"
+                    layout="total, sizes, prev, pager, next, jumper"
+                    style="margin-top: 20px;"
+                    @size-change="handleInventoryPageSizeChange"
+                    @current-change="handleInventoryPageChange"
+                />
+
                 <!-- 批量添加库存对话框 -->
                 <el-dialog
                     v-model="batchInventoryDialogVisible"
@@ -441,6 +452,9 @@ const inventoryFormRef = ref(null);
 const inventorySubmitting = ref(false);
 const editingInventoryId = ref(null);
 const pushingInventories = ref({});
+const inventoryCurrentPage = ref(1);
+const inventoryPageSize = ref(30);
+const inventoryTotal = ref(0);
 
 const isEdit = computed(() => editingId.value !== null);
 const dialogTitle = computed(() => isEdit.value ? '编辑酒店' : '创建酒店');
@@ -788,6 +802,7 @@ const resetRoomTypeDialog = () => {
 // 库存管理
 const handleManageInventory = async (roomType) => {
     currentRoomType.value = roomType;
+    inventoryCurrentPage.value = 1;
     inventoryDialogVisible.value = true;
     await fetchInventories(roomType.id);
 };
@@ -795,7 +810,11 @@ const handleManageInventory = async (roomType) => {
 const fetchInventories = async (roomTypeId) => {
     inventoryLoading.value = true;
     try {
-        const params = { room_type_id: roomTypeId };
+        const params = { 
+            room_type_id: roomTypeId,
+            page: inventoryCurrentPage.value,
+            per_page: inventoryPageSize.value,
+        };
         
         if (inventoryDateRange.value && inventoryDateRange.value.length === 2) {
             params.start_date = formatDate(inventoryDateRange.value[0]);
@@ -804,6 +823,7 @@ const fetchInventories = async (roomTypeId) => {
         
         const response = await axios.get('/inventories', { params });
         inventories.value = response.data.data || [];
+        inventoryTotal.value = response.data.total || 0;
     } catch (error) {
         ElMessage.error('获取库存列表失败');
         console.error(error);
@@ -813,6 +833,20 @@ const fetchInventories = async (roomTypeId) => {
 };
 
 const handleInventoryDateRangeChange = () => {
+    inventoryCurrentPage.value = 1;
+    if (currentRoomType.value) {
+        fetchInventories(currentRoomType.value.id);
+    }
+};
+
+const handleInventoryPageChange = () => {
+    if (currentRoomType.value) {
+        fetchInventories(currentRoomType.value.id);
+    }
+};
+
+const handleInventoryPageSizeChange = () => {
+    inventoryCurrentPage.value = 1;
     if (currentRoomType.value) {
         fetchInventories(currentRoomType.value.id);
     }
@@ -962,6 +996,8 @@ const resetInventoryDialog = () => {
     inventories.value = [];
     inventoryDateRange.value = null;
     editingInventoryId.value = null;
+    inventoryCurrentPage.value = 1;
+    inventoryTotal.value = 0;
 };
 
 const formatDate = (date) => {

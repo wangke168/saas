@@ -29,12 +29,26 @@ class OrderProcessorService
         try {
             DB::beginTransaction();
 
-            // 1. 锁定库存
-            if (!$this->lockInventory($order)) {
-                // 库存不足，不直接拒单，保留订单供人工处理
-                $this->createExceptionOrder($order, ExceptionOrderType::INVENTORY_MISMATCH, '库存不足');
-                DB::commit();
-                return;
+            // 1. 检查是否已存在库存不匹配的异常订单（人工处理时跳过库存检查）
+            $existingInventoryException = ExceptionOrder::where('order_id', $order->id)
+                ->where('exception_type', ExceptionOrderType::INVENTORY_MISMATCH)
+                ->where('status', \App\Enums\ExceptionOrderStatus::PENDING)
+                ->first();
+            
+            // 如果已存在库存不匹配异常订单，跳过库存检查（人工处理场景）
+            if ($existingInventoryException) {
+                Log::info('订单处理：检测到库存不匹配异常订单，跳过库存检查', [
+                    'order_id' => $order->id,
+                    'exception_order_id' => $existingInventoryException->id,
+                ]);
+            } else {
+                // 锁定库存
+                if (!$this->lockInventory($order)) {
+                    // 库存不足，不直接拒单，保留订单供人工处理
+                    $this->createExceptionOrder($order, ExceptionOrderType::INVENTORY_MISMATCH, '库存不足');
+                    DB::commit();
+                    return;
+                }
             }
 
             // 2. 更新订单状态为确认中

@@ -46,7 +46,7 @@ class InventoryController extends Controller
             });
         }
 
-        $inventories = $query->orderBy('date')->paginate($request->get('per_page', 50));
+        $inventories = $query->orderBy('date')->paginate($request->get('per_page', 30));
 
         return response()->json($inventories);
     }
