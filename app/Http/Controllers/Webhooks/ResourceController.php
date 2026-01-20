@@ -283,22 +283,62 @@ class ResourceController extends Controller
                         continue;
                     }
 
-                    // 查找房型（优先使用external_code，否则使用name）
+                    // 查找房型（严格匹配：优先external_code，避免误匹配）
+                    // 修复：当房型标识变更时（如"标准间"改为"豪华标准间"），避免通过name匹配到错误的房型
+                    $roomTypeModel = null;
+
+                    // 第一步：优先精确匹配 external_code
                     $roomTypeModel = RoomType::where('hotel_id', $hotel->id)
-                        ->where(function($query) use ($roomType) {
-                            $query->where('external_code', $roomType)
-                                  ->orWhere('name', $roomType);
-                        })
+                        ->where('external_code', $roomType)
                         ->first();
 
+                    // 第二步：如果未匹配到，检查是否有房型设置了 external_code
                     if (!$roomTypeModel) {
-                        $failCount++;
-                        $errors[] = "未找到房型：{$roomType}（酒店：{$hotelNo}）";
-                        Log::warning('资源方库存推送：未找到房型', [
-                            'hotel_id' => $hotel->id,
-                            'room_type' => $roomType,
-                        ]);
-                        continue;
+                        $hasAnyExternalCode = RoomType::where('hotel_id', $hotel->id)
+                            ->whereNotNull('external_code')
+                            ->where('external_code', '!=', '')
+                            ->exists();
+                        
+                        if ($hasAnyExternalCode) {
+                            // 如果酒店下有房型设置了 external_code，但当前推送的 roomType 未匹配到
+                            // 说明可能是房型标识已变更，记录警告但不使用 name 匹配（避免错误匹配）
+                            $failCount++;
+                            $errorMsg = "未找到房型：{$roomType}（酒店：{$hotelNo}）。该酒店下存在设置了external_code的房型，但未匹配到对应的external_code，可能是房型标识已变更";
+                            $errors[] = $errorMsg;
+                            Log::warning('资源方库存推送：房型external_code未匹配，且酒店下存在设置了external_code的房型', [
+                                'hotel_id' => $hotel->id,
+                                'hotel_no' => $hotelNo,
+                                'hotel_name' => $hotel->name ?? '',
+                                'room_type' => $roomType,
+                                'suggestion' => '请检查房型的external_code是否正确，或横店系统推送的roomType是否已变更。如果房型标识已变更，请更新对应房型的external_code',
+                            ]);
+                            continue;
+                        } else {
+                            // 如果酒店下所有房型都没有设置 external_code，使用 name 匹配（向后兼容）
+                            $roomTypeModel = RoomType::where('hotel_id', $hotel->id)
+                                ->where('name', $roomType)
+                                ->first();
+                            
+                            if (!$roomTypeModel) {
+                                $failCount++;
+                                $errors[] = "未找到房型：{$roomType}（酒店：{$hotelNo}）";
+                                Log::warning('资源方库存推送：未找到房型（通过name匹配也失败）', [
+                                    'hotel_id' => $hotel->id,
+                                    'hotel_no' => $hotelNo,
+                                    'room_type' => $roomType,
+                                ]);
+                                continue;
+                            }
+                            
+                            // 记录使用name匹配的日志（用于排查）
+                            Log::info('资源方库存推送：使用name匹配房型（该酒店下所有房型都未设置external_code）', [
+                                'hotel_id' => $hotel->id,
+                                'hotel_no' => $hotelNo,
+                                'room_type' => $roomType,
+                                'matched_room_type_id' => $roomTypeModel->id,
+                                'matched_room_type_name' => $roomTypeModel->name,
+                            ]);
+                        }
                     }
 
                     // Redis 指纹比对，找出变化的库存
