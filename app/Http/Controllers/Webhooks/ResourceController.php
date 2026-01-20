@@ -286,11 +286,44 @@ class ResourceController extends Controller
                     // 查找房型（严格匹配：优先external_code，避免误匹配）
                     // 修复：当房型标识变更时（如"标准间"改为"豪华标准间"），避免通过name匹配到错误的房型
                     $roomTypeModel = null;
+                    $matchMethod = null; // 记录匹配方式：'external_code' 或 'name'
+
+                    // 记录该酒店下所有房型信息（用于排查）
+                    $allRoomTypes = RoomType::where('hotel_id', $hotel->id)
+                        ->get(['id', 'name', 'external_code'])
+                        ->map(function($rt) {
+                            return [
+                                'id' => $rt->id,
+                                'name' => $rt->name,
+                                'external_code' => $rt->external_code,
+                            ];
+                        })
+                        ->toArray();
+                    
+                    Log::info('资源方库存推送：开始匹配房型', [
+                        'hotel_id' => $hotel->id,
+                        'hotel_no' => $hotelNo,
+                        'hotel_name' => $hotel->name ?? '',
+                        'pushed_room_type' => $roomType,
+                        'all_room_types' => $allRoomTypes,
+                    ]);
 
                     // 第一步：优先精确匹配 external_code
                     $roomTypeModel = RoomType::where('hotel_id', $hotel->id)
                         ->where('external_code', $roomType)
                         ->first();
+
+                    if ($roomTypeModel) {
+                        $matchMethod = 'external_code';
+                        Log::info('资源方库存推送：通过external_code匹配到房型', [
+                            'hotel_id' => $hotel->id,
+                            'hotel_no' => $hotelNo,
+                            'pushed_room_type' => $roomType,
+                            'matched_room_type_id' => $roomTypeModel->id,
+                            'matched_room_type_name' => $roomTypeModel->name,
+                            'matched_room_type_external_code' => $roomTypeModel->external_code,
+                        ]);
+                    }
 
                     // 第二步：如果未匹配到，检查是否有房型设置了 external_code
                     if (!$roomTypeModel) {
@@ -298,6 +331,13 @@ class ResourceController extends Controller
                             ->whereNotNull('external_code')
                             ->where('external_code', '!=', '')
                             ->exists();
+                        
+                        Log::info('资源方库存推送：external_code匹配失败，检查酒店下是否有房型设置了external_code', [
+                            'hotel_id' => $hotel->id,
+                            'hotel_no' => $hotelNo,
+                            'pushed_room_type' => $roomType,
+                            'has_any_external_code' => $hasAnyExternalCode,
+                        ]);
                         
                         if ($hasAnyExternalCode) {
                             // 如果酒店下有房型设置了 external_code，但当前推送的 roomType 未匹配到
@@ -309,12 +349,19 @@ class ResourceController extends Controller
                                 'hotel_id' => $hotel->id,
                                 'hotel_no' => $hotelNo,
                                 'hotel_name' => $hotel->name ?? '',
-                                'room_type' => $roomType,
+                                'pushed_room_type' => $roomType,
+                                'all_room_types' => $allRoomTypes,
                                 'suggestion' => '请检查房型的external_code是否正确，或横店系统推送的roomType是否已变更。如果房型标识已变更，请更新对应房型的external_code',
                             ]);
                             continue;
                         } else {
                             // 如果酒店下所有房型都没有设置 external_code，使用 name 匹配（向后兼容）
+                            Log::info('资源方库存推送：酒店下所有房型都未设置external_code，尝试使用name匹配', [
+                                'hotel_id' => $hotel->id,
+                                'hotel_no' => $hotelNo,
+                                'pushed_room_type' => $roomType,
+                            ]);
+                            
                             $roomTypeModel = RoomType::where('hotel_id', $hotel->id)
                                 ->where('name', $roomType)
                                 ->first();
@@ -325,18 +372,23 @@ class ResourceController extends Controller
                                 Log::warning('资源方库存推送：未找到房型（通过name匹配也失败）', [
                                     'hotel_id' => $hotel->id,
                                     'hotel_no' => $hotelNo,
-                                    'room_type' => $roomType,
+                                    'pushed_room_type' => $roomType,
+                                    'all_room_types' => $allRoomTypes,
                                 ]);
                                 continue;
                             }
                             
+                            $matchMethod = 'name';
                             // 记录使用name匹配的日志（用于排查）
-                            Log::info('资源方库存推送：使用name匹配房型（该酒店下所有房型都未设置external_code）', [
+                            Log::warning('资源方库存推送：使用name匹配房型（该酒店下所有房型都未设置external_code）', [
                                 'hotel_id' => $hotel->id,
                                 'hotel_no' => $hotelNo,
-                                'room_type' => $roomType,
+                                'pushed_room_type' => $roomType,
                                 'matched_room_type_id' => $roomTypeModel->id,
                                 'matched_room_type_name' => $roomTypeModel->name,
+                                'matched_room_type_external_code' => $roomTypeModel->external_code,
+                                'all_room_types' => $allRoomTypes,
+                                'warning' => '建议为该酒店下的房型设置external_code，以确保匹配准确性',
                             ]);
                         }
                     }
