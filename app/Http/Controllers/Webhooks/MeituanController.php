@@ -10,11 +10,18 @@ use App\Http\Client\MeituanClient;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Models\OtaPlatform as OtaPlatformModel;
+use App\Models\Pkg\PkgProduct;
+use App\Models\Pkg\PkgOrder;
+use App\Models\Pkg\PkgProductDailyPrice;
+use App\Models\Res\ResHotel;
+use App\Models\Res\ResRoomType;
+use App\Models\Res\ResHotelDailyStock;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use App\Services\Resource\ResourceServiceFactory;
+use App\Services\OTA\MeituanService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -465,229 +472,508 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '使用日期(useDate)为空', $partnerId, true);  // 订单创建V2需要加密
             }
 
-            // 根据产品编码查找产品
-            $product = \App\Models\Product::where('code', $partnerDealId)->first();
-            if (!$product) {
-                DB::rollBack();
-                Log::error('美团订单创建V2：产品不存在', [
+            // 判断产品类型：根据产品编号是否以 "pkg" 开头（不区分大小写）
+            $isPkgProduct = strtolower(substr($partnerDealId, 0, 3)) === 'pkg';
+            
+            Log::info('美团订单创建V2：解析产品类型', [
+                'partner_deal_id' => $partnerDealId,
+                'is_pkg_product' => $isPkgProduct,
+            ]);
+
+            // 分支处理：打包产品和常规产品
+            if ($isPkgProduct) {
+                // ========== 打包产品处理逻辑 ==========
+                // 根据产品编码查找打包产品（去除前后空格）
+                $searchCode = trim($partnerDealId);
+                
+                Log::info('美团订单创建V2：查找打包产品', [
                     'partner_deal_id' => $partnerDealId,
+                    'search_code' => $searchCode,
+                    'search_code_length' => strlen($searchCode),
                 ]);
-                return $this->errorResponse(505, '产品不存在', $partnerId, true);  // 订单创建V2需要加密
-            }
-
-            // 查找产品关联的酒店和房型（通过价格表）
-            $price = $product->prices()->where('date', $useDate)->first();
-            if (!$price) {
-                DB::rollBack();
-                Log::error('美团订单创建V2：指定日期没有价格', [
-                    'product_id' => $product->id,
-                    'use_date' => $useDate,
-                ]);
-                return $this->errorResponse(400, '指定日期没有价格', $partnerId, true);  // 订单创建V2需要加密
-            }
-
-            $roomType = $price->roomType;
-            $hotel = $roomType->hotel ?? null;
-
-            if (!$hotel || !$roomType) {
-                DB::rollBack();
-                Log::error('美团订单创建V2：产品未关联酒店或房型', [
-                    'product_id' => $product->id,
-                ]);
-                return $this->errorResponse(400, '产品未关联酒店或房型', $partnerId);
-            }
-
-            // 检查库存（考虑入住天数）
-            $stayDays = $product->stay_days ?: 1;
-            $checkInDate = \Carbon\Carbon::parse($useDate);
-            
-            // 检查连续入住天数的库存是否足够
-            $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
-            if (!$inventoryCheck['success']) {
-                DB::rollBack();
-                return $this->errorResponse(503, $inventoryCheck['message'], $partnerId);
-            }
-
-            // 检查是否已存在订单（防止重复）
-            $existingOrder = Order::where('ota_order_no', (string)$orderId)
-                ->where('ota_platform_id', $otaPlatform->id)
-                ->first();
-
-            if ($existingOrder) {
-                // 已存在，返回成功（幂等性）
-                DB::rollBack();
-                Log::info('美团订单创建V2：订单已存在，返回成功', [
-                    'order_id' => $orderId,
-                    'order_no' => $existingOrder->order_no,
-                ]);
-                return $this->successResponse([
-                    'orderId' => intval($orderId),
-                    'partnerOrderId' => $existingOrder->order_no,
-                ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
-            }
-
-            // 计算价格
-            $priceData = app(\App\Services\ProductService::class)->calculatePrice(
-                $product,
-                $roomType->id,
-                $useDate
-            );
-            $salePrice = floatval($priceData['sale_price']);
-            $settlementPrice = floatval($priceData['settlement_price']);
-
-            // 处理联系人信息
-            $contactName = $contactInfo['name'] ?? '';
-            $contactPhone = $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '';
-            $contactEmail = $contactInfo['email'] ?? '';
-
-            // 处理实名制订单
-            // 如果请求中有credentialList，自动将realNameType设置为1（即使请求中realNameType=0）
-            if (!empty($credentialList)) {
-                $realNameType = 1; // 有证件信息，强制设置为实名制
-            }
-            
-            $credentialListData = null;
-            if ($realNameType === 1 && !empty($credentialList)) {
-                $credentialListData = [];
-                foreach ($credentialList as $credential) {
-                    $credentialListData[] = [
-                        'credentialType' => intval($credential['credentialType'] ?? 0),
-                        'credentialNo' => $credential['credentialNo'] ?? '',
-                        'voucher' => $credential['voucher'] ?? '',
-                        'status' => 0, // 0=未使用
-                    ];
-                }
-            }
-
-            // 构建 guest_info，确保包含 name 和 idCode（横店服务需要）
-            // 横店服务期望的格式：[{name: "xxx", idCode: "xxx", cardNo: "xxx"}]
-            $guestInfo = [];
-            
-            // 优先从 visitors 中构建客人信息（美团可能使用 visitors 字段）
-            if (!empty($contacts) && is_array($contacts)) {
-                foreach ($contacts as $contact) {
-                    $guestName = $contact['name'] ?? $contactName;
-                    $guestIdCode = '';
+                
+                // 先精确匹配
+                $pkgProduct = PkgProduct::where('product_code', $searchCode)->first();
+                
+                // 如果精确匹配失败，尝试查找相似的产品编码（用于调试）
+                if (!$pkgProduct) {
+                    // 查找所有包含相似字符的打包产品（用于调试）
+                    $similarProducts = PkgProduct::where('product_code', 'like', '%' . substr($searchCode, 0, 10) . '%')
+                        ->limit(5)
+                        ->pluck('product_code', 'id')
+                        ->toArray();
                     
-                    // 从 contact 的 credentials 中获取证件号
-                    if (!empty($contact['credentials']) && is_array($contact['credentials'])) {
-                        // credentials 可能是数组，取第一个证件号
-                        $guestIdCode = reset($contact['credentials']) ?: '';
+                    Log::error('美团订单创建V2：打包产品不存在', [
+                        'partner_deal_id' => $partnerDealId,
+                        'search_code' => $searchCode,
+                        'similar_products' => $similarProducts,
+                        'similar_count' => count($similarProducts),
+                    ]);
+                    
+                    DB::rollBack();
+                    return $this->errorResponse(505, '打包产品不存在', $partnerId, true);  // 订单创建V2需要加密
+                }
+                
+                Log::info('美团订单创建V2：找到打包产品', [
+                    'partner_deal_id' => $partnerDealId,
+                    'pkg_product_id' => $pkgProduct->id,
+                    'product_code' => $pkgProduct->product_code,
+                ]);
+
+                // 从请求中获取 partnerPrimaryKey（用于确定酒店和房型）
+                $partnerPrimaryKey = $body['partnerPrimaryKey'] ?? null;
+                
+                if (empty($partnerPrimaryKey)) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：打包产品订单缺少partnerPrimaryKey', [
+                        'partner_deal_id' => $partnerDealId,
+                    ]);
+                    return $this->errorResponse(400, '打包产品订单缺少partnerPrimaryKey', $partnerId, true);
+                }
+
+                // 从 PkgProductDailyPrice 表中查找匹配的酒店和房型
+                // 根据 pkg_product_id 和 biz_date 查找所有记录，然后计算 partnerPrimaryKey 匹配
+                $pkgDailyPrices = PkgProductDailyPrice::where('pkg_product_id', $pkgProduct->id)
+                    ->where('biz_date', $useDate)
+                    ->with(['hotel', 'roomType'])
+                    ->get();
+
+                $matchedDailyPrice = null;
+                $meituanService = app(MeituanService::class);
+                
+                foreach ($pkgDailyPrices as $dailyPrice) {
+                    $hotel = $dailyPrice->hotel;
+                    $roomType = $dailyPrice->roomType;
+                    
+                    if (!$hotel || !$roomType) {
+                        continue;
                     }
                     
-                    // 如果 credentials 中没有，尝试从 credentialList 中匹配
-                    if (empty($guestIdCode) && !empty($credentialList)) {
-                        // 如果只有一个证件，直接使用
-                        if (count($credentialList) === 1) {
-                            $guestIdCode = $credentialList[0]['credentialNo'] ?? '';
+                    // 计算 partnerPrimaryKey
+                    $calculatedKey = $meituanService->generatePartnerPrimaryKey(
+                        $hotel->id,
+                        $roomType->id,
+                        $useDate
+                    );
+                    
+                    if ($calculatedKey === $partnerPrimaryKey) {
+                        $matchedDailyPrice = $dailyPrice;
+                        break;
+                    }
+                }
+
+                if (!$matchedDailyPrice) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：无法匹配酒店和房型', [
+                        'partner_deal_id' => $partnerDealId,
+                        'partner_primary_key' => $partnerPrimaryKey,
+                        'use_date' => $useDate,
+                        'matched_prices_count' => $pkgDailyPrices->count(),
+                    ]);
+                    return $this->errorResponse(400, '无法匹配酒店和房型', $partnerId, true);
+                }
+
+                $resHotel = $matchedDailyPrice->hotel;
+                $resRoomType = $matchedDailyPrice->roomType;
+
+                if (!$resHotel || !$resRoomType) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：打包产品价格记录未关联酒店或房型', [
+                        'pkg_product_id' => $pkgProduct->id,
+                        'daily_price_id' => $matchedDailyPrice->id,
+                    ]);
+                    return $this->errorResponse(400, '打包产品价格记录未关联酒店或房型', $partnerId, true);
+                }
+
+                // 检查库存（考虑入住天数）
+                $stayDays = $pkgProduct->stay_days ?? 1;
+                $checkInDate = \Carbon\Carbon::parse($useDate);
+                
+                // 检查连续入住天数的库存是否足够（使用打包酒店库存表）
+                $inventoryCheck = $this->checkResHotelStockForStayDays($resRoomType->id, $checkInDate, $stayDays, $quantity);
+                if (!$inventoryCheck['success']) {
+                    DB::rollBack();
+                    Log::warning('美团订单创建V2：打包产品库存检查失败', [
+                        'room_type_id' => $resRoomType->id,
+                        'check_in_date' => $checkInDate->format('Y-m-d'),
+                        'stay_days' => $stayDays,
+                        'quantity' => $quantity,
+                        'error_message' => $inventoryCheck['message'],
+                    ]);
+                    return $this->errorResponse(503, $inventoryCheck['message'], $partnerId, true);
+                }
+
+                // 检查是否已存在打包订单（防止重复）
+                $existingPkgOrder = PkgOrder::where('ota_order_no', (string)$orderId)
+                    ->where('ota_platform_id', $otaPlatform->id)
+                    ->first();
+
+                if ($existingPkgOrder) {
+                    // 已存在，返回成功（幂等性）
+                    DB::rollBack();
+                    Log::info('美团订单创建V2：打包订单已存在，返回成功', [
+                        'order_id' => $orderId,
+                        'pkg_order_no' => $existingPkgOrder->order_no,
+                    ]);
+                    return $this->successResponse([
+                        'orderId' => intval($orderId),
+                        'partnerOrderId' => $existingPkgOrder->order_no,
+                    ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
+                }
+
+                // 计算价格
+                $salePrice = floatval($matchedDailyPrice->sale_price) / 100; // 分转元
+                $costPrice = floatval($matchedDailyPrice->cost_price) / 100; // 分转元
+
+                // 处理联系人信息
+                $contactName = $contactInfo['name'] ?? '';
+                $contactPhone = $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '';
+                $contactEmail = $contactInfo['email'] ?? '';
+
+                // 处理实名制订单
+                if (!empty($credentialList)) {
+                    $realNameType = 1; // 有证件信息，强制设置为实名制
+                }
+                
+                $credentialListData = null;
+                if ($realNameType === 1 && !empty($credentialList)) {
+                    $credentialListData = [];
+                    foreach ($credentialList as $credential) {
+                        $credentialListData[] = [
+                            'credentialType' => intval($credential['credentialType'] ?? 0),
+                            'credentialNo' => $credential['credentialNo'] ?? '',
+                            'voucher' => $credential['voucher'] ?? '',
+                            'status' => 0, // 0=未使用
+                        ];
+                    }
+                }
+
+                // 构建 guest_info
+                $guestInfo = [];
+                if (!empty($contacts) && is_array($contacts)) {
+                    foreach ($contacts as $contact) {
+                        $guestName = $contact['name'] ?? $contactName;
+                        $guestIdCode = '';
+                        
+                        if (!empty($contact['credentials']) && is_array($contact['credentials'])) {
+                            $guestIdCode = reset($contact['credentials']) ?: '';
+                        }
+                        
+                        if (empty($guestIdCode) && !empty($credentialList)) {
+                            if (count($credentialList) === 1) {
+                                $guestIdCode = $credentialList[0]['credentialNo'] ?? '';
+                            }
+                        }
+                        
+                        if (!empty($guestName) || !empty($guestIdCode)) {
+                            $guestInfo[] = [
+                                'name' => $guestName,
+                                'idCode' => $guestIdCode,
+                                'cardNo' => $guestIdCode,
+                                'credentialType' => 0,
+                                'credentialNo' => $guestIdCode,
+                            ];
                         }
                     }
-                    
-                    // 只有当姓名或证件号至少有一个时才添加
-                    if (!empty($guestName) || !empty($guestIdCode)) {
-                        $guestInfo[] = [
-                            'name' => $guestName,
-                            'idCode' => $guestIdCode,
-                            'cardNo' => $guestIdCode, // 兼容携程格式
-                            'credentialType' => 0, // 默认身份证
-                            'credentialNo' => $guestIdCode,
-                        ];
+                }
+                
+                if (empty($guestInfo) && !empty($credentialList)) {
+                    foreach ($credentialList as $credential) {
+                        $credentialNo = $credential['credentialNo'] ?? '';
+                        $guestName = $contactName;
+                        
+                        if (!empty($credentialNo) || !empty($guestName)) {
+                            $guestInfo[] = [
+                                'name' => $guestName,
+                                'idCode' => $credentialNo,
+                                'cardNo' => $credentialNo,
+                                'credentialType' => $credential['credentialType'] ?? 0,
+                                'credentialNo' => $credentialNo,
+                            ];
+                        }
                     }
                 }
-            }
-            
-            // 如果没有从 visitors 中获取到信息，尝试从 credentialList 构建
-            if (empty($guestInfo) && !empty($credentialList)) {
-                foreach ($credentialList as $credential) {
-                    $credentialNo = $credential['credentialNo'] ?? '';
-                    $guestName = $contactName; // 使用联系人姓名
-                    
-                    if (!empty($credentialNo) || !empty($guestName)) {
-                        $guestInfo[] = [
-                            'name' => $guestName,
-                            'idCode' => $credentialNo,
-                            'cardNo' => $credentialNo, // 兼容携程格式
-                            'credentialType' => $credential['credentialType'] ?? 0,
-                            'credentialNo' => $credentialNo,
-                        ];
-                    }
+                
+                if (empty($guestInfo) && !empty($contactName)) {
+                    $guestInfo[] = [
+                        'name' => $contactName,
+                        'idCode' => '',
+                        'cardNo' => '',
+                    ];
                 }
-            }
-            
-            // 如果还是没有信息，至少保存联系人信息
-            if (empty($guestInfo) && !empty($contactName)) {
-                $guestInfo[] = [
-                    'name' => $contactName,
-                    'idCode' => '',
-                    'cardNo' => '',
-                ];
-            }
 
-            Log::info('美团订单创建V2：构建客人信息', [
-                'order_id' => $orderId,
-                'contact_name' => $contactName,
-                'credential_list_count' => count($credentialList),
-                'guest_info_count' => count($guestInfo),
-                'guest_info' => $guestInfo,
-            ]);
+                // 计算离店日期
+                $checkOutDate = \Carbon\Carbon::parse($useDate)->addDays($stayDays)->format('Y-m-d');
 
-            // 计算离店日期（根据产品入住天数）
-            $stayDays = $product->stay_days ?: 1;
-            $checkOutDate = \Carbon\Carbon::parse($useDate)->addDays($stayDays)->format('Y-m-d');
-            
-            Log::info('美团订单创建V2：根据产品入住天数计算离店日期', [
-                'use_date' => $useDate,
-                'stay_days' => $stayDays,
-                'calculated_check_out_date' => $checkOutDate,
-            ]);
-
-            // 创建订单
-            $order = Order::create([
-                'order_no' => $this->generateOrderNo(),
-                'ota_order_no' => (string)$orderId,
-                'ota_platform_id' => $otaPlatform->id,
-                'product_id' => $product->id,
-                'hotel_id' => $hotel->id,
-                'room_type_id' => $roomType->id,
-                'status' => OrderStatus::PAID_PENDING,
-                'check_in_date' => $useDate,
-                'check_out_date' => $checkOutDate,
-                'room_count' => $quantity,
-                'guest_count' => $quantity, // 默认等于房间数
-                'contact_name' => $contactName,
-                'contact_phone' => $contactPhone,
-                'contact_email' => $contactEmail,
-                'guest_info' => $guestInfo, // 使用构建好的 guest_info，包含 name 和 idCode
-                'real_name_type' => $realNameType,
-                'credential_list' => $credentialListData,
-                'total_amount' => intval($salePrice * $quantity), // prices表已是以分为单位，直接使用
-                'settlement_amount' => intval($settlementPrice * $quantity), // prices表已是以分为单位，直接使用
-                'paid_at' => null, // 订单创建时还未支付
-            ]);
-
-            // 锁定库存（订单创建的核心目的就是锁库存）
-            $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
-            if (!$lockResult['success']) {
-                DB::rollBack();
-                Log::error('美团订单创建V2：库存锁定失败', [
-                    'order_id' => $order->id,
-                    'error' => $lockResult['message'],
+                // 创建打包订单
+                $pkgOrder = PkgOrder::create([
+                    'order_no' => $this->generateOrderNo(),
+                    'ota_order_no' => (string)$orderId,
+                    'ota_platform_id' => $otaPlatform->id,
+                    'pkg_product_id' => $pkgProduct->id,
+                    'hotel_id' => $resHotel->id,
+                    'room_type_id' => $resRoomType->id,
+                    'status' => \App\Enums\PkgOrderStatus::PAID, // 预下单时使用PAID状态（待确认）
+                    'check_in_date' => $useDate,
+                    'check_out_date' => $checkOutDate,
+                    'stay_days' => $stayDays,
+                    'total_amount' => intval($salePrice * $quantity * 100), // 转换为分
+                    'settlement_amount' => intval($costPrice * $quantity * 100), // 转换为分
+                    'contact_name' => $contactName,
+                    'contact_phone' => $contactPhone,
+                    'contact_email' => $contactEmail,
+                    'paid_at' => null, // 订单创建时还未支付
                 ]);
-                return $this->errorResponse(503, '库存锁定失败：' . $lockResult['message'], $partnerId);
+
+                // 锁定库存（预下单的核心目的就是锁库存）
+                $lockResult = $this->lockResHotelStockForPreOrder($pkgOrder, $stayDays, $quantity);
+                if (!$lockResult['success']) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：打包产品库存锁定失败', [
+                        'pkg_order_id' => $pkgOrder->id,
+                        'error' => $lockResult['message'],
+                    ]);
+                    return $this->errorResponse(503, '库存锁定失败：' . $lockResult['message'], $partnerId, true);
+                }
+
+                DB::commit();
+
+                Log::info('美团订单创建V2成功（打包产品）', [
+                    'order_id' => $orderId,
+                    'pkg_order_no' => $pkgOrder->order_no,
+                    'partner_deal_id' => $partnerDealId,
+                ]);
+
+                return $this->successResponse([
+                    'orderId' => intval($orderId),
+                    'partnerOrderId' => $pkgOrder->order_no,
+                ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
+            } else {
+                // ========== 常规产品处理逻辑（完全保留原有逻辑） ==========
+                // 根据产品编码查找产品
+                $product = \App\Models\Product::where('code', $partnerDealId)->first();
+                if (!$product) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：产品不存在', [
+                        'partner_deal_id' => $partnerDealId,
+                    ]);
+                    return $this->errorResponse(505, '产品不存在', $partnerId, true);  // 订单创建V2需要加密
+                }
+
+                // 查找产品关联的酒店和房型（通过价格表）
+                $price = $product->prices()->where('date', $useDate)->first();
+                if (!$price) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：指定日期没有价格', [
+                        'product_id' => $product->id,
+                        'use_date' => $useDate,
+                    ]);
+                    return $this->errorResponse(400, '指定日期没有价格', $partnerId, true);  // 订单创建V2需要加密
+                }
+
+                $roomType = $price->roomType;
+                $hotel = $roomType->hotel ?? null;
+
+                if (!$hotel || !$roomType) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：产品未关联酒店或房型', [
+                        'product_id' => $product->id,
+                    ]);
+                    return $this->errorResponse(400, '产品未关联酒店或房型', $partnerId);
+                }
+
+                // 检查库存（考虑入住天数）
+                $stayDays = $product->stay_days ?: 1;
+                $checkInDate = \Carbon\Carbon::parse($useDate);
+                
+                // 检查连续入住天数的库存是否足够
+                $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
+                if (!$inventoryCheck['success']) {
+                    DB::rollBack();
+                    return $this->errorResponse(503, $inventoryCheck['message'], $partnerId);
+                }
+
+                // 检查是否已存在订单（防止重复）
+                $existingOrder = Order::where('ota_order_no', (string)$orderId)
+                    ->where('ota_platform_id', $otaPlatform->id)
+                    ->first();
+
+                if ($existingOrder) {
+                    // 已存在，返回成功（幂等性）
+                    DB::rollBack();
+                    Log::info('美团订单创建V2：订单已存在，返回成功', [
+                        'order_id' => $orderId,
+                        'order_no' => $existingOrder->order_no,
+                    ]);
+                    return $this->successResponse([
+                        'orderId' => intval($orderId),
+                        'partnerOrderId' => $existingOrder->order_no,
+                    ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
+                }
+
+                // 计算价格
+                $priceData = app(\App\Services\ProductService::class)->calculatePrice(
+                    $product,
+                    $roomType->id,
+                    $useDate
+                );
+                $salePrice = floatval($priceData['sale_price']);
+                $settlementPrice = floatval($priceData['settlement_price']);
+
+                // 处理联系人信息
+                $contactName = $contactInfo['name'] ?? '';
+                $contactPhone = $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '';
+                $contactEmail = $contactInfo['email'] ?? '';
+
+                // 处理实名制订单
+                // 如果请求中有credentialList，自动将realNameType设置为1（即使请求中realNameType=0）
+                if (!empty($credentialList)) {
+                    $realNameType = 1; // 有证件信息，强制设置为实名制
+                }
+                
+                $credentialListData = null;
+                if ($realNameType === 1 && !empty($credentialList)) {
+                    $credentialListData = [];
+                    foreach ($credentialList as $credential) {
+                        $credentialListData[] = [
+                            'credentialType' => intval($credential['credentialType'] ?? 0),
+                            'credentialNo' => $credential['credentialNo'] ?? '',
+                            'voucher' => $credential['voucher'] ?? '',
+                            'status' => 0, // 0=未使用
+                        ];
+                    }
+                }
+
+                // 构建 guest_info，确保包含 name 和 idCode（横店服务需要）
+                // 横店服务期望的格式：[{name: "xxx", idCode: "xxx", cardNo: "xxx"}]
+                $guestInfo = [];
+                
+                // 优先从 visitors 中构建客人信息（美团可能使用 visitors 字段）
+                if (!empty($contacts) && is_array($contacts)) {
+                    foreach ($contacts as $contact) {
+                        $guestName = $contact['name'] ?? $contactName;
+                        $guestIdCode = '';
+                        
+                        // 从 contact 的 credentials 中获取证件号
+                        if (!empty($contact['credentials']) && is_array($contact['credentials'])) {
+                            // credentials 可能是数组，取第一个证件号
+                            $guestIdCode = reset($contact['credentials']) ?: '';
+                        }
+                        
+                        // 如果 credentials 中没有，尝试从 credentialList 中匹配
+                        if (empty($guestIdCode) && !empty($credentialList)) {
+                            // 如果只有一个证件，直接使用
+                            if (count($credentialList) === 1) {
+                                $guestIdCode = $credentialList[0]['credentialNo'] ?? '';
+                            }
+                        }
+                        
+                        // 只有当姓名或证件号至少有一个时才添加
+                        if (!empty($guestName) || !empty($guestIdCode)) {
+                            $guestInfo[] = [
+                                'name' => $guestName,
+                                'idCode' => $guestIdCode,
+                                'cardNo' => $guestIdCode, // 兼容携程格式
+                                'credentialType' => 0, // 默认身份证
+                                'credentialNo' => $guestIdCode,
+                            ];
+                        }
+                    }
+                }
+                
+                // 如果没有从 visitors 中获取到信息，尝试从 credentialList 构建
+                if (empty($guestInfo) && !empty($credentialList)) {
+                    foreach ($credentialList as $credential) {
+                        $credentialNo = $credential['credentialNo'] ?? '';
+                        $guestName = $contactName; // 使用联系人姓名
+                        
+                        if (!empty($credentialNo) || !empty($guestName)) {
+                            $guestInfo[] = [
+                                'name' => $guestName,
+                                'idCode' => $credentialNo,
+                                'cardNo' => $credentialNo, // 兼容携程格式
+                                'credentialType' => $credential['credentialType'] ?? 0,
+                                'credentialNo' => $credentialNo,
+                            ];
+                        }
+                    }
+                }
+                
+                // 如果还是没有信息，至少保存联系人信息
+                if (empty($guestInfo) && !empty($contactName)) {
+                    $guestInfo[] = [
+                        'name' => $contactName,
+                        'idCode' => '',
+                        'cardNo' => '',
+                    ];
+                }
+
+                Log::info('美团订单创建V2：构建客人信息', [
+                    'order_id' => $orderId,
+                    'contact_name' => $contactName,
+                    'credential_list_count' => count($credentialList),
+                    'guest_info_count' => count($guestInfo),
+                    'guest_info' => $guestInfo,
+                ]);
+
+                // 计算离店日期（根据产品入住天数）
+                $stayDays = $product->stay_days ?: 1;
+                $checkOutDate = \Carbon\Carbon::parse($useDate)->addDays($stayDays)->format('Y-m-d');
+                
+                Log::info('美团订单创建V2：根据产品入住天数计算离店日期', [
+                    'use_date' => $useDate,
+                    'stay_days' => $stayDays,
+                    'calculated_check_out_date' => $checkOutDate,
+                ]);
+
+                // 创建订单
+                $order = Order::create([
+                    'order_no' => $this->generateOrderNo(),
+                    'ota_order_no' => (string)$orderId,
+                    'ota_platform_id' => $otaPlatform->id,
+                    'product_id' => $product->id,
+                    'hotel_id' => $hotel->id,
+                    'room_type_id' => $roomType->id,
+                    'status' => OrderStatus::PAID_PENDING,
+                    'check_in_date' => $useDate,
+                    'check_out_date' => $checkOutDate,
+                    'room_count' => $quantity,
+                    'guest_count' => $quantity, // 默认等于房间数
+                    'contact_name' => $contactName,
+                    'contact_phone' => $contactPhone,
+                    'contact_email' => $contactEmail,
+                    'guest_info' => $guestInfo, // 使用构建好的 guest_info，包含 name 和 idCode
+                    'real_name_type' => $realNameType,
+                    'credential_list' => $credentialListData,
+                    'total_amount' => intval($salePrice * $quantity), // prices表已是以分为单位，直接使用
+                    'settlement_amount' => intval($settlementPrice * $quantity), // prices表已是以分为单位，直接使用
+                    'paid_at' => null, // 订单创建时还未支付
+                ]);
+
+                // 锁定库存（订单创建的核心目的就是锁库存）
+                $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
+                if (!$lockResult['success']) {
+                    DB::rollBack();
+                    Log::error('美团订单创建V2：库存锁定失败', [
+                        'order_id' => $order->id,
+                        'error' => $lockResult['message'],
+                    ]);
+                    return $this->errorResponse(503, '库存锁定失败：' . $lockResult['message'], $partnerId);
+                }
+
+                DB::commit();
+
+                Log::info('美团订单创建V2成功', [
+                    'order_id' => $orderId,
+                    'order_no' => $order->order_no,
+                    'partner_deal_id' => $partnerDealId,
+                ]);
+
+                return $this->successResponse([
+                    'orderId' => intval($orderId),
+                    'partnerOrderId' => $order->order_no,
+                ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
             }
-
-            DB::commit();
-
-            Log::info('美团订单创建V2成功', [
-                'order_id' => $orderId,
-                'order_no' => $order->order_no,
-                'partner_deal_id' => $partnerDealId,
-            ]);
-
-            return $this->successResponse([
-                'orderId' => intval($orderId),
-                'partnerOrderId' => $order->order_no,
-            ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
         } catch (\Exception $e) {
             DB::rollBack();
 
