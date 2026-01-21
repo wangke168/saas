@@ -2090,6 +2090,52 @@ class MeituanController extends Controller
     }
 
     /**
+     * 检查打包酒店连续入住天数的库存
+     * 使用 ResHotelDailyStock 表检查打包产品的库存
+     * 
+     * @param int $resRoomTypeId 打包房型ID
+     * @param \Carbon\Carbon $checkInDate 入住日期
+     * @param int $stayDays 入住天数
+     * @param int $quantity 房间数量
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function checkResHotelStockForStayDays(int $resRoomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity): array
+    {
+        // 检查连续入住天数的库存
+        for ($i = 0; $i < $stayDays; $i++) {
+            $date = $checkInDate->copy()->addDays($i);
+            $stock = ResHotelDailyStock::where('room_type_id', $resRoomTypeId)
+                ->where('biz_date', $date->format('Y-m-d'))
+                ->first();
+
+            if (!$stock) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，没有库存记录',
+                ];
+            }
+
+            if ($stock->is_closed) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，库存已关闭',
+                ];
+            }
+
+            // 获取可用库存（优先使用 stock_available 字段，如果为 NULL 则计算）
+            $availableStock = $stock->stock_available ?? ($stock->stock_total - $stock->stock_sold);
+            if ($availableStock < $quantity) {
+                return [
+                    'success' => false,
+                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，实际可用库存：' . $availableStock . '，需要：' . $quantity,
+                ];
+            }
+        }
+
+        return ['success' => true, 'message' => ''];
+    }
+
+    /**
      * 生成订单号
      */
     protected function generateOrderNo(): string
