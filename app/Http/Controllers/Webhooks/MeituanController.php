@@ -26,6 +26,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 
 class MeituanController extends Controller
 {
@@ -2133,6 +2134,135 @@ class MeituanController extends Controller
         }
 
         return ['success' => true, 'message' => ''];
+    }
+
+    /**
+     * 锁定打包酒店库存（预下单时使用）
+     * 使用 ResHotelDailyStock 表，直接增加 stock_sold（一次性扣减）
+     * 使用乐观锁（version字段）防止并发冲突
+     *
+     * @param PkgOrder $order 打包订单
+     * @param int|null $stayDays 入住天数，如果为null则从产品获取
+     * @param int $quantity 房间数量
+     * @return array ['success' => bool, 'message' => string]
+     */
+    protected function lockResHotelStockForPreOrder(PkgOrder $order, ?int $stayDays = null, int $quantity = 1): array
+    {
+        try {
+            // 获取入住天数
+            if ($stayDays === null) {
+                $pkgProduct = $order->product;
+                $stayDays = $pkgProduct->stay_days ?? 1;
+            }
+
+            $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
+            $resRoomTypeId = $order->room_type_id;
+
+            // 使用 Redis 分布式锁，防止并发问题
+            // 锁的粒度：按房型和日期
+            $lockKeys = [];
+            for ($i = 0; $i < $stayDays; $i++) {
+                $date = $checkInDate->copy()->addDays($i);
+                $lockKey = "res_hotel_stock_lock:{$resRoomTypeId}:{$date->format('Y-m-d')}";
+                $lockKeys[] = $lockKey;
+            }
+
+            // 尝试获取所有日期的锁
+            $acquiredLocks = [];
+            foreach ($lockKeys as $lockKey) {
+                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
+                if (!$lock) {
+                    // 获取锁失败，释放已获取的锁
+                    foreach ($acquiredLocks as $acquiredLock) {
+                        Redis::del($acquiredLock);
+                    }
+                    return [
+                        'success' => false,
+                        'message' => '库存锁定失败：并发冲突，请稍后重试',
+                    ];
+                }
+                $acquiredLocks[] = $lockKey;
+            }
+
+            try {
+                // 再次检查库存（在锁内检查，确保准确性）
+                $checkResult = $this->checkResHotelStockForStayDays($resRoomTypeId, $checkInDate, $stayDays, $quantity);
+                if (!$checkResult['success']) {
+                    return $checkResult;
+                }
+
+                // 使用乐观锁更新库存（直接增加 stock_sold）
+                for ($i = 0; $i < $stayDays; $i++) {
+                    $date = $checkInDate->copy()->addDays($i);
+                    $stock = ResHotelDailyStock::where('room_type_id', $resRoomTypeId)
+                        ->where('biz_date', $date->format('Y-m-d'))
+                        ->lockForUpdate() // 行级锁，防止并发
+                        ->first();
+
+                    if (!$stock) {
+                        return [
+                            'success' => false,
+                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 没有库存记录',
+                        ];
+                    }
+
+                    // 再次检查（双重检查，确保在获取行锁后库存仍然足够）
+                    $availableStock = $stock->stock_available ?? ($stock->stock_total - $stock->stock_sold);
+                    if ($stock->is_closed || $availableStock < $quantity) {
+                        return [
+                            'success' => false,
+                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 库存不足或已关闭',
+                        ];
+                    }
+
+                    // 使用乐观锁更新（增加 stock_sold，版本号递增）
+                    $updated = ResHotelDailyStock::where('id', $stock->id)
+                        ->where('version', $stock->version) // 版本号必须匹配
+                        ->update([
+                            'stock_sold' => DB::raw('stock_sold + ' . $quantity),
+                            'version' => DB::raw('version + 1'), // 版本号递增
+                        ]);
+
+                    if ($updated === 0) {
+                        // 版本号不匹配，说明数据已被其他事务修改
+                        return [
+                            'success' => false,
+                            'message' => '库存已被其他订单占用，请重试',
+                        ];
+                    }
+
+                    Log::info('预下单打包酒店库存锁定成功', [
+                        'pkg_order_id' => $order->id,
+                        'room_type_id' => $resRoomTypeId,
+                        'date' => $date->format('Y-m-d'),
+                        'quantity' => $quantity,
+                        'stock_sold' => $stock->stock_sold + $quantity,
+                        'version' => $stock->version + 1,
+                    ]);
+                }
+
+                return ['success' => true, 'message' => ''];
+            } finally {
+                // 释放所有 Redis 锁
+                foreach ($acquiredLocks as $lockKey) {
+                    try {
+                        Redis::del($lockKey);
+                    } catch (\Exception $e) {
+                        // 忽略释放锁的异常
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('预下单打包酒店库存锁定异常', [
+                'pkg_order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return [
+                'success' => false,
+                'message' => '库存锁定失败：' . $e->getMessage(),
+            ];
+        }
     }
 
     /**
