@@ -26,12 +26,12 @@
                 </el-table-column>
                 <el-table-column prop="cost_price" label="结算价(元)" width="120">
                     <template #default="{ row }">
-                        {{ row.cost_price || '-' }}
+                        {{ formatPrice(row.cost_price) }}
                     </template>
                 </el-table-column>
                 <el-table-column prop="sale_price" label="销售价(元)" width="120">
                     <template #default="{ row }">
-                        {{ row.sale_price || '-' }}
+                        {{ formatPrice(row.sale_price) }}
                     </template>
                 </el-table-column>
                 <el-table-column prop="stock_total" label="总库存" width="100" />
@@ -408,8 +408,8 @@ const handleSubmitBatch = async () => {
                 room_type_id: batchForm.room_type_id,
                 start_date: batchForm.dateRange[0],
                 end_date: batchForm.dateRange[1],
-                cost_price: batchForm.cost_price,
-                sale_price: batchForm.sale_price,
+                cost_price: Math.round(batchForm.cost_price * 100), // 元转分
+                sale_price: Math.round(batchForm.sale_price * 100), // 元转分
                 stock_total: batchForm.stock_total,
                 stock_sold: batchForm.stock_sold || 0,
                 stock_available: batchForm.stock_available,
@@ -433,8 +433,8 @@ const handleEdit = (row) => {
     userSetStockAvailable.value = row.stock_available !== null && row.stock_available !== undefined;
     Object.assign(editForm, {
         biz_date: row.biz_date,
-        cost_price: parseFloat(row.cost_price) || 0,
-        sale_price: parseFloat(row.sale_price) || 0,
+        cost_price: (parseFloat(row.cost_price) || 0) / 100, // 分转元
+        sale_price: (parseFloat(row.sale_price) || 0) / 100, // 分转元
         stock_total: row.stock_total || 0,
         stock_sold: row.stock_sold || 0,
         stock_available: row.stock_available ?? (row.stock_total - row.stock_sold),
@@ -470,8 +470,8 @@ const handleSubmitEdit = async () => {
         editSubmitting.value = true;
         try {
             await resHotelDailyStocksApi.update(editingId.value, {
-                cost_price: editForm.cost_price,
-                sale_price: editForm.sale_price,
+                cost_price: Math.round(editForm.cost_price * 100), // 元转分
+                sale_price: Math.round(editForm.sale_price * 100), // 元转分
                 stock_total: editForm.stock_total,
                 stock_sold: editForm.stock_sold,
                 stock_available: editForm.stock_available,
@@ -590,6 +590,12 @@ const resetEditForm = () => {
 const formatDate = (date) => {
     if (!date) return '-';
     return new Date(date).toISOString().split('T')[0];
+};
+
+// 格式化价格（分转元）
+const formatPrice = (price) => {
+    if (!price && price !== 0) return '-';
+    return (parseFloat(price) / 100).toFixed(2);
 };
 
 // 初始化

@@ -49,12 +49,12 @@
                                 {{ formatDateOnly(row.date) }}
                             </template>
                             </el-table-column>
-                            <el-table-column prop="cost_price" label="成本价" width="120" align="right">
+                            <el-table-column prop="cost_price" label="成本价（元）" width="120" align="right">
                                 <template #default="{ row }">
                                     ¥{{ formatPrice(row.cost_price) }}
                                 </template>
                             </el-table-column>
-                            <el-table-column prop="sale_price" label="销售价" width="120" align="right">
+                            <el-table-column prop="sale_price" label="销售价（元）" width="120" align="right">
                                 <template #default="{ row }">
                                     ¥{{ formatPrice(row.sale_price) }}
                                 </template>
@@ -108,10 +108,10 @@
                                         style="width: 100%"
                                     />
                                 </el-form-item>
-                                <el-form-item label="成本价" prop="cost_price">
+                                <el-form-item label="成本价（元）" prop="cost_price">
                                     <el-input-number v-model="batchPriceForm.cost_price" :min="0" :precision="2" :step="0.01" style="width: 100%;" />
                                 </el-form-item>
-                                <el-form-item label="销售价" prop="sale_price">
+                                <el-form-item label="销售价（元）" prop="sale_price">
                                     <el-input-number v-model="batchPriceForm.sale_price" :min="0" :precision="2" :step="0.01" style="width: 100%;" />
                                 </el-form-item>
                                 <el-form-item label="可用库存" prop="stock_available">
@@ -149,10 +149,10 @@
                                         disabled
                                     />
                                 </el-form-item>
-                                <el-form-item label="成本价" prop="cost_price">
+                                <el-form-item label="成本价（元）" prop="cost_price">
                                     <el-input-number v-model="priceForm.cost_price" :min="0" :precision="2" :step="0.01" style="width: 100%;" />
                                 </el-form-item>
-                                <el-form-item label="销售价" prop="sale_price">
+                                <el-form-item label="销售价（元）" prop="sale_price">
                                     <el-input-number v-model="priceForm.sale_price" :min="0" :precision="2" :step="0.01" style="width: 100%;" />
                                 </el-form-item>
                                 <el-form-item label="可用库存" prop="stock_available">
@@ -271,7 +271,8 @@ const formatDate = (dateString) => {
 
 const formatPrice = (price) => {
     if (!price) return '0.00';
-    return parseFloat(price).toFixed(2);
+    // 价格存储为分，转换为元显示
+    return (parseFloat(price) / 100).toFixed(2);
 };
 
 const fetchTicketDetail = async () => {
@@ -305,7 +306,12 @@ const fetchPrices = async () => {
             params.end_date = priceDateRange.value[1];
         }
         const response = await axios.get(`/ticket-prices`, { params });
-        prices.value = response.data.data || [];
+        // 价格存储为分，转换为元显示
+        prices.value = (response.data.data || []).map(price => ({
+            ...price,
+            cost_price: (parseFloat(price.cost_price) || 0) / 100,
+            sale_price: (parseFloat(price.sale_price) || 0) / 100,
+        }));
         // 更新分页信息
         if (response.data.current_page !== undefined) {
             pricePagination.value = {
@@ -355,8 +361,8 @@ const handleSubmitBatchPrice = async () => {
                     ticket_id: ticket.value.id,
                     start_date: batchPriceForm.value.dateRange[0],
                     end_date: batchPriceForm.value.dateRange[1],
-                    cost_price: batchPriceForm.value.cost_price,
-                    sale_price: batchPriceForm.value.sale_price,
+                    cost_price: Math.round(batchPriceForm.value.cost_price * 100), // 元转分
+                    sale_price: Math.round(batchPriceForm.value.sale_price * 100), // 元转分
                     stock_available: batchPriceForm.value.stock_available,
                 };
                 await axios.post(`/ticket-prices/batch`, data);
@@ -379,8 +385,8 @@ const handleEditPrice = (row) => {
     editingPriceId.value = row.id;
     priceForm.value = {
         date: row.date,
-        cost_price: parseFloat(row.cost_price),
-        sale_price: parseFloat(row.sale_price),
+        cost_price: parseFloat(row.cost_price) || 0, // 已经是元（在fetchPrices中已转换）
+        sale_price: parseFloat(row.sale_price) || 0, // 已经是元（在fetchPrices中已转换）
         stock_available: row.stock_available,
     };
     priceFormDialogVisible.value = true;
@@ -393,8 +399,8 @@ const handleSubmitPrice = async () => {
             priceSubmitting.value = true;
             try {
                 const data = {
-                    cost_price: priceForm.value.cost_price,
-                    sale_price: priceForm.value.sale_price,
+                    cost_price: Math.round(priceForm.value.cost_price * 100), // 元转分
+                    sale_price: Math.round(priceForm.value.sale_price * 100), // 元转分
                     stock_available: priceForm.value.stock_available,
                 };
                 await axios.put(`/ticket-prices/${editingPriceId.value}`, data);
