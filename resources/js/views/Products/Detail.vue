@@ -1201,9 +1201,9 @@ const handleEditPriceRule = async (row) => {
             type: rule.type,
             weekdays: rule.weekdays ? rule.weekdays.split(',') : [],
             dateRange: rule.start_date && rule.end_date ? [rule.start_date, rule.end_date] : null,
-            market_price_adjustment: parseFloat(rule.market_price_adjustment) / 100,
-            settlement_price_adjustment: parseFloat(rule.settlement_price_adjustment) / 100,
-            sale_price_adjustment: parseFloat(rule.sale_price_adjustment) / 100,
+            market_price_adjustment: parseFloat(rule.market_price_adjustment) || 0, // 单位：元
+            settlement_price_adjustment: parseFloat(rule.settlement_price_adjustment) || 0, // 单位：元
+            sale_price_adjustment: parseFloat(rule.sale_price_adjustment) || 0, // 单位：元
             is_active: rule.is_active,
             items: rule.items && rule.items.length > 0
                 ? rule.items.map(item => ({
