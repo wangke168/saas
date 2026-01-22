@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\Price;
 use App\Models\PriceRule;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class ProductService
@@ -85,7 +86,11 @@ class ProductService
                 $weekdays = explode(',', $rule->weekdays ?? '');
                 $shouldApply = in_array($weekday, $weekdays);
             } elseif ($rule->type->value === 'date_range') {
-                $shouldApply = $date >= $rule->start_date && $date <= $rule->end_date;
+                // 将字符串日期转换为 Carbon 对象进行比较，确保日期范围判断准确
+                $dateCarbon = Carbon::parse($date)->startOfDay();
+                $startDate = Carbon::parse($rule->start_date)->startOfDay();
+                $endDate = Carbon::parse($rule->end_date)->startOfDay();
+                $shouldApply = $dateCarbon->gte($startDate) && $dateCarbon->lte($endDate);
             }
 
             if ($shouldApply) {

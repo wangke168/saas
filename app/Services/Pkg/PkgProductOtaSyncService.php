@@ -285,11 +285,11 @@ class PkgProductOtaSyncService
             'supplierOptionId' => $compositeCode, // 使用复合编码作为产品标识
         ];
 
-        // 转换价格数据（携程价格单位是元，需要除以100）
+        // 转换价格数据（携程价格单位是元，数据库存储已经是元，直接使用）
         foreach ($dailyPrices as $dailyPrice) {
             $bodyData['prices'][] = [
-                'salePrice' => floatval($dailyPrice->sale_price), // 已经是元为单位
-                'costPrice' => floatval($dailyPrice->cost_price), // 已经是元为单位
+                'salePrice' => floatval($dailyPrice->sale_price), // 单位：元
+                'costPrice' => floatval($dailyPrice->cost_price), // 单位：元
                 'date' => $dailyPrice->biz_date->format('Y-m-d'),
             ];
         }
