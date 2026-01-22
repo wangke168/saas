@@ -299,19 +299,26 @@ class ZiwoyouService implements ResourceServiceInterface
         ];
         
         // 联系人信息
-        if ($order->contact_name) {
+        // 联系人姓名：只从 guest_info[0]['name'] 获取（携程订单格式）
+        $contactName = '';
+        if (!empty($order->guest_info) && is_array($order->guest_info)) {
+            $firstGuest = $order->guest_info[0] ?? [];
+            $contactName = $firstGuest['name'] ?? $firstGuest['Name'] ?? '';
+        }
+        
+        if ($contactName) {
             // 分离姓名（简单处理：如果有空格，第一个词是姓，其余是名）
-            $nameParts = explode(' ', $order->contact_name, 2);
+            $nameParts = explode(' ', $contactName, 2);
             if (count($nameParts) == 2) {
                 $requestData['lastName'] = $nameParts[0];
                 $requestData['firstName'] = $nameParts[1];
             } else {
                 // 如果没有空格，全部作为名，姓为空
-                $requestData['firstName'] = $order->contact_name;
+                $requestData['firstName'] = $contactName;
                 $requestData['lastName'] = '';
             }
             
-            $requestData['linkMan'] = $order->contact_name;
+            $requestData['linkMan'] = $contactName;
         }
         
         if ($order->contact_phone) {
@@ -322,14 +329,59 @@ class ZiwoyouService implements ResourceServiceInterface
             $requestData['linkEmail'] = $order->contact_email;
         }
         
-        // 证件信息（如果有）
+        // 证件信息（联系人证件信息，自我游接口要求必填）
+        // 优先级：1. credential_list 2. guest_info[0] 3. card_no 字段
+        $linkCreditNo = '';
+        $linkCreditType = 0;
+        
+        // 1. 优先从 credential_list 获取
         if (!empty($order->credential_list) && is_array($order->credential_list)) {
             $firstCredential = $order->credential_list[0] ?? [];
             if (!empty($firstCredential)) {
-                $requestData['linkCreditNo'] = $firstCredential['credentialNo'] ?? $firstCredential['idCode'] ?? '';
-                $requestData['linkCreditType'] = $this->mapCredentialType($firstCredential['credentialType'] ?? 0);
+                $linkCreditNo = $firstCredential['credentialNo'] ?? $firstCredential['idCode'] ?? '';
+                $linkCreditType = $this->mapCredentialType($firstCredential['credentialType'] ?? 0);
             }
         }
+        
+        // 2. 如果 credential_list 中没有，从 guest_info 的第一个元素获取（携程订单格式）
+        if (empty($linkCreditNo) && !empty($order->guest_info) && is_array($order->guest_info)) {
+            $firstGuest = $order->guest_info[0] ?? [];
+            if (!empty($firstGuest)) {
+                // 携程格式：cardNo 为身份证号码，cardType "1" 表示身份证
+                $linkCreditNo = $firstGuest['cardNo'] ?? $firstGuest['credentialNo'] ?? $firstGuest['IdCode'] ?? $firstGuest['idCode'] ?? '';
+                // 如果 cardType 是 "1"，映射为自我游的 0（身份证）
+                if (!empty($firstGuest['cardType'])) {
+                    $cardType = (string)$firstGuest['cardType'];
+                    $linkCreditType = ($cardType === '1') ? 0 : $this->mapCredentialType($firstGuest['credentialType'] ?? 0);
+                } else {
+                    $linkCreditType = $this->mapCredentialType($firstGuest['credentialType'] ?? 0);
+                }
+            }
+        }
+        
+        // 3. 如果还没有，尝试从 card_no 字段获取
+        if (empty($linkCreditNo) && !empty($order->card_no)) {
+            $linkCreditNo = $order->card_no;
+            $linkCreditType = 0; // 默认身份证
+        }
+        
+        // 4. 如果仍然没有证件号码，记录警告并抛出异常（自我游接口要求必填）
+        if (empty($linkCreditNo)) {
+            Log::error('ZiwoyouService::buildOrderRequest: 无法获取联系人证件号码', [
+                'order_id' => $order->id,
+                'has_credential_list' => !empty($order->credential_list),
+                'credential_list_count' => is_array($order->credential_list) ? count($order->credential_list) : 0,
+                'has_guest_info' => !empty($order->guest_info),
+                'guest_info_count' => is_array($order->guest_info) ? count($order->guest_info) : 0,
+                'has_card_no' => !empty($order->card_no),
+                'card_no' => $order->card_no,
+            ]);
+            throw new \Exception('订单缺少联系人证件号码，无法创建自我游订单');
+        }
+        
+        // 设置联系人证件信息
+        $requestData['linkCreditNo'] = $linkCreditNo;
+        $requestData['linkCreditType'] = $linkCreditType;
         
         // 订单备注
         if ($order->remark) {
@@ -351,11 +403,27 @@ class ZiwoyouService implements ResourceServiceInterface
         // 游玩人信息（如果有）
         if (!empty($order->guest_info) && is_array($order->guest_info)) {
             $requestData['peoples'] = array_map(function($guest, $index) {
+                // 支持多种格式：
+                // 1. 携程格式：name, cardNo, cardType
+                // 2. 其他格式：name/Name, credentialNo/IdCode/idCode, credentialType
+                $guestName = $guest['name'] ?? $guest['Name'] ?? '';
+                $guestPhone = $guest['phone'] ?? $guest['Phone'] ?? $guest['mobile'] ?? '';
+                $guestCreditNo = $guest['cardNo'] ?? $guest['credentialNo'] ?? $guest['IdCode'] ?? $guest['idCode'] ?? '';
+                
+                // 证件类型：携程格式 cardType "1" 表示身份证，对应自我游的 0
+                $guestCreditType = 0; // 默认身份证
+                if (!empty($guest['cardType'])) {
+                    $cardType = (string)$guest['cardType'];
+                    $guestCreditType = ($cardType === '1') ? 0 : $this->mapCredentialType($guest['credentialType'] ?? 0);
+                } elseif (isset($guest['credentialType'])) {
+                    $guestCreditType = $this->mapCredentialType($guest['credentialType']);
+                }
+                
                 return [
-                    'linkMan' => $guest['name'] ?? $guest['Name'] ?? '',
-                    'linkPhone' => $guest['phone'] ?? $guest['Phone'] ?? '',
-                    'linkCreditNo' => $guest['credentialNo'] ?? $guest['IdCode'] ?? '',
-                    'linkCreditType' => $this->mapCredentialType($guest['credentialType'] ?? 0),
+                    'linkMan' => $guestName,
+                    'linkPhone' => $guestPhone,
+                    'linkCreditNo' => $guestCreditNo,
+                    'linkCreditType' => $guestCreditType,
                     'roomNum' => $index + 1, // 第几间房，从1开始
                 ];
             }, $order->guest_info, array_keys($order->guest_info));
