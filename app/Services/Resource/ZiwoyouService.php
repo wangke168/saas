@@ -348,24 +348,37 @@ class ZiwoyouService implements ResourceServiceInterface
         $creditSource = 'none'; // 记录证件号码来源，用于调试
         
         // 1. 优先从 credential_list 获取
-        if (!empty($order->credential_list) && is_array($order->credential_list)) {
-            $firstCredential = $order->credential_list[0] ?? [];
-            if (!empty($firstCredential)) {
-                $linkCreditNo = $firstCredential['credentialNo'] ?? $firstCredential['idCode'] ?? '';
-                if (!empty($linkCreditNo)) {
-                    $linkCreditType = $this->mapCredentialType($firstCredential['credentialType'] ?? 0);
-                    $creditSource = 'credential_list';
-                }
-            }
-        }
+        // if (!empty($order->credential_list) && is_array($order->credential_list)) {
+        //     $firstCredential = $order->credential_list[0] ?? [];
+        //     if (!empty($firstCredential)) {
+        //         $linkCreditNo = $firstCredential['credentialNo'] ?? $firstCredential['idCode'] ?? '';
+        //         if (!empty($linkCreditNo)) {
+        //             $linkCreditType = $this->mapCredentialType($firstCredential['credentialType'] ?? 0);
+        //             $creditSource = 'credential_list';
+        //         }
+        //     }
+        // }
         
         // 2. 如果 credential_list 中没有，从 guest_info 的第一个元素获取（携程订单格式）
         if (empty($linkCreditNo) && !empty($order->guest_info) && is_array($order->guest_info)) {
             $firstGuest = $order->guest_info[0] ?? [];
             if (!empty($firstGuest)) {
                 // 携程格式：cardNo 为身份证号码，cardType "1" 表示身份证
-                $linkCreditNo = $firstGuest['cardNo'] ?? $firstGuest['credentialNo'] ?? $firstGuest['IdCode'] ?? $firstGuest['idCode'] ?? '';
-                if (!empty($linkCreditNo)) {
+                // 尝试多种字段名，并去除首尾空格
+                $cardNo = '';
+                if (isset($firstGuest['cardNo']) && !empty(trim((string)$firstGuest['cardNo']))) {
+                    $cardNo = trim((string)$firstGuest['cardNo']);
+                } 
+                // elseif (isset($firstGuest['credentialNo']) && !empty(trim((string)$firstGuest['credentialNo']))) {
+                //     $cardNo = trim((string)$firstGuest['credentialNo']);
+                // } elseif (isset($firstGuest['IdCode']) && !empty(trim((string)$firstGuest['IdCode']))) {
+                //     $cardNo = trim((string)$firstGuest['IdCode']);
+                // } elseif (isset($firstGuest['idCode']) && !empty(trim((string)$firstGuest['idCode']))) {
+                //     $cardNo = trim((string)$firstGuest['idCode']);
+                // }
+                
+                if (!empty($cardNo)) {
+                    $linkCreditNo = $cardNo;
                     // 如果 cardType 是 "1"，映射为自我游的 0（身份证）
                     if (!empty($firstGuest['cardType'])) {
                         $cardType = (string)$firstGuest['cardType'];
@@ -380,10 +393,20 @@ class ZiwoyouService implements ResourceServiceInterface
                         'order_id' => $order->id,
                         'guest_info_count' => count($order->guest_info),
                         'first_guest_keys' => array_keys($firstGuest),
-                        'cardNo' => $firstGuest['cardNo'] ?? 'not_set',
+                        'cardNo_raw' => $firstGuest['cardNo'] ?? 'not_set',
+                        'cardNo_trimmed' => $cardNo,
                         'cardType' => $firstGuest['cardType'] ?? 'not_set',
                         'linkCreditNo' => $linkCreditNo,
                         'linkCreditType' => $linkCreditType,
+                    ]);
+                } else {
+                    // 记录为什么没有获取到证件号码
+                    Log::warning('ZiwoyouService::buildOrderRequest: guest_info中未找到有效的证件号码', [
+                        'order_id' => $order->id,
+                        'first_guest_keys' => array_keys($firstGuest),
+                        'cardNo' => $firstGuest['cardNo'] ?? 'not_set',
+                        'cardNo_type' => isset($firstGuest['cardNo']) ? gettype($firstGuest['cardNo']) : 'not_set',
+                        'cardNo_empty' => isset($firstGuest['cardNo']) ? empty($firstGuest['cardNo']) : 'not_set',
                     ]);
                 }
             }
@@ -452,10 +475,21 @@ class ZiwoyouService implements ResourceServiceInterface
                 // 1. 携程格式：name, cardNo, cardType
                 // 2. 其他格式：name/Name, credentialNo/IdCode/idCode, credentialType
                 $guestName = $guest['name'] ?? $guest['Name'] ?? '';
-                $guestPhone = $guest['phone'] ?? $guest['Phone'] ?? $guest['mobile'] ?? '';
-                $guestCreditNo = $guest['cardNo'] ?? $guest['credentialNo'] ?? $guest['IdCode'] ?? $guest['idCode'] ?? '';
-                $guestCreditNo = trim((string)$guestCreditNo); // 去除首尾空格
+                // $guestPhone = $guest['phone'] ?? $guest['Phone'] ?? $guest['mobile'] ?? '';
+                $guestPhone=$order->contact_phone;
                 
+                // 获取证件号码，优先使用 cardNo（携程格式），并去除首尾空格
+                // $guestCreditNo = '';
+                // if (isset($guest['cardNo']) && !empty(trim((string)$guest['cardNo']))) {
+                //     $guestCreditNo = trim((string)$guest['cardNo']);
+                // } elseif (isset($guest['credentialNo']) && !empty(trim((string)$guest['credentialNo']))) {
+                //     $guestCreditNo = trim((string)$guest['credentialNo']);
+                // } elseif (isset($guest['IdCode']) && !empty(trim((string)$guest['IdCode']))) {
+                //     $guestCreditNo = trim((string)$guest['IdCode']);
+                // } elseif (isset($guest['idCode']) && !empty(trim((string)$guest['idCode']))) {
+                //     $guestCreditNo = trim((string)$guest['idCode']);
+                // }
+                $guestCreditNo=$guest['cardNo']; 
                 // 证件类型：携程格式 cardType "1" 表示身份证，对应自我游的 0
                 $guestCreditType = 0; // 默认身份证
                 if (!empty($guest['cardType'])) {
@@ -472,6 +506,8 @@ class ZiwoyouService implements ResourceServiceInterface
                         'guest_index' => $index,
                         'guest_name' => $guestName,
                         'guest_data_keys' => array_keys($guest),
+                        'cardNo_raw' => $guest['cardNo'] ?? 'not_set',
+                        'cardNo_type' => isset($guest['cardNo']) ? gettype($guest['cardNo']) : 'not_set',
                     ]);
                 }
                 
