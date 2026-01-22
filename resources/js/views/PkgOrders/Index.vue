@@ -283,7 +283,8 @@ const viewDetail = (order) => {
 // 格式化价格
 const formatPrice = (price) => {
     if (!price) return '0.00';
-    return (parseFloat(price) / 100).toFixed(2);
+    // 价格单位：数据库存储已经是元，直接格式化
+    return parseFloat(price).toFixed(2);
 };
 
 // 格式化日期

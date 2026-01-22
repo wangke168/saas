@@ -314,7 +314,8 @@ const formatDateTime = (date) => {
 // 格式化价格
 const formatPrice = (price) => {
     if (!price) return '0.00';
-    return (price / 100).toFixed(2);
+    // 价格单位：数据库存储已经是元，直接格式化
+    return parseFloat(price).toFixed(2);
 };
 
 // 初始化
