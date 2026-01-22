@@ -170,7 +170,11 @@ class ZiwoyouService implements ResourceServiceInterface
             ]);
             
             // 检查响应是否真正成功
-            // 必须 success=true 才判断为成功
+            // 根据自我游接口文档和实际返回：
+            // - state=0 表示接口调用成功
+            // - state=1 表示订单创建成功但需要支付（待支付状态）
+            // - state=-1 表示接口调用失败
+            // 关键判断依据：有 orderId 且 state >= 0 且 msg 不包含错误信息
             $msg = $result['msg'] ?? '';
             $data = $result['data'] ?? null;
             $state = $result['state'] ?? -1;
@@ -184,15 +188,23 @@ class ZiwoyouService implements ResourceServiceInterface
             // 检查错误消息
             $isErrorMsg = $this->isErrorMessage($msg);
             
-            // 综合判断：必须同时满足所有条件才算成功
-            // 1. success=true（必须）
-            // 2. state=0（必须）
-            // 3. 没有错误消息
-            // 4. 有 orderId
-            $isRealSuccess = ($result['success'] ?? false) 
-                && $state === 0 
-                && !$isErrorMsg
-                && $hasOrderId; // 必须有 orderId 才算成功
+            // 检查成功消息（msg中包含"成功"关键词）
+            $isSuccessMsg = !empty($msg) && (
+                mb_strpos($msg, '成功') !== false || 
+                mb_strpos($msg, '下单成功') !== false ||
+                mb_strpos($msg, '创建成功') !== false ||
+                mb_strpos($msg, '录入订单成功') !== false
+            );
+            
+            // 综合判断：订单创建成功的条件
+            // 1. 有 orderId（最关键，订单创建成功的标志）
+            // 2. state >= 0（state=-1 表示错误，0 和 1 都可以是成功）
+            // 3. 没有错误消息，或者有成功消息
+            // 注意：自我游接口可能返回 success=false（因为 state=1），但订单实际创建成功
+            // 从自我游后台日志看，state=1 且 msg="下单成功" 且有 orderId 表示订单创建成功
+            $isRealSuccess = $hasOrderId 
+                && $state >= 0  // state >= 0 表示不是错误状态（0=成功，1=待支付也是成功）
+                && (!$isErrorMsg || $isSuccessMsg); // 没有错误消息，或者有成功消息
             
             // 详细记录判断过程
             Log::info('ZiwoyouService::confirmOrder: 判断订单是否真正成功', [
@@ -201,9 +213,11 @@ class ZiwoyouService implements ResourceServiceInterface
                 'result_state' => $state,
                 'msg' => $msg,
                 'is_error_msg' => $isErrorMsg,
+                'is_success_msg' => $isSuccessMsg,
                 'has_valid_data' => $hasValidData,
                 'has_order_id' => $hasOrderId,
                 'order_id_value' => $data['orderId'] ?? null,
+                'order_state' => $data['orderState'] ?? null,
                 'data' => $data,
                 'is_real_success' => $isRealSuccess,
             ]);
