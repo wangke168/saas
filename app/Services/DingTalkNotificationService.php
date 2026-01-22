@@ -334,8 +334,9 @@ class DingTalkNotificationService
         $productName = $order->product->name ?? '未知产品';
         $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
         
-        $totalAmount = $order->total_amount ? number_format($order->total_amount / 100, 2) : '0.00';
-        $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount / 100, 2) : '0.00';
+        // 价格单位：数据库存储已经是元，直接使用
+        $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
+        $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
 
         $message = "# 📦 新订单通知\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
@@ -371,7 +372,8 @@ class DingTalkNotificationService
         $productName = $order->product->name ?? '未知产品';
         $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
         
-        $totalAmount = $order->total_amount ? number_format($order->total_amount / 100, 2) : '0.00';
+        // 价格单位：数据库存储已经是元，直接使用
+        $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
         $cancelQuantity = $cancelData['quantity'] ?? $order->room_count;
         $cancelTypeLabel = $cancelData['cancel_type_label'] ?? '全部取消';
 
@@ -406,7 +408,8 @@ class DingTalkNotificationService
         $productName = $order->product->name ?? '未知产品';
         $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
         
-        $totalAmount = $order->total_amount ? number_format($order->total_amount / 100, 2) : '0.00';
+        // 价格单位：数据库存储已经是元，直接使用
+        $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
         
         // 判断是确认还是拒绝
         $isApproved = $order->status->value === 'cancel_approved';
