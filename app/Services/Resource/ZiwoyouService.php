@@ -360,22 +360,56 @@ class ZiwoyouService implements ResourceServiceInterface
         // }
         
         // 2. 如果 credential_list 中没有，从 guest_info 的第一个元素获取（携程订单格式）
+        // 添加调试日志，追踪执行流程
+        Log::info('ZiwoyouService::buildOrderRequest: 开始从guest_info获取证件号码', [
+            'order_id' => $order->id,
+            'linkCreditNo_empty' => empty($linkCreditNo),
+            'has_guest_info' => !empty($order->guest_info),
+            'guest_info_is_array' => is_array($order->guest_info),
+            'guest_info_count' => is_array($order->guest_info) ? count($order->guest_info) : 0,
+        ]);
+        
         if (empty($linkCreditNo) && !empty($order->guest_info) && is_array($order->guest_info)) {
             $firstGuest = $order->guest_info[0] ?? [];
+            
+            Log::info('ZiwoyouService::buildOrderRequest: 获取firstGuest', [
+                'order_id' => $order->id,
+                'first_guest_empty' => empty($firstGuest),
+                'first_guest_is_array' => is_array($firstGuest),
+                'first_guest_keys' => is_array($firstGuest) ? array_keys($firstGuest) : [],
+                'first_guest_data' => $firstGuest,
+            ]);
+            
             if (!empty($firstGuest)) {
                 // 携程格式：cardNo 为身份证号码，cardType "1" 表示身份证
                 // 尝试多种字段名，并去除首尾空格
                 $cardNo = '';
+                
+                Log::info('ZiwoyouService::buildOrderRequest: 检查cardNo字段', [
+                    'order_id' => $order->id,
+                    'has_cardNo_key' => isset($firstGuest['cardNo']),
+                    'cardNo_value' => $firstGuest['cardNo'] ?? 'not_set',
+                    'cardNo_type' => isset($firstGuest['cardNo']) ? gettype($firstGuest['cardNo']) : 'not_set',
+                    'cardNo_isset' => isset($firstGuest['cardNo']),
+                    'cardNo_empty_check' => isset($firstGuest['cardNo']) ? empty($firstGuest['cardNo']) : 'not_set',
+                    'cardNo_trimmed_empty' => isset($firstGuest['cardNo']) ? empty(trim((string)$firstGuest['cardNo'])) : 'not_set',
+                ]);
+                
                 if (isset($firstGuest['cardNo']) && !empty(trim((string)$firstGuest['cardNo']))) {
                     $cardNo = trim((string)$firstGuest['cardNo']);
-                } 
-                // elseif (isset($firstGuest['credentialNo']) && !empty(trim((string)$firstGuest['credentialNo']))) {
-                //     $cardNo = trim((string)$firstGuest['credentialNo']);
-                // } elseif (isset($firstGuest['IdCode']) && !empty(trim((string)$firstGuest['IdCode']))) {
-                //     $cardNo = trim((string)$firstGuest['IdCode']);
-                // } elseif (isset($firstGuest['idCode']) && !empty(trim((string)$firstGuest['idCode']))) {
-                //     $cardNo = trim((string)$firstGuest['idCode']);
-                // }
+                    Log::info('ZiwoyouService::buildOrderRequest: 成功获取cardNo', [
+                        'order_id' => $order->id,
+                        'cardNo_raw' => $firstGuest['cardNo'],
+                        'cardNo_trimmed' => $cardNo,
+                    ]);
+                } else {
+                    Log::warning('ZiwoyouService::buildOrderRequest: cardNo获取失败', [
+                        'order_id' => $order->id,
+                        'isset_cardNo' => isset($firstGuest['cardNo']),
+                        'cardNo_value' => $firstGuest['cardNo'] ?? 'not_set',
+                        'cardNo_trimmed_empty' => isset($firstGuest['cardNo']) ? empty(trim((string)$firstGuest['cardNo'])) : 'not_set',
+                    ]);
+                }
                 
                 if (!empty($cardNo)) {
                     $linkCreditNo = $cardNo;
@@ -407,9 +441,22 @@ class ZiwoyouService implements ResourceServiceInterface
                         'cardNo' => $firstGuest['cardNo'] ?? 'not_set',
                         'cardNo_type' => isset($firstGuest['cardNo']) ? gettype($firstGuest['cardNo']) : 'not_set',
                         'cardNo_empty' => isset($firstGuest['cardNo']) ? empty($firstGuest['cardNo']) : 'not_set',
+                        'cardNo_isset' => isset($firstGuest['cardNo']),
                     ]);
                 }
+            } else {
+                Log::warning('ZiwoyouService::buildOrderRequest: firstGuest为空', [
+                    'order_id' => $order->id,
+                    'guest_info_count' => count($order->guest_info),
+                ]);
             }
+        } else {
+            Log::warning('ZiwoyouService::buildOrderRequest: 未进入guest_info获取逻辑', [
+                'order_id' => $order->id,
+                'linkCreditNo_empty' => empty($linkCreditNo),
+                'has_guest_info' => !empty($order->guest_info),
+                'guest_info_is_array' => is_array($order->guest_info),
+            ]);
         }
         
         // 3. 如果还没有，尝试从 card_no 字段获取
