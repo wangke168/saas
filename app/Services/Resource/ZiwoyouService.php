@@ -110,6 +110,18 @@ class ZiwoyouService implements ResourceServiceInterface
             // 2. 构建订单请求数据
             $requestData = $this->buildOrderRequest($order, $ziwoyouProductId);
             
+            // 记录构建的请求数据（用于调试）
+            Log::info('ZiwoyouService::confirmOrder: 构建订单请求数据完成', [
+                'order_id' => $order->id,
+                'request_data_keys' => array_keys($requestData),
+                'linkCreditNo' => $requestData['linkCreditNo'] ?? 'not_set',
+                'linkCreditType' => $requestData['linkCreditType'] ?? 'not_set',
+                'linkMan' => $requestData['linkMan'] ?? 'not_set',
+                'linkPhone' => $requestData['linkPhone'] ?? 'not_set',
+                'has_peoples' => !empty($requestData['peoples']),
+                'peoples_count' => !empty($requestData['peoples']) ? count($requestData['peoples']) : 0,
+            ]);
+            
             // 3. 可选：订单校验（根据实际情况决定是否调用）
             $shouldValidate = $this->shouldValidateOrder($order);
             if ($shouldValidate) {
@@ -333,13 +345,17 @@ class ZiwoyouService implements ResourceServiceInterface
         // 优先级：1. credential_list 2. guest_info[0] 3. card_no 字段
         $linkCreditNo = '';
         $linkCreditType = 0;
+        $creditSource = 'none'; // 记录证件号码来源，用于调试
         
         // 1. 优先从 credential_list 获取
         if (!empty($order->credential_list) && is_array($order->credential_list)) {
             $firstCredential = $order->credential_list[0] ?? [];
             if (!empty($firstCredential)) {
                 $linkCreditNo = $firstCredential['credentialNo'] ?? $firstCredential['idCode'] ?? '';
-                $linkCreditType = $this->mapCredentialType($firstCredential['credentialType'] ?? 0);
+                if (!empty($linkCreditNo)) {
+                    $linkCreditType = $this->mapCredentialType($firstCredential['credentialType'] ?? 0);
+                    $creditSource = 'credential_list';
+                }
             }
         }
         
@@ -349,20 +365,37 @@ class ZiwoyouService implements ResourceServiceInterface
             if (!empty($firstGuest)) {
                 // 携程格式：cardNo 为身份证号码，cardType "1" 表示身份证
                 $linkCreditNo = $firstGuest['cardNo'] ?? $firstGuest['credentialNo'] ?? $firstGuest['IdCode'] ?? $firstGuest['idCode'] ?? '';
-                // 如果 cardType 是 "1"，映射为自我游的 0（身份证）
-                if (!empty($firstGuest['cardType'])) {
-                    $cardType = (string)$firstGuest['cardType'];
-                    $linkCreditType = ($cardType === '1') ? 0 : $this->mapCredentialType($firstGuest['credentialType'] ?? 0);
-                } else {
-                    $linkCreditType = $this->mapCredentialType($firstGuest['credentialType'] ?? 0);
+                if (!empty($linkCreditNo)) {
+                    // 如果 cardType 是 "1"，映射为自我游的 0（身份证）
+                    if (!empty($firstGuest['cardType'])) {
+                        $cardType = (string)$firstGuest['cardType'];
+                        $linkCreditType = ($cardType === '1') ? 0 : $this->mapCredentialType($firstGuest['credentialType'] ?? 0);
+                    } else {
+                        $linkCreditType = $this->mapCredentialType($firstGuest['credentialType'] ?? 0);
+                    }
+                    $creditSource = 'guest_info';
+                    
+                    // 详细日志记录
+                    Log::info('ZiwoyouService::buildOrderRequest: 从guest_info获取证件号码', [
+                        'order_id' => $order->id,
+                        'guest_info_count' => count($order->guest_info),
+                        'first_guest_keys' => array_keys($firstGuest),
+                        'cardNo' => $firstGuest['cardNo'] ?? 'not_set',
+                        'cardType' => $firstGuest['cardType'] ?? 'not_set',
+                        'linkCreditNo' => $linkCreditNo,
+                        'linkCreditType' => $linkCreditType,
+                    ]);
                 }
             }
         }
         
         // 3. 如果还没有，尝试从 card_no 字段获取
         if (empty($linkCreditNo) && !empty($order->card_no)) {
-            $linkCreditNo = $order->card_no;
-            $linkCreditType = 0; // 默认身份证
+            $linkCreditNo = trim((string)$order->card_no);
+            if (!empty($linkCreditNo)) {
+                $linkCreditType = 0; // 默认身份证
+                $creditSource = 'card_no';
+            }
         }
         
         // 4. 如果仍然没有证件号码，记录警告并抛出异常（自我游接口要求必填）
@@ -373,15 +406,26 @@ class ZiwoyouService implements ResourceServiceInterface
                 'credential_list_count' => is_array($order->credential_list) ? count($order->credential_list) : 0,
                 'has_guest_info' => !empty($order->guest_info),
                 'guest_info_count' => is_array($order->guest_info) ? count($order->guest_info) : 0,
+                'guest_info_first' => !empty($order->guest_info) && is_array($order->guest_info) ? ($order->guest_info[0] ?? null) : null,
                 'has_card_no' => !empty($order->card_no),
                 'card_no' => $order->card_no,
             ]);
             throw new \Exception('订单缺少联系人证件号码，无法创建自我游订单');
         }
         
-        // 设置联系人证件信息
+        // 设置联系人证件信息（确保去除首尾空格）
+        $linkCreditNo = trim((string)$linkCreditNo);
         $requestData['linkCreditNo'] = $linkCreditNo;
         $requestData['linkCreditType'] = $linkCreditType;
+        
+        // 记录证件信息设置情况
+        Log::info('ZiwoyouService::buildOrderRequest: 设置联系人证件信息', [
+            'order_id' => $order->id,
+            'credit_source' => $creditSource,
+            'linkCreditNo' => $linkCreditNo,
+            'linkCreditNo_length' => strlen($linkCreditNo),
+            'linkCreditType' => $linkCreditType,
+        ]);
         
         // 订单备注
         if ($order->remark) {
@@ -402,13 +446,15 @@ class ZiwoyouService implements ResourceServiceInterface
         
         // 游玩人信息（如果有）
         if (!empty($order->guest_info) && is_array($order->guest_info)) {
-            $requestData['peoples'] = array_map(function($guest, $index) {
+            $peoples = [];
+            foreach ($order->guest_info as $index => $guest) {
                 // 支持多种格式：
                 // 1. 携程格式：name, cardNo, cardType
                 // 2. 其他格式：name/Name, credentialNo/IdCode/idCode, credentialType
                 $guestName = $guest['name'] ?? $guest['Name'] ?? '';
                 $guestPhone = $guest['phone'] ?? $guest['Phone'] ?? $guest['mobile'] ?? '';
                 $guestCreditNo = $guest['cardNo'] ?? $guest['credentialNo'] ?? $guest['IdCode'] ?? $guest['idCode'] ?? '';
+                $guestCreditNo = trim((string)$guestCreditNo); // 去除首尾空格
                 
                 // 证件类型：携程格式 cardType "1" 表示身份证，对应自我游的 0
                 $guestCreditType = 0; // 默认身份证
@@ -419,14 +465,28 @@ class ZiwoyouService implements ResourceServiceInterface
                     $guestCreditType = $this->mapCredentialType($guest['credentialType']);
                 }
                 
-                return [
+                // 如果证件号码为空，记录警告但仍然添加（可能自我游接口会使用联系人的证件号码）
+                if (empty($guestCreditNo)) {
+                    Log::warning('ZiwoyouService::buildOrderRequest: 游玩人证件号码为空', [
+                        'order_id' => $order->id,
+                        'guest_index' => $index,
+                        'guest_name' => $guestName,
+                        'guest_data_keys' => array_keys($guest),
+                    ]);
+                }
+                
+                $peoples[] = [
                     'linkMan' => $guestName,
                     'linkPhone' => $guestPhone,
                     'linkCreditNo' => $guestCreditNo,
                     'linkCreditType' => $guestCreditType,
                     'roomNum' => $index + 1, // 第几间房，从1开始
                 ];
-            }, $order->guest_info, array_keys($order->guest_info));
+            }
+            
+            if (!empty($peoples)) {
+                $requestData['peoples'] = $peoples;
+            }
         }
         
         return $requestData;
