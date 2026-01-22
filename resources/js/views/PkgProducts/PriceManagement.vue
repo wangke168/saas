@@ -320,6 +320,7 @@ const formatDateOnly = (dateString) => {
 
 const formatPrice = (price) => {
     if (!price) return '0.00';
+    // 价格存储为元，直接显示
     return parseFloat(price).toFixed(2);
 };
 

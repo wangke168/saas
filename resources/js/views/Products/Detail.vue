@@ -929,7 +929,7 @@ const formatDateOnly = (date) => {
 
 const formatPrice = (price) => {
     if (!price) return '0.00';
-    return (parseFloat(price) / 100).toFixed(2);
+    return parseFloat(price).toFixed(2);
 };
 
 const formatWeekdays = (weekdays) => {
@@ -962,9 +962,9 @@ const handleEditPrice = (row) => {
     editingPriceId.value = row.id;
     priceForm.value = {
         room_type_ids: [row.room_type_id], // 编辑时只显示当前房型
-        market_price: parseFloat(row.market_price) / 100,
-        settlement_price: parseFloat(row.settlement_price) / 100,
-        sale_price: parseFloat(row.sale_price) / 100,
+        market_price: parseFloat(row.market_price),
+        settlement_price: parseFloat(row.settlement_price),
+        sale_price: parseFloat(row.sale_price),
     };
     priceDialogVisible.value = true;
 };
@@ -1015,9 +1015,9 @@ const handleEditPriceRange = (group, range) => {
         editingPriceId.value = null; // 批量编辑时，创建新的价格记录
         priceForm.value = {
             room_type_ids: [group.roomTypeId], // 批量编辑时只显示当前房型
-            market_price: parseFloat(firstPrice.market_price) / 100,
-            settlement_price: parseFloat(firstPrice.settlement_price) / 100,
-            sale_price: parseFloat(firstPrice.sale_price) / 100,
+            market_price: parseFloat(firstPrice.market_price),
+            settlement_price: parseFloat(firstPrice.settlement_price),
+            sale_price: parseFloat(firstPrice.sale_price),
         };
         priceDialogVisible.value = true;
     }).catch(() => {
@@ -1119,9 +1119,9 @@ const handleSubmitPrice = async () => {
                     // 编辑模式：只更新单个价格记录的价格值
                     // 注意：编辑模式下，room_type_ids 只包含一个房型，但后端只需要价格值
                     await axios.put(`/prices/${editingPriceId.value}`, {
-                        market_price: Math.round(priceForm.value.market_price * 100),
-                        settlement_price: Math.round(priceForm.value.settlement_price * 100),
-                        sale_price: Math.round(priceForm.value.sale_price * 100),
+                        market_price: priceForm.value.market_price,
+                        settlement_price: priceForm.value.settlement_price,
+                        sale_price: priceForm.value.sale_price,
                     });
                     ElMessage.success('价格更新成功');
                 } else {
@@ -1142,9 +1142,9 @@ const handleSubmitPrice = async () => {
                     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
                         prices.push({
                             date: d.toISOString().split('T')[0],
-                            market_price: Math.round(priceForm.value.market_price * 100),
-                            settlement_price: Math.round(priceForm.value.settlement_price * 100),
-                            sale_price: Math.round(priceForm.value.sale_price * 100),
+                            market_price: priceForm.value.market_price,
+                            settlement_price: priceForm.value.settlement_price,
+                            sale_price: priceForm.value.sale_price,
                         });
                     }
 
@@ -1256,9 +1256,9 @@ const handleSubmitPriceRule = async () => {
                     product_id: product.value.id,
                     name: priceRuleForm.value.name,
                     type: priceRuleForm.value.type,
-                    market_price_adjustment: Math.round(priceRuleForm.value.market_price_adjustment * 100),
-                    settlement_price_adjustment: Math.round(priceRuleForm.value.settlement_price_adjustment * 100),
-                    sale_price_adjustment: Math.round(priceRuleForm.value.sale_price_adjustment * 100),
+                    market_price_adjustment: priceRuleForm.value.market_price_adjustment,
+                    settlement_price_adjustment: priceRuleForm.value.settlement_price_adjustment,
+                    sale_price_adjustment: priceRuleForm.value.sale_price_adjustment,
                     is_active: priceRuleForm.value.is_active,
                     items: priceRuleForm.value.items,
                 };

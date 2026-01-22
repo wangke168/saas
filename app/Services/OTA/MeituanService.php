@@ -169,10 +169,10 @@ class MeituanService
                     ],
                 ],
                 'priceDate' => $date,
-                // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
-                'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']) / 100, 2),
-                'mtPrice' => round(floatval($priceData['sale_price']) / 100, 2),
-                'settlementPrice' => round(floatval($priceData['settlement_price']) / 100, 2),
+                // 价格单位：元（美团接口要求单位：元，保留两位小数）
+                'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
+                'mtPrice' => round(floatval($priceData['sale_price']), 2),
+                'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
                 'stock' => $stock,
                 'attr' => null,
             ];
@@ -254,10 +254,10 @@ class MeituanService
                     ],
                 ],
                 'priceDate' => $date,
-                // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
-                'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']) / 100, 2),
-                'mtPrice' => round(floatval($priceData['sale_price']) / 100, 2),
-                'settlementPrice' => round(floatval($priceData['settlement_price']) / 100, 2),
+                // 价格单位：元（美团接口要求单位：元，保留两位小数）
+                'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
+                'mtPrice' => round(floatval($priceData['sale_price']), 2),
+                'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
                 'stock' => $stock,
                 'attr' => null,
             ];
@@ -332,13 +332,11 @@ class MeituanService
             // 生成partnerPrimaryKey
             $partnerPrimaryKey = $this->generatePartnerPrimaryKey($hotel->id, $roomType->id, $date);
 
-            // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
-            // dailyPrice->sale_price 已经是 decimal:2，单位是分（例如 2.00 表示 2分 = 0.02元）
-            // 转换为元：除以100，保留两位小数
-            $salePriceInYuan = round(floatval($dailyPrice->sale_price) / 100, 2);
+            // 价格单位：元（美团接口要求单位：元，保留两位小数）
+            $salePriceInYuan = round(floatval($dailyPrice->sale_price), 2);
             $marketPriceInYuan = $salePriceInYuan; // 打包产品通常市场价等于售价
             $settlementPriceInYuan = $dailyPrice->cost_price 
-                ? round(floatval($dailyPrice->cost_price) / 100, 2) 
+                ? round(floatval($dailyPrice->cost_price), 2) 
                 : $salePriceInYuan; // 如果没有成本价，使用售价
 
             $body[] = [

@@ -330,9 +330,9 @@ const fetchPrices = async () => {
             response.data.data.forEach(price => {
                 priceMap[price.date] = {
                     ...price,
-                    market_price: (parseFloat(price.market_price) || 0) / 100,
-                    sale_price: (parseFloat(price.sale_price) || 0) / 100,
-                    settlement_price: (parseFloat(price.settlement_price) || 0) / 100,
+                    market_price: parseFloat(price.market_price) || 0,
+                    sale_price: parseFloat(price.sale_price) || 0,
+                    settlement_price: parseFloat(price.settlement_price) || 0,
                     is_custom: true,
                 };
             });
@@ -352,12 +352,12 @@ const fetchPrices = async () => {
                 if (priceMap[dateStr]) {
                     result.push(priceMap[dateStr]);
                 } else {
-                    // 默认价格也需要分转元显示
+                    // 默认价格（单位：元）
                     result.push({
                         date: dateStr,
-                        market_price: (parseFloat(props.ticket.market_price) || 0) / 100,
-                        sale_price: (parseFloat(props.ticket.sale_price) || 0) / 100,
-                        settlement_price: (parseFloat(props.ticket.settlement_price) || 0) / 100,
+                        market_price: parseFloat(props.ticket.market_price) || 0,
+                        sale_price: parseFloat(props.ticket.sale_price) || 0,
+                        settlement_price: parseFloat(props.ticket.settlement_price) || 0,
                         is_custom: false,
                     });
                 }
@@ -392,9 +392,9 @@ const handleBatchSetPrice = () => {
     
     batchForm.value = {
         dateRange: dateRange.value || [props.ticket.sale_start_date, props.ticket.sale_end_date],
-        market_price: (parseFloat(props.ticket.market_price) || 0) / 100, // 分转元
-        sale_price: (parseFloat(props.ticket.sale_price) || 0) / 100, // 分转元
-        settlement_price: (parseFloat(props.ticket.settlement_price) || 0) / 100, // 分转元
+        market_price: parseFloat(props.ticket.market_price) || 0, // 单位：元
+        sale_price: parseFloat(props.ticket.sale_price) || 0, // 单位：元
+        settlement_price: parseFloat(props.ticket.settlement_price) || 0, // 单位：元
     };
     batchDialogVisible.value = true;
 };
@@ -414,9 +414,9 @@ const handleBatchSubmit = async () => {
                 for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
                     priceList.push({
                         date: d.toISOString().split('T')[0],
-                        market_price: Math.round(batchForm.value.market_price * 100),
-                        sale_price: Math.round(batchForm.value.sale_price * 100),
-                        settlement_price: Math.round(batchForm.value.settlement_price * 100),
+                        market_price: batchForm.value.market_price,
+                        sale_price: batchForm.value.sale_price,
+                        settlement_price: batchForm.value.settlement_price,
                     });
                 }
                 
@@ -442,9 +442,9 @@ const handleEditPrice = (row) => {
     editingPrice.value = row;
     editForm.value = {
         date: row.date,
-        market_price: (parseFloat(row.market_price) || 0) / 100, // 分转元
-        sale_price: (parseFloat(row.sale_price) || 0) / 100, // 分转元
-        settlement_price: (parseFloat(row.settlement_price) || 0) / 100, // 分转元
+        market_price: parseFloat(row.market_price) || 0, // 单位：元
+        sale_price: parseFloat(row.sale_price) || 0, // 单位：元
+        settlement_price: parseFloat(row.settlement_price) || 0, // 单位：元
     };
     editDialogVisible.value = true;
 };
@@ -462,9 +462,9 @@ const handleEditSubmit = async () => {
                 if (existingPrice && existingPrice.id) {
                     // 更新现有价格（元转分）
                     await axios.put(`/ticket-prices/${existingPrice.id}`, {
-                        market_price: Math.round(editForm.value.market_price * 100),
-                        sale_price: Math.round(editForm.value.sale_price * 100),
-                        settlement_price: Math.round(editForm.value.settlement_price * 100),
+                        market_price: editForm.value.market_price,
+                        sale_price: editForm.value.sale_price,
+                        settlement_price: editForm.value.settlement_price,
                     });
                     ElMessage.success('价格更新成功');
                 } else {
@@ -549,7 +549,7 @@ const resetEditForm = () => {
 const formatPrice = (price) => {
     if (!price) return '0.00';
     // 价格存储为分，转换为元显示
-    return (parseFloat(price) / 100).toFixed(2);
+    return parseFloat(price).toFixed(2);
 };
 
 watch(() => props.ticket, () => {

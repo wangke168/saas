@@ -48,7 +48,7 @@
                     <el-card class="stat-card">
                         <el-statistic
                             title="订单总金额"
-                            :value="(reportData.stats?.total_amount || 0) / 100"
+                            :value="reportData.stats?.total_amount || 0"
                             :precision="2"
                         >
                             <template #prefix>
@@ -63,7 +63,7 @@
                     <el-card class="stat-card">
                         <el-statistic
                             title="结算总金额"
-                            :value="(reportData.stats?.total_settlement_amount || 0) / 100"
+                            :value="reportData.stats?.total_settlement_amount || 0"
                             :precision="2"
                         >
                             <template #prefix>
@@ -263,9 +263,8 @@ const handleCustomDateChange = () => {
 
 const formatPrice = (price) => {
     if (!price) return '0.00';
-    // 将分转换为元（除以100）
-    const amountInYuan = Number(price) / 100;
-    return amountInYuan.toLocaleString('zh-CN', {
+    // 价格单位：元
+    return Number(price).toLocaleString('zh-CN', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     });

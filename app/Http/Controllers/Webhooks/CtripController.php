@@ -404,12 +404,12 @@ class CtripController extends Controller
                     ]);
                 }
                 
-                // 如果没有从 items 中获取价格，则从价格表获取
+                // 如果没有从 items 中获取价格，则从价格表获取（单位：元）
                 if ($salePrice <= 0) {
-                    $salePrice = floatval($pkgDailyPrice->sale_price) / 100; // 转换为元
+                    $salePrice = floatval($pkgDailyPrice->sale_price);
                 }
                 if ($costPrice <= 0) {
-                    $costPrice = floatval($pkgDailyPrice->cost_price) / 100; // 转换为元
+                    $costPrice = floatval($pkgDailyPrice->cost_price);
                 }
                 
                 // 从出行人信息中提取身份证号（cardNo）
@@ -444,8 +444,8 @@ class CtripController extends Controller
                     'check_in_date' => $useStartDate,
                     'check_out_date' => $checkOutDate,
                     'stay_days' => $stayDays,
-                    'total_amount' => intval($salePrice * $quantity * 100), // 转换为分
-                    'settlement_amount' => intval($costPrice * $quantity * 100), // 转换为分
+                    'total_amount' => round($salePrice * $quantity, 2), // 单位：元
+                    'settlement_amount' => round($costPrice * $quantity, 2), // 单位：元
                     'contact_name' => $contactInfo['name'] ?? '',
                     'contact_phone' => $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '',
                     'contact_email' => $contactInfo['email'] ?? '',
@@ -617,12 +617,12 @@ class CtripController extends Controller
                 ]);
             }
 
-            // 如果没有从 items 中获取价格，则从价格表获取
+            // 如果没有从 items 中获取价格，则从价格表获取（单位：元）
             if ($salePrice <= 0) {
-                $salePrice = floatval($price->sale_price) / 100; // 转换为元
+                $salePrice = floatval($price->sale_price);
             }
             if ($costPrice <= 0) {
-                $costPrice = floatval($price->settlement_price) / 100; // 转换为元
+                $costPrice = floatval($price->settlement_price);
             }
 
             // 从出行人信息中提取身份证号（cardNo）
@@ -666,8 +666,8 @@ class CtripController extends Controller
                 'contact_email' => $contactInfo['email'] ?? '',
                 'card_no' => $cardNo,
                 'guest_info' => $passengers,
-                'total_amount' => intval($salePrice * $quantity * 100), // 转换为分
-                'settlement_amount' => intval($costPrice * $quantity * 100), // 转换为分
+                'total_amount' => round($salePrice * $quantity, 2), // 单位：元
+                'settlement_amount' => round($costPrice * $quantity, 2), // 单位：元
                 'paid_at' => null, // 预下单创建时还未支付，paid_at 应该为 null
             ]);
 
@@ -1394,12 +1394,12 @@ class CtripController extends Controller
                     ]);
                 }
                 
-                // 如果没有从 items 中获取价格，则从价格表获取
+                // 如果没有从 items 中获取价格，则从价格表获取（单位：元）
                 if ($salePrice <= 0) {
-                    $salePrice = floatval($pkgDailyPrice->sale_price) / 100; // 转换为元
+                    $salePrice = floatval($pkgDailyPrice->sale_price);
                 }
                 if ($costPrice <= 0) {
-                    $costPrice = floatval($pkgDailyPrice->cost_price) / 100; // 转换为元
+                    $costPrice = floatval($pkgDailyPrice->cost_price);
                 }
                 
                 // 从出行人信息中提取身份证号（cardNo）
@@ -1439,8 +1439,8 @@ class CtripController extends Controller
                     'check_in_date' => $useStartDate,
                     'check_out_date' => $checkOutDate,
                     'stay_days' => $stayDays,
-                    'total_amount' => intval($salePrice * $quantity * 100), // 转换为分
-                    'settlement_amount' => intval($costPrice * $quantity * 100), // 转换为分
+                    'total_amount' => round($salePrice * $quantity, 2), // 单位：元
+                    'settlement_amount' => round($costPrice * $quantity, 2), // 单位：元
                     'contact_name' => $contactInfo['name'] ?? '',
                     'contact_phone' => $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '',
                     'contact_email' => $contactInfo['email'] ?? '',
@@ -1641,12 +1641,12 @@ class CtripController extends Controller
                     ]);
                 }
 
-                // 如果没有从 items 中获取价格，则从价格表获取
+                // 如果没有从 items 中获取价格，则从价格表获取（单位：元）
                 if ($salePrice <= 0) {
-                    $salePrice = floatval($price->sale_price) / 100;
+                    $salePrice = floatval($price->sale_price);
                 }
                 if ($costPrice <= 0) {
-                    $costPrice = floatval($price->settlement_price) / 100;
+                    $costPrice = floatval($price->settlement_price);
                 }
 
                 // 从出行人信息中提取身份证号
@@ -1693,8 +1693,8 @@ class CtripController extends Controller
                     'contact_email' => $contactInfo['email'] ?? '',
                     'card_no' => $cardNo,
                     'guest_info' => $passengers,
-                    'total_amount' => intval($salePrice * $quantity * 100),
-                    'settlement_amount' => intval($costPrice * $quantity * 100),
+                    'total_amount' => round($salePrice * $quantity, 2), // 单位：元
+                    'settlement_amount' => round($costPrice * $quantity, 2), // 单位：元
                     'paid_at' => now(), // CreateOrder 是直接下单，已支付
                     'ctrip_item_id' => $ctripItemId, // 保存 itemId
                 ]);

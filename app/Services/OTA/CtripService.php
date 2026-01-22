@@ -117,8 +117,8 @@ class CtripService
                 );
                 
                 $bodyData['prices'][] = [
-                    'salePrice' => floatval($calculatedPrice['sale_price']) / 100, // 转换为元（应用加价规则后）
-                    'costPrice' => floatval($calculatedPrice['settlement_price']) / 100, // 转换为元（应用加价规则后）
+                    'salePrice' => floatval($calculatedPrice['sale_price']), // 单位：元（应用加价规则后）
+                    'costPrice' => floatval($calculatedPrice['settlement_price']), // 单位：元（应用加价规则后）
                     // 注意：非指定日期模式不包含 date 字段
                 ];
             }
@@ -149,8 +149,8 @@ class CtripService
                 $avgSettlementPrice = array_sum(array_column($prices, 'settlement_price')) / count($prices);
                 
                 $priceItem = [
-                    'salePrice' => floatval($avgSalePrice) / 100, // 转换为元（应用加价规则后）
-                    'costPrice' => floatval($avgSettlementPrice) / 100, // 转换为元（应用加价规则后）
+                    'salePrice' => floatval($avgSalePrice), // 单位：元（应用加价规则后）
+                    'costPrice' => floatval($avgSettlementPrice), // 单位：元（应用加价规则后）
                     'date' => $date,
                 ];
 
@@ -584,8 +584,8 @@ class CtripService
                 );
                 
                 $bodyData['prices'][] = [
-                    'salePrice' => floatval($calculatedPrice['sale_price']) / 100,
-                    'costPrice' => floatval($calculatedPrice['settlement_price']) / 100,
+                    'salePrice' => floatval($calculatedPrice['sale_price']),
+                    'costPrice' => floatval($calculatedPrice['settlement_price']),
                 ];
             }
         } else {
@@ -601,8 +601,8 @@ class CtripService
                 );
                 
                 $bodyData['prices'][] = [
-                    'salePrice' => floatval($calculatedPrice['sale_price']) / 100,
-                    'costPrice' => floatval($calculatedPrice['settlement_price']) / 100,
+                    'salePrice' => floatval($calculatedPrice['sale_price']),
+                    'costPrice' => floatval($calculatedPrice['settlement_price']),
                     'date' => $date,
                 ];
             }

@@ -165,16 +165,16 @@ class PkgProductPriceService
      * 价格公式：酒店价格 + Σ(门票价格 × 张数)
      * 其中"张数"是pkg_product_bundle_items.quantity字段（创建打包产品时指定）
      * 
-     * 注意：所有价格单位均为分（cents）
-     * - ResHotelDailyStock 的 sale_price 和 cost_price 存储为分
-     * - TicketPrice 的 sale_price 和 cost_price 存储为分
-     * - 返回的 sale_price 和 cost_price 也为分
+     * 注意：所有价格单位均为元（yuan）
+     * - ResHotelDailyStock 的 sale_price 和 cost_price 存储为元
+     * - TicketPrice 的 sale_price 和 cost_price 存储为元
+     * - 返回的 sale_price 和 cost_price 也为元
      * 
      * @param PkgProduct $product 打包产品
      * @param PkgProductHotelRoomType $hotelRoomType 酒店房型关联
      * @param \Illuminate\Database\Eloquent\Collection $bundleItems 门票关联项
      * @param Carbon $date 日期
-     * @return array ['sale_price' => float, 'cost_price' => float] 价格单位为分
+     * @return array ['sale_price' => float, 'cost_price' => float] 价格单位为元
      */
     protected function calculateSinglePrice(
         PkgProduct $product,
@@ -184,7 +184,7 @@ class PkgProductPriceService
     ): array {
         $dateString = $date->format('Y-m-d');
 
-        // 1. 获取酒店房型该日期的价格（单位：分）
+        // 1. 获取酒店房型该日期的价格（单位：元）
         $hotelStock = ResHotelDailyStock::where('hotel_id', $hotelRoomType->hotel_id)
             ->where('room_type_id', $hotelRoomType->room_type_id)
             ->where('biz_date', $dateString)
@@ -193,7 +193,7 @@ class PkgProductPriceService
         $hotelSalePrice = $hotelStock ? (float) $hotelStock->sale_price : 0;
         $hotelCostPrice = $hotelStock ? (float) $hotelStock->cost_price : 0;
 
-        // 2. 计算所有关联门票的价格总和（门票价格 × 张数，单位：分）
+        // 2. 计算所有关联门票的价格总和（门票价格 × 张数，单位：元）
         $ticketSalePriceTotal = 0;
         $ticketCostPriceTotal = 0;
 
@@ -209,13 +209,13 @@ class PkgProductPriceService
             }
         }
 
-        // 3. 总价格 = 酒店价格 + 门票总价（单位：分）
+        // 3. 总价格 = 酒店价格 + 门票总价（单位：元）
         $salePrice = $hotelSalePrice + $ticketSalePriceTotal;
         $costPrice = $hotelCostPrice + $ticketCostPriceTotal;
 
         return [
-            'sale_price' => max(0, $salePrice), // 确保价格不为负数（单位：分）
-            'cost_price' => max(0, $costPrice), // 单位：分
+            'sale_price' => max(0, $salePrice), // 确保价格不为负数（单位：元）
+            'cost_price' => max(0, $costPrice), // 单位：元
         ];
     }
 

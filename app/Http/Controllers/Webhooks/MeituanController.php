@@ -622,9 +622,9 @@ class MeituanController extends Controller
                     ], $partnerId, null, 200, 'success', true);  // 订单创建V2需要加密
                 }
 
-                // 计算价格
-                $salePrice = floatval($matchedDailyPrice->sale_price) / 100; // 分转元
-                $costPrice = floatval($matchedDailyPrice->cost_price) / 100; // 分转元
+                // 计算价格（单位：元）
+                $salePrice = floatval($matchedDailyPrice->sale_price);
+                $costPrice = floatval($matchedDailyPrice->cost_price);
 
                 // 处理联系人信息
                 $contactName = $contactInfo['name'] ?? '';
@@ -718,8 +718,8 @@ class MeituanController extends Controller
                     'check_in_date' => $useDate,
                     'check_out_date' => $checkOutDate,
                     'stay_days' => $stayDays,
-                    'total_amount' => intval($salePrice * $quantity * 100), // 转换为分
-                    'settlement_amount' => intval($costPrice * $quantity * 100), // 转换为分
+                    'total_amount' => round($salePrice * $quantity, 2), // 单位：元
+                    'settlement_amount' => round($costPrice * $quantity, 2), // 单位：元
                     'contact_name' => $contactName,
                     'contact_phone' => $contactPhone,
                     'contact_email' => $contactEmail,
@@ -946,8 +946,8 @@ class MeituanController extends Controller
                     'guest_info' => $guestInfo, // 使用构建好的 guest_info，包含 name 和 idCode
                     'real_name_type' => $realNameType,
                     'credential_list' => $credentialListData,
-                    'total_amount' => intval($salePrice * $quantity), // prices表已是以分为单位，直接使用
-                    'settlement_amount' => intval($settlementPrice * $quantity), // prices表已是以分为单位，直接使用
+                    'total_amount' => round($salePrice * $quantity, 2), // 单位：元
+                    'settlement_amount' => round($settlementPrice * $quantity, 2), // 单位：元
                     'paid_at' => null, // 订单创建时还未支付
                 ]);
 
@@ -2356,10 +2356,10 @@ class MeituanController extends Controller
                 $responseBody[] = [
                     'partnerDealId' => $partnerDealId,
                     'date' => $price->date->format('Y-m-d'),
-                    // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
-                    'mtPrice' => round(floatval($priceData['sale_price']) / 100, 2),
-                    'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']) / 100, 2),
-                    'settlementPrice' => round(floatval($priceData['settlement_price']) / 100, 2),
+                    // 价格单位：元（美团接口要求单位：元，保留两位小数）
+                    'mtPrice' => round(floatval($priceData['sale_price']), 2),
+                    'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
+                    'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
                     'stock' => $stock,
                 ];
             }
@@ -2535,13 +2535,11 @@ class MeituanController extends Controller
                         $date
                     );
 
-                    // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
-                    // dailyPrice->sale_price 已经是 decimal:2，单位是分（例如 2.00 表示 2分 = 0.02元）
-                    // 转换为元：除以100，保留两位小数
-                    $salePriceInYuan = round(floatval($dailyPrice->sale_price) / 100, 2);
+                    // 价格单位：元（美团接口要求单位：元，保留两位小数）
+                    $salePriceInYuan = round(floatval($dailyPrice->sale_price), 2);
                     $marketPriceInYuan = $salePriceInYuan; // 打包产品通常市场价等于售价
                     $settlementPriceInYuan = $dailyPrice->cost_price 
-                        ? round(floatval($dailyPrice->cost_price) / 100, 2) 
+                        ? round(floatval($dailyPrice->cost_price), 2) 
                         : $salePriceInYuan; // 如果没有成本价，使用售价
 
                     $responseBody[] = [
@@ -2640,10 +2638,10 @@ class MeituanController extends Controller
                             ],
                         ],
                         'priceDate' => $price->date->format('Y-m-d'),
-                        // 价格从"分"转换为"元"（美团接口要求单位：元，保留两位小数）
-                        'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']) / 100, 2),
-                        'mtPrice' => round(floatval($priceData['sale_price']) / 100, 2),
-                        'settlementPrice' => round(floatval($priceData['settlement_price']) / 100, 2),
+                        // 价格单位：元（美团接口要求单位：元，保留两位小数）
+                        'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
+                        'mtPrice' => round(floatval($priceData['sale_price']), 2),
+                        'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
                         'stock' => $stock,
                         'attr' => null,
                     ];

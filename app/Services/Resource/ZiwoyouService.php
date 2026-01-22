@@ -342,7 +342,8 @@ class ZiwoyouService implements ResourceServiceInterface
                 [
                     'cond' => $order->check_in_date->format('Y-m-d'),
                     'num' => $order->room_count ?? 1,
-                    'price' => $order->settlement_amount ?? $order->total_amount ?? 0,
+                    // 订单价格存储为元，自我游接口要求单位为元，直接使用
+                    'price' => floatval($order->settlement_amount ?? $order->total_amount ?? 0),
                 ],
             ];
         }

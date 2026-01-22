@@ -271,8 +271,8 @@ const formatDate = (dateString) => {
 
 const formatPrice = (price) => {
     if (!price) return '0.00';
-    // 价格存储为分，转换为元显示
-    return (parseFloat(price) / 100).toFixed(2);
+    // 价格存储为元，直接显示
+    return parseFloat(price).toFixed(2);
 };
 
 const fetchTicketDetail = async () => {
@@ -306,12 +306,8 @@ const fetchPrices = async () => {
             params.end_date = priceDateRange.value[1];
         }
         const response = await axios.get(`/ticket-prices`, { params });
-        // 价格存储为分，转换为元显示
-        prices.value = (response.data.data || []).map(price => ({
-            ...price,
-            cost_price: (parseFloat(price.cost_price) || 0) / 100,
-            sale_price: (parseFloat(price.sale_price) || 0) / 100,
-        }));
+        // 价格数据存储为元
+        prices.value = response.data.data || [];
         // 更新分页信息
         if (response.data.current_page !== undefined) {
             pricePagination.value = {
@@ -361,8 +357,8 @@ const handleSubmitBatchPrice = async () => {
                     ticket_id: ticket.value.id,
                     start_date: batchPriceForm.value.dateRange[0],
                     end_date: batchPriceForm.value.dateRange[1],
-                    cost_price: Math.round(batchPriceForm.value.cost_price * 100), // 元转分
-                    sale_price: Math.round(batchPriceForm.value.sale_price * 100), // 元转分
+                    cost_price: batchPriceForm.value.cost_price, // 单位：元
+                    sale_price: batchPriceForm.value.sale_price, // 单位：元
                     stock_available: batchPriceForm.value.stock_available,
                 };
                 await axios.post(`/ticket-prices/batch`, data);
@@ -385,8 +381,8 @@ const handleEditPrice = (row) => {
     editingPriceId.value = row.id;
     priceForm.value = {
         date: row.date,
-        cost_price: parseFloat(row.cost_price) || 0, // 已经是元（在fetchPrices中已转换）
-        sale_price: parseFloat(row.sale_price) || 0, // 已经是元（在fetchPrices中已转换）
+        cost_price: parseFloat(row.cost_price) || 0, // 单位：元
+        sale_price: parseFloat(row.sale_price) || 0, // 单位：元
         stock_available: row.stock_available,
     };
     priceFormDialogVisible.value = true;
@@ -399,8 +395,8 @@ const handleSubmitPrice = async () => {
             priceSubmitting.value = true;
             try {
                 const data = {
-                    cost_price: Math.round(priceForm.value.cost_price * 100), // 元转分
-                    sale_price: Math.round(priceForm.value.sale_price * 100), // 元转分
+                    cost_price: priceForm.value.cost_price, // 单位：元
+                    sale_price: priceForm.value.sale_price, // 单位：元
                     stock_available: priceForm.value.stock_available,
                 };
                 await axios.put(`/ticket-prices/${editingPriceId.value}`, data);

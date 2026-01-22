@@ -73,8 +73,8 @@ class PkgOrderSplitService
                     ->where('date', $order->check_in_date)
                     ->first();
                 
-                // 价格单位：分转元（sale_price是decimal:2，存储为分，需要转换为元）
-                $unitPrice = $ticketPrice ? (floatval($ticketPrice->sale_price) / 100) : 0;
+                // 价格单位：元（sale_price存储为元）
+                $unitPrice = $ticketPrice ? (floatval($ticketPrice->sale_price)) : 0;
                 $totalPrice = $unitPrice * $item->quantity;
                 
                 $orderItem = PkgOrderItem::create([
@@ -100,8 +100,8 @@ class PkgOrderSplitService
                 ->where('biz_date', $order->check_in_date)
                 ->first();
             
-            // 价格单位：分转元（sale_price是decimal:2，存储为分，需要转换为元）
-            $unitPrice = $pkgDailyPrice ? (floatval($pkgDailyPrice->sale_price) / 100) : 0;
+            // 价格单位：元（sale_price存储为元）
+            $unitPrice = $pkgDailyPrice ? (floatval($pkgDailyPrice->sale_price)) : 0;
             // 酒店价格按天计算，总价 = 单价 * 入住天数
             $totalPrice = $unitPrice * ($order->stay_days ?? 1);
             
