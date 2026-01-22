@@ -312,6 +312,24 @@ class ZiwoyouClient
     }
 
     /**
+     * 支付订单
+     * 
+     * @param int $orderId 自我游订单号
+     * @return array 响应数据
+     */
+    public function payOrder(int $orderId): array
+    {
+        Log::info('ZiwoyouClient: 调用支付订单接口', [
+            'endpoint' => '/api/thirdPaty/order/pay',
+            'ziwoyou_order_id' => $orderId,
+        ]);
+        
+        return $this->request('/api/thirdPaty/order/pay', [
+            'orderId' => $orderId,
+        ]);
+    }
+
+    /**
      * 查询余额（可选，用于监控）
      * 
      * @return array 响应数据

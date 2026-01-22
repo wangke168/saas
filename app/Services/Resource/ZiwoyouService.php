@@ -170,9 +170,10 @@ class ZiwoyouService implements ResourceServiceInterface
             ]);
             
             // 检查响应是否真正成功
-            // 即使 state=0，如果 msg 中包含错误信息，也应该判断为失败
+            // 必须 success=true 才判断为成功
             $msg = $result['msg'] ?? '';
             $data = $result['data'] ?? null;
+            $state = $result['state'] ?? -1;
             
             // 严格检查：必须有 orderId 才算成功（订单创建成功的标志）
             $hasOrderId = !empty($data['orderId']);
@@ -184,8 +185,12 @@ class ZiwoyouService implements ResourceServiceInterface
             $isErrorMsg = $this->isErrorMessage($msg);
             
             // 综合判断：必须同时满足所有条件才算成功
+            // 1. success=true（必须）
+            // 2. state=0（必须）
+            // 3. 没有错误消息
+            // 4. 有 orderId
             $isRealSuccess = ($result['success'] ?? false) 
-                && ($result['state'] ?? 0) === 0 
+                && $state === 0 
                 && !$isErrorMsg
                 && $hasOrderId; // 必须有 orderId 才算成功
             
@@ -193,11 +198,12 @@ class ZiwoyouService implements ResourceServiceInterface
             Log::info('ZiwoyouService::confirmOrder: 判断订单是否真正成功', [
                 'order_id' => $order->id,
                 'result_success' => $result['success'] ?? false,
-                'result_state' => $result['state'] ?? null,
+                'result_state' => $state,
                 'msg' => $msg,
                 'is_error_msg' => $isErrorMsg,
                 'has_valid_data' => $hasValidData,
                 'has_order_id' => $hasOrderId,
+                'order_id_value' => $data['orderId'] ?? null,
                 'data' => $data,
                 'is_real_success' => $isRealSuccess,
             ]);
@@ -223,23 +229,83 @@ class ZiwoyouService implements ResourceServiceInterface
                     ]);
                 }
                 
-                // 处理订单状态
-                // payType=0 表示虚拟支付（预存款），已从余额扣款
-                if ($payType == 0) {
-                    Log::info('ZiwoyouService::confirmOrder: 预存款支付，已从余额扣款', [
+                // 处理订单状态和支付
+                // orderState: 0=等待人工确认, 1=待支付, 2=已成功（现付返佣）
+                // payType: 0=虚拟支付（预存款）, 1=信用支付, 3=库存支付, 4=全球货仓抵扣
+                
+                // 如果订单状态为待支付（orderState=1），需要调用支付接口
+                if ($orderState == 1 && $ziwoyouOrderId) {
+                    Log::info('ZiwoyouService::confirmOrder: 订单状态为待支付，开始调用支付接口', [
                         'order_id' => $order->id,
                         'ziwoyou_order_id' => $ziwoyouOrderId,
+                        'order_state' => $orderState,
+                        'pay_type' => $payType,
+                    ]);
+                    
+                    try {
+                        $payResult = $this->getClient()->payOrder($ziwoyouOrderId);
+                        
+                        Log::info('ZiwoyouService::confirmOrder: 支付接口响应', [
+                            'order_id' => $order->id,
+                            'ziwoyou_order_id' => $ziwoyouOrderId,
+                            'pay_success' => $payResult['success'] ?? false,
+                            'pay_state' => $payResult['state'] ?? null,
+                            'pay_msg' => $payResult['msg'] ?? '',
+                            'pay_data' => $payResult['data'] ?? null,
+                        ]);
+                        
+                        if (($payResult['success'] ?? false) && ($payResult['state'] ?? -1) === 0) {
+                            // 支付成功，订单状态应该变为已成功
+                            Log::info('ZiwoyouService::confirmOrder: 支付成功', [
+                                'order_id' => $order->id,
+                                'ziwoyou_order_id' => $ziwoyouOrderId,
+                            ]);
+                            
+                            // 更新订单状态为已确认
+                            $order->update(['status' => OrderStatus::CONFIRMED]);
+                            $orderState = 2; // 更新为已成功状态
+                        } else {
+                            // 支付失败，记录错误但不抛出异常（订单已创建成功）
+                            $payErrorMsg = $payResult['msg'] ?? '支付失败';
+                            Log::warning('ZiwoyouService::confirmOrder: 支付失败，订单已创建但未支付', [
+                                'order_id' => $order->id,
+                                'ziwoyou_order_id' => $ziwoyouOrderId,
+                                'pay_error' => $payErrorMsg,
+                                'pay_result' => $payResult,
+                            ]);
+                            
+                            // 创建异常订单，转人工处理支付
+                            $this->createExceptionOrder($order, 'payOrder', "订单创建成功但支付失败：{$payErrorMsg}");
+                        }
+                    } catch (\Exception $e) {
+                        // 支付接口调用异常，记录错误但不抛出异常（订单已创建成功）
+                        Log::error('ZiwoyouService::confirmOrder: 支付接口调用异常', [
+                            'order_id' => $order->id,
+                            'ziwoyou_order_id' => $ziwoyouOrderId,
+                            'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
+                        ]);
+                        
+                        // 创建异常订单，转人工处理支付
+                        $this->createExceptionOrder($order, 'payOrder', '支付接口调用异常：' . $e->getMessage());
+                    }
+                } elseif ($payType == 0) {
+                    // payType=0 表示虚拟支付（预存款），理论上已从余额扣款
+                    // 但如果 orderState=2，说明已经是已成功状态，不需要再支付
+                    Log::info('ZiwoyouService::confirmOrder: 虚拟支付（预存款）', [
+                        'order_id' => $order->id,
+                        'ziwoyou_order_id' => $ziwoyouOrderId,
+                        'order_state' => $orderState,
                         'order_money' => $orderMoney,
                     ]);
                 }
                 
                 // 根据 orderState 更新订单状态
-                // 0: 等待人工确认, 1: 待支付, 2: 已成功（现付返佣）
                 if ($orderState == 2) {
-                    // 已成功（现付返佣产品）
+                    // 已成功（现付返佣产品或支付成功）
                     $order->update(['status' => OrderStatus::CONFIRMED]);
                 }
-                // orderState == 0 或 1 时，等待确认回调
+                // orderState == 0 时，等待人工确认回调
                 
                 return [
                     'success' => true,
