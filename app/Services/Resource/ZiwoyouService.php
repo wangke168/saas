@@ -222,13 +222,24 @@ class ZiwoyouService implements ResourceServiceInterface
                 'is_real_success' => $isRealSuccess,
             ]);
             
+            // 提取订单数据（无论是否判断为成功，都提取以便后续处理）
+            $ziwoyouOrderId = $data['orderId'] ?? null;
+            $orderState = $data['orderState'] ?? null;
+            $payType = $data['payType'] ?? null;
+            $orderMoney = $data['orderMoney'] ?? 0;
+            
+            // 记录订单数据提取情况
+            Log::info('ZiwoyouService::confirmOrder: 提取订单数据', [
+                'order_id' => $order->id,
+                'is_real_success' => $isRealSuccess,
+                'ziwoyou_order_id' => $ziwoyouOrderId,
+                'order_state' => $orderState,
+                'pay_type' => $payType,
+                'order_money' => $orderMoney,
+                'should_call_pay' => ($orderState == 1 && $ziwoyouOrderId),
+            ]);
+            
             if ($isRealSuccess) {
-                // 此时 $data 已经在上面的判断中提取，且已验证有 orderId
-                $ziwoyouOrderId = $data['orderId'] ?? null;
-                $orderState = $data['orderState'] ?? null;
-                $payType = $data['payType'] ?? null;
-                $orderMoney = $data['orderMoney'] ?? 0;
-                
                 // 保存自我游订单号
                 if ($ziwoyouOrderId) {
                     $order->update([
@@ -257,6 +268,12 @@ class ZiwoyouService implements ResourceServiceInterface
                     ]);
                     
                     try {
+                        Log::info('ZiwoyouService::confirmOrder: 准备调用支付接口', [
+                            'order_id' => $order->id,
+                            'ziwoyou_order_id' => $ziwoyouOrderId,
+                            'client_class' => get_class($this->getClient()),
+                        ]);
+                        
                         $payResult = $this->getClient()->payOrder($ziwoyouOrderId);
                         
                         Log::info('ZiwoyouService::confirmOrder: 支付接口响应', [
@@ -266,6 +283,7 @@ class ZiwoyouService implements ResourceServiceInterface
                             'pay_state' => $payResult['state'] ?? null,
                             'pay_msg' => $payResult['msg'] ?? '',
                             'pay_data' => $payResult['data'] ?? null,
+                            'pay_result_full' => $payResult,
                         ]);
                         
                         if (($payResult['success'] ?? false) && ($payResult['state'] ?? -1) === 0) {
@@ -273,6 +291,7 @@ class ZiwoyouService implements ResourceServiceInterface
                             Log::info('ZiwoyouService::confirmOrder: 支付成功', [
                                 'order_id' => $order->id,
                                 'ziwoyou_order_id' => $ziwoyouOrderId,
+                                'pay_result' => $payResult,
                             ]);
                             
                             // 更新订单状态为已确认
@@ -285,6 +304,8 @@ class ZiwoyouService implements ResourceServiceInterface
                                 'order_id' => $order->id,
                                 'ziwoyou_order_id' => $ziwoyouOrderId,
                                 'pay_error' => $payErrorMsg,
+                                'pay_success' => $payResult['success'] ?? false,
+                                'pay_state' => $payResult['state'] ?? null,
                                 'pay_result' => $payResult,
                             ]);
                             
@@ -297,6 +318,7 @@ class ZiwoyouService implements ResourceServiceInterface
                             'order_id' => $order->id,
                             'ziwoyou_order_id' => $ziwoyouOrderId,
                             'error' => $e->getMessage(),
+                            'error_class' => get_class($e),
                             'trace' => $e->getTraceAsString(),
                         ]);
                         
@@ -306,11 +328,21 @@ class ZiwoyouService implements ResourceServiceInterface
                 } elseif ($payType == 0) {
                     // payType=0 表示虚拟支付（预存款），理论上已从余额扣款
                     // 但如果 orderState=2，说明已经是已成功状态，不需要再支付
-                    Log::info('ZiwoyouService::confirmOrder: 虚拟支付（预存款）', [
+                    Log::info('ZiwoyouService::confirmOrder: 虚拟支付（预存款），未调用支付接口', [
                         'order_id' => $order->id,
                         'ziwoyou_order_id' => $ziwoyouOrderId,
                         'order_state' => $orderState,
+                        'pay_type' => $payType,
                         'order_money' => $orderMoney,
+                        'reason' => $orderState == 1 ? 'orderState=1但payType=0' : 'orderState=' . $orderState,
+                    ]);
+                } else {
+                    Log::info('ZiwoyouService::confirmOrder: 未调用支付接口', [
+                        'order_id' => $order->id,
+                        'ziwoyou_order_id' => $ziwoyouOrderId,
+                        'order_state' => $orderState,
+                        'pay_type' => $payType,
+                        'reason' => $orderState != 1 ? 'orderState不等于1' : 'ziwoyouOrderId为空',
                     ]);
                 }
                 
@@ -347,6 +379,10 @@ class ZiwoyouService implements ResourceServiceInterface
                     'state' => $result['state'] ?? null,
                     'msg' => $msg,
                     'has_data' => !empty($result['data']),
+                    'has_order_id' => !empty($data['orderId']),
+                    'ziwoyou_order_id' => $ziwoyouOrderId,
+                    'order_state' => $orderState,
+                    'will_not_call_pay' => true,
                     'result' => $result,
                 ]);
                 
