@@ -104,7 +104,7 @@ class DingTalkNotificationService
         ]);
 
         // 发送消息
-        return $this->sendMessage($message);
+        return $this->sendMessage($message, '📦 新订单通知');
     }
 
     /**
@@ -168,7 +168,7 @@ class DingTalkNotificationService
         ]);
 
         // 发送消息
-        return $this->sendMessage($message);
+        return $this->sendMessage($message,'⚠️ 订单取消申请');
     }
 
     /**
@@ -224,6 +224,11 @@ class DingTalkNotificationService
             'user_roles' => $users->pluck('role.value')->toArray(),
         ]);
 
+        // 1. 动态生成标题
+        $isApproved = $order->status->value === 'cancel_approved';
+        $title = $isApproved ? '✅ 订单取消成功' : '❌ 订单取消被拒绝';
+
+
         // 构建消息内容
         $message = $this->buildOrderCancelConfirmedMessage($order, $cancelReason);
 
@@ -232,8 +237,9 @@ class DingTalkNotificationService
             'message_length' => strlen($message),
         ]);
 
+            
         // 发送消息
-        return $this->sendMessage($message);
+        return $this->sendMessage($message, $title);
     }
 
     /**
@@ -379,9 +385,9 @@ class DingTalkNotificationService
 
         $message = "# ⚠️ 订单取消申请\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
-        $message .= "**OTA平台：** {$otaPlatformName}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
-        $message .= "**景区：** {$scenicSpotName}\n";
+        $message .= "**景区：** {$scenicSpotName}\n\n";
         $message .= "**产品：** {$productName}\n\n";
         $message .= "**取消信息：**\n";
         $message .= "- 取消数量：{$cancelQuantity}\n";
@@ -419,13 +425,13 @@ class DingTalkNotificationService
 
         $message = "# " . ($isApproved ? "✅" : "❌") . " 订单取消{$resultLabel}\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
-        $message .= "**OTA平台：** {$otaPlatformName}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
-        $message .= "**景区：** {$scenicSpotName}\n";
+        $message .= "**景区：** {$scenicSpotName}\n\n";
         $message .= "**产品：** {$productName}\n\n";
-        $message .= "**取消结果：** {$resultLabel}\n";
+        $message .= "**取消结果：** {$resultLabel}\n\n";
         if ($cancelReason) {
-            $message .= "**取消原因：** {$cancelReason}\n";
+            $message .= "**取消原因：** {$cancelReason}\n\n";
         }
         $message .= "**取消时间：** {$cancelledAt}\n\n";
         $message .= "**原订单信息：**\n";
@@ -443,7 +449,7 @@ class DingTalkNotificationService
     /**
      * 发送钉钉消息
      */
-    protected function sendMessage(string $message): bool
+    protected function sendMessage(string $message, string $title = '订单通知'): bool
     {
         // 脱敏处理Webhook URL（只显示前30个字符）
         $maskedUrl = $this->maskWebhookUrl($this->webhookUrl);
@@ -457,7 +463,7 @@ class DingTalkNotificationService
             $response = Http::timeout(10)->post($this->webhookUrl, [
                 'msgtype' => 'markdown',
                 'markdown' => [
-                    'title' => '订单通知',
+                    'title' => $title,
                     'text' => $message,
                 ],
             ]);

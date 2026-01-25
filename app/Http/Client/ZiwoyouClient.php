@@ -295,20 +295,42 @@ class ZiwoyouClient
      * 
      * @param int $orderId 自我游订单号
      * @param string $reason 取消原因
+     * @param int $cancelNum 取消数量（必须大于0）
      * @return array 响应数据
      */
-    public function cancelOrder(int $orderId, string $reason): array
+    public function cancelOrder(int $orderId, string $reason, int $cancelNum = 0): array
     {
         Log::info('ZiwoyouClient: 调用取消订单接口', [
             'endpoint' => '/api/thirdPaty/order/cancel',
             'ziwoyou_order_id' => $orderId,
             'reason' => $reason,
+            'cancel_num' => $cancelNum,
         ]);
         
-        return $this->request('/api/thirdPaty/order/cancel', [
+        $requestData = [
             'orderId' => $orderId,
             'cancelMemo' => $reason,
+        ];
+        
+        // 取消数量必须传递且大于0（自我游接口要求）
+        // 如果 cancelNum <= 0，使用默认值 1
+        if ($cancelNum <= 0) {
+            Log::warning('ZiwoyouClient: cancelNum <= 0，使用默认值 1', [
+                'ziwoyou_order_id' => $orderId,
+                'cancel_num' => $cancelNum,
+            ]);
+            $cancelNum = 1;
+        }
+        
+        $requestData['cancelNum'] = $cancelNum;
+        
+        Log::info('ZiwoyouClient: 取消订单请求数据', [
+            'ziwoyou_order_id' => $orderId,
+            'cancel_num' => $cancelNum,
+            'request_data_keys' => array_keys($requestData),
         ]);
+        
+        return $this->request('/api/thirdPaty/order/cancel', $requestData);
     }
 
     /**

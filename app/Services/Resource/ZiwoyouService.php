@@ -223,11 +223,11 @@ class ZiwoyouService implements ResourceServiceInterface
             ]);
             
             // 提取订单数据（无论是否判断为成功，都提取以便后续处理）
-            $ziwoyouOrderId = $data['orderId'] ?? null;
-            $orderState = $data['orderState'] ?? null;
-            $payType = $data['payType'] ?? null;
-            $orderMoney = $data['orderMoney'] ?? 0;
-            
+                $ziwoyouOrderId = $data['orderId'] ?? null;
+                $orderState = $data['orderState'] ?? null;
+                $payType = $data['payType'] ?? null;
+                $orderMoney = $data['orderMoney'] ?? 0;
+                
             // 记录订单数据提取情况
             Log::info('ZiwoyouService::confirmOrder: 提取订单数据', [
                 'order_id' => $order->id,
@@ -286,7 +286,37 @@ class ZiwoyouService implements ResourceServiceInterface
                             'pay_result_full' => $payResult,
                         ]);
                         
-                        if (($payResult['success'] ?? false) && ($payResult['state'] ?? -1) === 0) {
+                        // 检查支付是否真正成功
+                        // 即使 success=true 和 state=0，如果 msg 中包含错误信息，也应该判断为失败
+                        $payMsg = $payResult['msg'] ?? '';
+                        $payIsErrorMsg = $this->isErrorMessage($payMsg);
+                        
+                        // 检查支付特定的错误关键词（如"余额不足"、"系统执行错误"等）
+                        $payHasError = $payIsErrorMsg || (
+                            !empty($payMsg) && (
+                                mb_strpos($payMsg, '系统执行错误') !== false ||
+                                mb_strpos($payMsg, '余额不足') !== false ||
+                                mb_strpos($payMsg, '无法完成支付') !== false ||
+                                mb_strpos($payMsg, '支付失败') !== false
+                            )
+                        );
+                        
+                        $payIsSuccess = ($payResult['success'] ?? false) 
+                            && ($payResult['state'] ?? -1) === 0 
+                            && !$payHasError; // 没有错误消息
+                        
+                        Log::info('ZiwoyouService::confirmOrder: 判断支付是否成功', [
+                            'order_id' => $order->id,
+                            'ziwoyou_order_id' => $ziwoyouOrderId,
+                            'pay_success' => $payResult['success'] ?? false,
+                            'pay_state' => $payResult['state'] ?? null,
+                            'pay_msg' => $payMsg,
+                            'pay_is_error_msg' => $payIsErrorMsg,
+                            'pay_has_error' => $payHasError,
+                            'pay_is_success' => $payIsSuccess,
+                        ]);
+                        
+                        if ($payIsSuccess) {
                             // 支付成功，订单状态应该变为已成功
                             Log::info('ZiwoyouService::confirmOrder: 支付成功', [
                                 'order_id' => $order->id,
@@ -306,6 +336,7 @@ class ZiwoyouService implements ResourceServiceInterface
                                 'pay_error' => $payErrorMsg,
                                 'pay_success' => $payResult['success'] ?? false,
                                 'pay_state' => $payResult['state'] ?? null,
+                                'pay_has_error' => $payHasError,
                                 'pay_result' => $payResult,
                             ]);
                             
@@ -770,6 +801,7 @@ class ZiwoyouService implements ResourceServiceInterface
             'order_id' => $order->id,
             'resource_order_no' => $order->resource_order_no,
             'reason' => $reason,
+            'room_count' => $order->room_count,
         ]);
         
         try {
@@ -779,27 +811,128 @@ class ZiwoyouService implements ResourceServiceInterface
             
             $ziwoyouOrderId = (int)$order->resource_order_no;
             
-            $result = $this->getClient()->cancelOrder($ziwoyouOrderId, $reason);
+            // 获取取消数量，使用订单的房间数量（必须大于0）
+            // cancelNum 来源：$order->room_count（订单的房间数量）
+            $roomCount = $order->room_count;
+            $roomCountInt = (int)($roomCount ?? 1);
+            $cancelNum = max(1, $roomCountInt);
             
-            if ($result['success'] ?? false && ($result['state'] ?? 0) === 0) {
+            Log::info('ZiwoyouService::cancelOrder: 准备调用取消接口', [
+                'order_id' => $order->id,
+                'ziwoyou_order_id' => $ziwoyouOrderId,
+                'room_count_raw' => $roomCount,
+                'room_count_type' => gettype($roomCount),
+                'room_count_int' => $roomCountInt,
+                'cancel_num' => $cancelNum,
+                'cancel_num_type' => gettype($cancelNum),
+            ]);
+            
+            $result = $this->getClient()->cancelOrder($ziwoyouOrderId, $reason, $cancelNum);
+            
+            Log::info('ZiwoyouService::cancelOrder: 取消接口响应', [
+                'order_id' => $order->id,
+                'ziwoyou_order_id' => $ziwoyouOrderId,
+                'result_success' => $result['success'] ?? false,
+                'result_state' => $result['state'] ?? null,
+                'result_msg' => $result['msg'] ?? '',
+                'result_data' => $result['data'] ?? null,
+                'cancel_state' => $result['data']['cancelState'] ?? null,
+            ]);
+            
+            // 检查取消是否真正成功
+            // 根据自我游接口文档：cancelState=1 表示取消成功，2=审核中
+            // 关键判断依据：
+            // 1. success=true 且 state=0（接口调用成功）
+            // 2. cancelState=1（必须存在且等于1，才是取消成功）
+            // 3. msg 不包含错误信息
+            // 注意：如果 data 为 null，说明取消失败，不应该判断为成功
+            $cancelData = $result['data'] ?? null;
+            $cancelState = $cancelData['cancelState'] ?? null;
+            $msg = $result['msg'] ?? '';
+            $isErrorMsg = $this->isErrorMessage($msg);
+            
+            // 检查是否有取消状态相关的错误消息
+            $hasCancelError = !empty($msg) && (
+                mb_strpos($msg, '取消数量必须大于0') !== false ||
+                mb_strpos($msg, '取消失败') !== false ||
+                mb_strpos($msg, '无法取消') !== false ||
+                mb_strpos($msg, '系统执行错误') !== false
+            );
+            
+            // 如果 data 为 null，说明取消失败（自我游返回错误时 data 为 null）
+            $hasValidData = $cancelData !== null && is_array($cancelData);
+            
+            // 判断取消是否成功：必须同时满足所有条件
+            // 1. 接口调用成功（success=true 且 state=0）
+            // 2. 有有效数据（data 不为 null，这是关键！）
+            // 3. cancelState=1（取消成功，必须存在且等于1）
+            // 4. 没有错误消息
+            // 注意：即使 success=true 和 state=0，如果 data 为 null 或 cancelState != 1，也应该判断为失败
+            $isCancelSuccess = ($result['success'] ?? false) 
+                && ($result['state'] ?? -1) === 0 
+                && $hasValidData  // 必须有有效数据（data 不为 null）
+                && $cancelState !== null  // cancelState 必须存在
+                && $cancelState == 1  // cancelState=1 表示取消成功（必须等于1）
+                && !$isErrorMsg 
+                && !$hasCancelError;
+            
+            Log::info('ZiwoyouService::cancelOrder: 判断取消是否成功', [
+                'order_id' => $order->id,
+                'ziwoyou_order_id' => $ziwoyouOrderId,
+                'result_success' => $result['success'] ?? false,
+                'result_state' => $result['state'] ?? null,
+                'has_valid_data' => $hasValidData,
+                'cancel_state' => $cancelState,
+                'msg' => $msg,
+                'is_error_msg' => $isErrorMsg,
+                'has_cancel_error' => $hasCancelError,
+                'condition_1_success' => ($result['success'] ?? false),
+                'condition_2_state_0' => ($result['state'] ?? -1) === 0,
+                'condition_3_has_valid_data' => $hasValidData,
+                'condition_4_cancel_state_1' => $cancelState == 1,
+                'condition_5_no_error_msg' => !$isErrorMsg,
+                'condition_6_no_cancel_error' => !$hasCancelError,
+                'is_cancel_success' => $isCancelSuccess,
+            ]);
+            
+            if ($isCancelSuccess) {
                 Log::info('ZiwoyouService::cancelOrder: 取消成功', [
                     'order_id' => $order->id,
                     'ziwoyou_order_id' => $ziwoyouOrderId,
+                    'cancel_state' => $cancelState,
+                    'cancel_id' => $cancelData['cancelId'] ?? null,
+                    'cancel_money' => $cancelData['cancelMoney'] ?? null,
                 ]);
                 
                 return [
                     'success' => true,
                     'message' => '订单取消成功',
-                    'data' => $result['data'] ?? [],
+                    'data' => $cancelData ?? [],
                 ];
             } else {
-                $errorMsg = $result['msg'] ?? '订单取消失败';
+                // 取消失败，记录详细错误信息
+                $errorMsg = $msg ?: '订单取消失败';
+                if ($cancelState && $cancelState != 1) {
+                    $errorMsg = "取消状态异常：cancelState={$cancelState}，{$msg}";
+                }
+                
+                Log::error('ZiwoyouService::cancelOrder: 取消失败', [
+                    'order_id' => $order->id,
+                    'ziwoyou_order_id' => $ziwoyouOrderId,
+                    'error' => $errorMsg,
+                    'result_success' => $result['success'] ?? false,
+                    'result_state' => $result['state'] ?? null,
+                    'cancel_state' => $cancelState,
+                    'result' => $result,
+                ]);
+                
                 throw new \Exception($errorMsg);
             }
         } catch (\Exception $e) {
             Log::error('ZiwoyouService::cancelOrder: 取消失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             
             $this->createExceptionOrder($order, 'cancelOrder', $e->getMessage());
