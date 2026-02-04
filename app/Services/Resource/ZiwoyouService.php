@@ -651,12 +651,42 @@ class ZiwoyouService implements ResourceServiceInterface
         
         // 酒店产品需要传 details（入住日期）
         if ($order->check_in_date) {
+            // 计算人数：优先使用 guest_info 数组长度，其次 guest_count，最后 room_count
+            $peopleCount = 1; // 默认1人
+            if (!empty($order->guest_info) && is_array($order->guest_info)) {
+                $peopleCount = count($order->guest_info);
+            } elseif (!empty($order->guest_count)) {
+                $peopleCount = (int)$order->guest_count;
+            } elseif (!empty($order->room_count)) {
+                $peopleCount = (int)$order->room_count;
+            }
+            
+            // 确保人数至少为1，防止除零错误
+            $peopleCount = max(1, $peopleCount);
+            
+            // 计算总价
+            $totalPrice = floatval($order->settlement_amount ?? $order->total_amount ?? 0);
+            
+            // 计算单人价格：自我游接口要求 details 中的 price 是单人价格，而不是总价
+            $unitPrice = $totalPrice / $peopleCount;
+            
+            Log::info('ZiwoyouService::buildOrderRequest: 计算details价格', [
+                'order_id' => $order->id,
+                'total_price' => $totalPrice,
+                'people_count' => $peopleCount,
+                'unit_price' => $unitPrice,
+                'people_count_source' => !empty($order->guest_info) && is_array($order->guest_info) 
+                    ? 'guest_info_count' 
+                    : (!empty($order->guest_count) ? 'guest_count' : 'room_count'),
+            ]);
+            
             $requestData['details'] = [
                 [
                     'cond' => $order->check_in_date->format('Y-m-d'),
-                    'num' => $order->room_count ?? 1,
-                    // 订单价格存储为元，自我游接口要求单位为元，直接使用
-                    'price' => floatval($order->settlement_amount ?? $order->total_amount ?? 0),
+                    'num' => $peopleCount,
+                    // 订单价格存储为元，自我游接口要求单位为元
+                    // 注意：self游接口要求 details 中的 price 是单人价格，而不是总价
+                    'price' => $unitPrice,
                 ],
             ];
         }

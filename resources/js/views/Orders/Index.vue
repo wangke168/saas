@@ -36,14 +36,7 @@
                     @clear="handleFilter"
                     @keyup.enter="handleFilter"
                 />
-                <el-input
-                    v-model="filters.contact_name"
-                    placeholder="客人姓名"
-                    clearable
-                    style="width: 150px;"
-                    @clear="handleFilter"
-                    @keyup.enter="handleFilter"
-                />
+
                 <el-select
                     v-model="filters.ota_platform_id"
                     placeholder="渠道"
@@ -72,6 +65,14 @@
                         :value="spot.id"
                     />
                 </el-select>
+                <el-input
+                    v-model="filters.contact_name"
+                    placeholder="客人姓名"
+                    clearable
+                    style="width: 150px;"
+                    @clear="handleFilter"
+                    @keyup.enter="handleFilter"
+                />
                 <el-date-picker
                     v-model="filters.check_in_date_range"
                     type="daterange"
