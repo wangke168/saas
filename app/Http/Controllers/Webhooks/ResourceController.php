@@ -417,7 +417,8 @@ class ResourceController extends Controller
                             }
 
                             // 值不同或不存在，记录为脏数据
-                            $dirtyInventories[] = [
+                            // 如果总库存为0，可用库存和锁定库存都应该为0
+                            $inventoryData = [
                                 'room_type_id' => $roomTypeModel->id,
                                 'date' => $date,
                                 'total_quantity' => $newQuota,
@@ -427,6 +428,11 @@ class ResourceController extends Controller
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ];
+                            // 总库存为0时，清空锁定库存
+                            if ($newQuota === 0) {
+                                $inventoryData['locked_quantity'] = 0;
+                            }
+                            $dirtyInventories[] = $inventoryData;
                             $changedDates[] = $date;
 
                             // 更新 Redis 指纹（先更新，避免并发问题）
@@ -439,7 +445,7 @@ class ResourceController extends Controller
                                 'date' => $date,
                                 'error' => $e->getMessage(),
                             ]);
-                            $dirtyInventories[] = [
+                            $inventoryData = [
                                 'room_type_id' => $roomTypeModel->id,
                                 'date' => $date,
                                 'total_quantity' => $newQuota,
@@ -449,6 +455,11 @@ class ResourceController extends Controller
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ];
+                            // 总库存为0时，清空锁定库存
+                            if ($newQuota === 0) {
+                                $inventoryData['locked_quantity'] = 0;
+                            }
+                            $dirtyInventories[] = $inventoryData;
                             $changedDates[] = $date;
                         } catch (\Exception $e) {
                             // 其他异常也降级处理
@@ -462,6 +473,7 @@ class ResourceController extends Controller
                                 'date' => $date,
                                 'total_quantity' => $newQuota,
                                 'available_quantity' => $newQuota,
+                                'locked_quantity' => $newQuota === 0 ? 0 : null, // 总库存为0时，清空锁定库存
                                 'source' => PriceSource::API->value,
                                 'is_closed' => false,
                                 'created_at' => now(),
@@ -479,10 +491,20 @@ class ResourceController extends Controller
                             // 注意：更新字段列表中不包含 is_closed，确保不会覆盖手工关闭的库存状态
                             // 如果运营手工关闭了库存（is_closed = true），资源方推送时不会覆盖这个状态
                             // 这样推送到OTA时，is_closed = true 的库存会被正确处理为关闭状态（库存为0）
+                            // 修复：当 total_quantity = 0 时，需要同时更新 locked_quantity 为 0，确保数据一致性
+                            $updateFields = ['total_quantity', 'available_quantity', 'source', 'updated_at'];
+                            // 检查是否有需要清空锁定库存的记录
+                            $hasZeroQuota = collect($dirtyInventories)->contains(function ($item) {
+                                return ($item['total_quantity'] ?? 0) === 0;
+                            });
+                            if ($hasZeroQuota) {
+                                $updateFields[] = 'locked_quantity';
+                            }
+                            
                             Inventory::upsert(
                                 $dirtyInventories,
                                 ['room_type_id', 'date'], // 唯一键
-                                ['total_quantity', 'available_quantity', 'source', 'updated_at'] // 更新字段（不包含 is_closed）
+                                $updateFields // 更新字段
                             );
 
                             DB::commit();

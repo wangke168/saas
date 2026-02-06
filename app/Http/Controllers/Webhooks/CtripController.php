@@ -2629,7 +2629,9 @@ class CtripController extends Controller
                     }
 
                     // 锁定库存
-                    $inventory->available_quantity -= $quantity;
+                    // 修复：确保锁定后 available_quantity 不会小于 0，且不超过 total_quantity
+                    $newAvailableQuantity = max(0, $inventory->available_quantity - $quantity);
+                    $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
                     $inventory->locked_quantity += $quantity;
                     $inventory->save();
 
@@ -2728,7 +2730,9 @@ class CtripController extends Controller
                     // 释放库存（确保不会出现负数）
                     $releaseQuantity = min($quantity, $inventory->locked_quantity);
                     $inventory->locked_quantity -= $releaseQuantity;
-                    $inventory->available_quantity += $releaseQuantity;
+                    // 修复：确保 available_quantity 不超过 total_quantity
+                    $newAvailableQuantity = $inventory->available_quantity + $releaseQuantity;
+                    $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
                     $inventory->save();
 
                     Log::info('预下单库存释放成功', [

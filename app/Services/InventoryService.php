@@ -88,7 +88,9 @@ class InventoryService
                             throw new \Exception("库存记录不存在：room_type_id={$roomTypeId}, date={$date}");
                         }
 
-                        $inventory->available_quantity -= $quantity;
+                        // 修复：确保锁定后 available_quantity 不会小于 0，且不超过 total_quantity
+                        $newAvailableQuantity = max(0, $inventory->available_quantity - $quantity);
+                        $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
                         $inventory->locked_quantity += $quantity;
                         $inventory->save();
                     }
@@ -202,8 +204,10 @@ class InventoryService
 
                         // 确保释放数量不超过锁定数量
                         $releaseQuantity = min($quantity, $inventory->locked_quantity);
-                        $inventory->available_quantity += $releaseQuantity;
                         $inventory->locked_quantity -= $releaseQuantity;
+                        // 修复：确保 available_quantity 不超过 total_quantity
+                        $newAvailableQuantity = $inventory->available_quantity + $releaseQuantity;
+                        $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
                         $inventory->save();
                     }
                 });
@@ -383,8 +387,10 @@ class InventoryService
 
                     // 确保释放数量不超过锁定数量
                     $releaseQuantity = min($quantity, $inventory->locked_quantity);
-                    $inventory->available_quantity += $releaseQuantity;
                     $inventory->locked_quantity -= $releaseQuantity;
+                    // 修复：确保 available_quantity 不超过 total_quantity
+                    $newAvailableQuantity = $inventory->available_quantity + $releaseQuantity;
+                    $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
                     $inventory->save();
                 }
 
