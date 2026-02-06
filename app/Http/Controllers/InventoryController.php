@@ -34,6 +34,9 @@ class InventoryController extends Controller
             $query->where('source', $request->source);
         }
 
+        // 过滤掉已过去的日期，只显示今天及以后的库存
+        $query->whereDate('date', '>=', now()->format('Y-m-d'));
+
         // 权限控制：运营只能查看所属资源方下的所有景区下的酒店的房型的库存
         if ($request->user()->isOperator()) {
             $resourceProviderIds = $request->user()->resourceProviders->pluck('id');

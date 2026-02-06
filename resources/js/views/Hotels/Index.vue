@@ -254,6 +254,7 @@
                         start-placeholder="开始日期"
                         end-placeholder="结束日期"
                         style="margin-left: 20px;"
+                        :disabled-date="disabledPastDate"
                         @change="handleInventoryDateRangeChange"
                     />
                 </div>
@@ -336,6 +337,7 @@
                                 start-placeholder="开始日期"
                                 end-placeholder="结束日期"
                                 style="width: 100%"
+                                :disabled-date="disabledPastDate"
                             />
                         </el-form-item>
                         <el-form-item label="总库存" prop="total_quantity">
@@ -803,6 +805,7 @@ const resetRoomTypeDialog = () => {
 const handleManageInventory = async (roomType) => {
     currentRoomType.value = roomType;
     inventoryCurrentPage.value = 1;
+    inventoryDateRange.value = null; // 重置日期范围，避免显示过去的日期
     inventoryDialogVisible.value = true;
     await fetchInventories(roomType.id);
 };
@@ -1007,6 +1010,14 @@ const formatDate = (date) => {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+};
+
+// 禁用过去的日期
+const disabledPastDate = (time) => {
+    if (!time) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return time.getTime() < today.getTime();
 };
 
 onMounted(() => {
