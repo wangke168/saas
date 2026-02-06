@@ -223,13 +223,22 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
             //      - 如果 2026-01-11 从0变成正数，2026-01-10 需要重新计算并推送准确库存（可以满足连续入住）
             //   2. 从 2026-01-11 开始入住需要：2026-01-11, 2026-01-12
             $stayDays = $product->stay_days ?: 1;
-            $queryDates = $this->dates;
+            // 优化：过滤掉已过去的日期
+            $queryDates = $this->filterFutureDates($this->dates);
             
-            if ($stayDays > 1 && !empty($this->dates)) {
+            if (empty($queryDates)) {
+                Log::info('推送库存变化到携程：所有日期都已过去，跳过推送', [
+                    'product_id' => $product->id,
+                    'original_dates' => $this->dates,
+                ]);
+                return;
+            }
+            
+            if ($stayDays > 1 && !empty($queryDates)) {
                 // 对于每个变化的日期，需要查询前面相关日期的库存
                 // 这样当库存变化时，可以重新计算所有受影响日期的库存
                 $expandedDates = [];
-                foreach ($this->dates as $date) {
+                foreach ($queryDates as $date) {
                     $dateObj = \Carbon\Carbon::parse($date);
                     
                     // 查询范围：[变化日期 - (stay_days-1), 变化日期]
@@ -250,7 +259,18 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                 
                 // 排序日期，确保顺序正确
                 sort($expandedDates);
-                $queryDates = $expandedDates;
+                // 再次过滤掉已过去的日期（扩大范围后可能包含过去的日期）
+                $queryDates = $this->filterFutureDates($expandedDates);
+                
+                if (empty($queryDates)) {
+                    Log::info('推送库存变化到携程：扩大日期范围后所有日期都已过去，跳过推送', [
+                        'product_id' => $product->id,
+                        'stay_days' => $stayDays,
+                        'original_dates' => $this->dates,
+                        'expanded_dates' => $expandedDates,
+                    ]);
+                    return;
+                }
                 
                 Log::debug('推送库存变化：扩大查询日期范围（考虑入住天数）', [
                     'product_id' => $product->id,
@@ -332,13 +352,22 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
             //      - 如果 2026-01-11 从0变成正数，2026-01-10 需要重新计算并推送准确库存（可以满足连续入住）
             //   2. 从 2026-01-11 开始入住需要：2026-01-11, 2026-01-12
             $stayDays = $product->stay_days ?: 1;
-            $queryDates = $this->dates;
+            // 优化：过滤掉已过去的日期
+            $queryDates = $this->filterFutureDates($this->dates);
             
-            if ($stayDays > 1 && !empty($this->dates)) {
+            if (empty($queryDates)) {
+                Log::info('推送库存变化到美团：所有日期都已过去，跳过推送', [
+                    'product_id' => $product->id,
+                    'original_dates' => $this->dates,
+                ]);
+                return;
+            }
+            
+            if ($stayDays > 1 && !empty($queryDates)) {
                 // 对于每个变化的日期，需要查询前面相关日期的库存
                 // 这样当库存变化时，可以重新计算所有受影响日期的库存
                 $expandedDates = [];
-                foreach ($this->dates as $date) {
+                foreach ($queryDates as $date) {
                     $dateObj = \Carbon\Carbon::parse($date);
                     
                     // 查询范围：[变化日期 - (stay_days-1), 变化日期]
@@ -359,7 +388,18 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                 
                 // 排序日期，确保顺序正确
                 sort($expandedDates);
-                $queryDates = $expandedDates;
+                // 再次过滤掉已过去的日期（扩大范围后可能包含过去的日期）
+                $queryDates = $this->filterFutureDates($expandedDates);
+                
+                if (empty($queryDates)) {
+                    Log::info('推送库存变化到美团：扩大日期范围后所有日期都已过去，跳过推送', [
+                        'product_id' => $product->id,
+                        'stay_days' => $stayDays,
+                        'original_dates' => $this->dates,
+                        'expanded_dates' => $expandedDates,
+                    ]);
+                    return;
+                }
                 
                 Log::debug('推送库存变化到美团：扩大查询日期范围（考虑入住天数）', [
                     'product_id' => $product->id,
@@ -413,6 +453,35 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
             ]);
             // 美团推送失败不影响其他平台，只记录错误，不抛出异常
         }
+    }
+
+    /**
+     * 过滤掉已过去的日期，只保留今天及未来的日期
+     * 
+     * @param array $dates 日期数组，格式：['2025-01-01', '2025-01-02', ...]
+     * @return array 过滤后的日期数组
+     */
+    protected function filterFutureDates(array $dates): array
+    {
+        if (empty($dates)) {
+            return [];
+        }
+
+        $today = \Carbon\Carbon::today()->format('Y-m-d');
+        $futureDates = [];
+
+        foreach ($dates as $date) {
+            // 只保留今天及未来的日期
+            if ($date >= $today) {
+                $futureDates[] = $date;
+            }
+        }
+
+        // 去重并排序
+        $futureDates = array_unique($futureDates);
+        sort($futureDates);
+
+        return $futureDates;
     }
 }
 
