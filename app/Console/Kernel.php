@@ -41,6 +41,9 @@ class Kernel extends ConsoleKernel
 
         // 每天凌晨2点查询订单核销状态
         $schedule->command('order:query-verification-status')->dailyAt('02:00');
+        
+        // 每5分钟同步飞猪订单状态
+        $schedule->command('fliggy:sync-order-status')->everyFiveMinutes();
     }
 
     /**

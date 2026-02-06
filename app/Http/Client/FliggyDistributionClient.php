@@ -529,5 +529,219 @@ class FliggyDistributionClient
         
         return $this->request($url, $params);
     }
+
+    /**
+     * 5. 订单校验（预下单 - 必须调用）
+     * 
+     * @param array $orderData 订单数据
+     * @return array
+     */
+    public function validateOrder(array $orderData): array
+    {
+        $url = $this->baseUrl . '/api/v1/hotelticket/validateOrder?format=json';
+        
+        $productId = $orderData['productInfo']['productId'] ?? '';
+        
+        if (empty($productId)) {
+            return [
+                'success' => false,
+                'code' => '4001',
+                'message' => '产品ID不能为空',
+                'data' => null,
+            ];
+        }
+        
+        $params = $this->buildParams($orderData, 'distributorId_timestamp_productId');
+        
+        Log::info('飞猪订单校验', [
+            'url' => $url,
+            'product_id' => $productId,
+            'out_order_id' => $orderData['outOrderId'] ?? '',
+        ]);
+        
+        return $this->request($url, $params);
+    }
+
+    /**
+     * 6. 订单创建
+     * 
+     * @param array $orderData 订单数据（结构同 validateOrder）
+     * @return array
+     */
+    public function createOrder(array $orderData): array
+    {
+        $url = $this->baseUrl . '/api/v1/hotelticket/createOrder?format=json';
+        
+        $productId = $orderData['productInfo']['productId'] ?? '';
+        
+        if (empty($productId)) {
+            return [
+                'success' => false,
+                'code' => '4001',
+                'message' => '产品ID不能为空',
+                'data' => null,
+            ];
+        }
+        
+        $params = $this->buildParams($orderData, 'distributorId_timestamp_productId');
+        
+        Log::info('飞猪订单创建', [
+            'url' => $url,
+            'product_id' => $productId,
+            'out_order_id' => $orderData['outOrderId'] ?? '',
+        ]);
+        
+        return $this->request($url, $params);
+    }
+
+    /**
+     * 7. 订单取消
+     * 
+     * @param string $orderId 飞猪订单号
+     * @param string|null $outOrderId 外部订单号
+     * @param string $reason 取消原因
+     * @return array
+     */
+    public function cancelOrder(string $orderId = '', ?string $outOrderId = null, string $reason = ''): array
+    {
+        $url = $this->baseUrl . '/api/v1/hotelticket/cancelOrder?format=json';
+        
+        // 签名公式：distributorId_timestamp_orderId（如果orderId为空则不拼）
+        $signFormula = $orderId ? 'distributorId_timestamp_orderId' : 'distributorId_timestamp_';
+        
+        $params = [
+            'reason' => $reason,
+        ];
+        
+        if ($orderId) {
+            $params['orderId'] = $orderId;
+        }
+        
+        if ($outOrderId) {
+            $params['outOrderId'] = $outOrderId;
+        }
+        
+        $params = $this->buildParams($params, $signFormula);
+        
+        Log::info('飞猪订单取消', [
+            'url' => $url,
+            'order_id' => $orderId,
+            'out_order_id' => $outOrderId,
+            'reason' => $reason,
+        ]);
+        
+        return $this->request($url, $params);
+    }
+
+    /**
+     * 8. 订单查询
+     * 
+     * @param string $orderId 飞猪订单号
+     * @param string|null $outOrderId 外部订单号
+     * @return array
+     */
+    public function searchOrder(string $orderId = '', ?string $outOrderId = null): array
+    {
+        $url = $this->baseUrl . '/api/v1/hotelticket/searchOrder?format=json';
+        
+        // 签名公式：distributorId_timestamp_orderId（如果orderId为空则不拼）
+        $signFormula = $orderId ? 'distributorId_timestamp_orderId' : 'distributorId_timestamp_';
+        
+        $params = [];
+        
+        if ($orderId) {
+            $params['orderId'] = $orderId;
+        }
+        
+        if ($outOrderId) {
+            $params['outOrderId'] = $outOrderId;
+        }
+        
+        if (empty($params)) {
+            return [
+                'success' => false,
+                'code' => '4001',
+                'message' => '订单ID和外部订单ID至少需要一个',
+                'data' => null,
+            ];
+        }
+        
+        $params = $this->buildParams($params, $signFormula);
+        
+        Log::info('飞猪订单查询', [
+            'url' => $url,
+            'order_id' => $orderId,
+            'out_order_id' => $outOrderId,
+        ]);
+        
+        return $this->request($url, $params);
+    }
+
+    /**
+     * 9. 订单退款申请
+     * 
+     * @param string $orderId 飞猪订单号
+     * @param string $refundReason 退款原因
+     * @param string $remark 备注
+     * @return array
+     */
+    public function refundOrder(string $orderId, string $refundReason, string $remark = ''): array
+    {
+        $url = $this->baseUrl . '/api/v1/hotelticket/refundOrder?format=json';
+        
+        if (empty($orderId)) {
+            return [
+                'success' => false,
+                'code' => '4001',
+                'message' => '订单ID不能为空',
+                'data' => null,
+            ];
+        }
+        
+        $params = $this->buildParams([
+            'orderId' => $orderId,
+            'refundReason' => $refundReason,
+            'remark' => $remark,
+        ], 'distributorId_timestamp_orderId');
+        
+        Log::info('飞猪订单退款申请', [
+            'url' => $url,
+            'order_id' => $orderId,
+            'refund_reason' => $refundReason,
+        ]);
+        
+        return $this->request($url, $params);
+    }
+
+    /**
+     * 10. 退款单查询
+     * 
+     * @param string $orderId 飞猪订单号
+     * @return array
+     */
+    public function searchRefundOrder(string $orderId): array
+    {
+        $url = $this->baseUrl . '/api/v1/hotelticket/searchRefundOrder?format=json';
+        
+        if (empty($orderId)) {
+            return [
+                'success' => false,
+                'code' => '4001',
+                'message' => '订单ID不能为空',
+                'data' => null,
+            ];
+        }
+        
+        $params = $this->buildParams([
+            'orderId' => $orderId,
+        ], 'distributorId_timestamp_orderId');
+        
+        Log::info('飞猪退款单查询', [
+            'url' => $url,
+            'order_id' => $orderId,
+        ]);
+        
+        return $this->request($url, $params);
+    }
 }
 

@@ -7,7 +7,9 @@ use App\Models\ResourceConfig;
 use App\Models\SoftwareProvider;
 use App\Services\Resource\HengdianService;
 use App\Services\Resource\ZiwoyouService;
+use App\Services\Resource\FliggyDistributionService;
 use App\Services\ZiwoyouProductMappingService;
+use App\Services\FliggyMappingService;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -209,6 +211,42 @@ class ResourceServiceFactory
                         'room_type_id' => $order->room_type_id,
                     ]);
                 }
+                
+                // 产品级别控制：如果订单下发服务商是飞猪，检查产品是否有映射关系
+                if ($softwareProvider->api_type === 'fliggy_distribution') {
+                    Log::info('ResourceServiceFactory: 订单下发服务商是飞猪，开始验证产品映射关系', [
+                        'order_id' => $order->id,
+                        'product_id' => $order->product_id,
+                        'hotel_id' => $order->hotel_id,
+                        'room_type_id' => $order->room_type_id,
+                        'scenic_spot_id' => $scenicSpot->id,
+                    ]);
+                    
+                    $mappingService = app(FliggyMappingService::class);
+                    $hasMapping = $mappingService->hasMapping(
+                        $order->product_id,
+                        $order->hotel_id,
+                        $order->room_type_id
+                    );
+                    
+                    if (!$hasMapping) {
+                        Log::info('ResourceServiceFactory: 产品没有飞猪映射关系，走手工流程', [
+                            'order_id' => $order->id,
+                            'product_id' => $order->product_id,
+                            'hotel_id' => $order->hotel_id,
+                            'room_type_id' => $order->room_type_id,
+                            'scenic_spot_id' => $scenicSpot->id,
+                        ]);
+                        return null; // 没有映射关系，返回null，走手工流程
+                    }
+                    
+                    Log::info('ResourceServiceFactory: 产品有飞猪映射关系，使用飞猪服务', [
+                        'order_id' => $order->id,
+                        'product_id' => $order->product_id,
+                        'hotel_id' => $order->hotel_id,
+                        'room_type_id' => $order->room_type_id,
+                    ]);
+                }
             }
             // $orderMode === 'auto' 时，继续执行，返回资源方服务
         } elseif ($operation === 'inventory') {
@@ -229,6 +267,7 @@ class ResourceServiceFactory
         $service = match($softwareProvider->api_type) {
             'hengdian' => app(HengdianService::class)->setConfig($config),
             'ziwoyou' => app(ZiwoyouService::class)->setConfig($config),
+            'fliggy_distribution' => app(FliggyDistributionService::class)->setConfig($config),
             default => null,
         };
 
@@ -400,6 +439,31 @@ class ResourceServiceFactory
                     
                     if (!$hasMapping) {
                         Log::info('ResourceServiceFactory::isSystemConnected: 订单下发服务商是自我游，但产品没有映射关系', [
+                            'order_id' => $order->id,
+                            'scenic_spot_id' => $scenicSpot->id,
+                            'order_mode' => $orderMode,
+                            'order_provider_id' => $orderProviderId,
+                            'order_provider_api_type' => $orderSoftwareProvider->api_type,
+                            'product_id' => $order->product_id,
+                            'hotel_id' => $order->hotel_id,
+                            'room_type_id' => $order->room_type_id,
+                            'is_connected' => false,
+                        ]);
+                        return false;
+                    }
+                }
+                
+                // 如果订单下发服务商是飞猪，还需要检查产品是否有映射关系
+                if ($orderSoftwareProvider->api_type === 'fliggy_distribution') {
+                    $mappingService = app(FliggyMappingService::class);
+                    $hasMapping = $mappingService->hasMapping(
+                        $order->product_id,
+                        $order->hotel_id,
+                        $order->room_type_id
+                    );
+                    
+                    if (!$hasMapping) {
+                        Log::info('ResourceServiceFactory::isSystemConnected: 订单下发服务商是飞猪，但产品没有映射关系', [
                             'order_id' => $order->id,
                             'scenic_spot_id' => $scenicSpot->id,
                             'order_mode' => $orderMode,

@@ -332,7 +332,9 @@ class InventoryService
                         ->lockForUpdate()
                         ->first();
 
-                    $inventory->available_quantity -= $quantity;
+                    // 修复：确保锁定后 available_quantity 不会小于 0，且不超过 total_quantity
+                    $newAvailableQuantity = max(0, $inventory->available_quantity - $quantity);
+                    $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
                     $inventory->locked_quantity += $quantity;
                     $inventory->save();
                 }

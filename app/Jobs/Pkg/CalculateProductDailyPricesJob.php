@@ -69,3 +69,4 @@ class CalculateProductDailyPricesJob implements ShouldQueue
 }
 
 
+

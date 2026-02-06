@@ -412,8 +412,34 @@ class ResourceController extends Controller
                             $lastQuota = Redis::get($fingerprintKey);
                             
                             // 如果值相同，跳过（去重）
-                            if ($lastQuota !== null && (int)$lastQuota === $newQuota) {
-                                continue; // 库存未变化，丢弃
+                            // 修复：当 newQuota = 0 时，即使指纹相同也要检查并修复数据不一致问题
+                            if ($lastQuota !== null && (int)$lastQuota === $newQuota && $newQuota !== 0) {
+                                continue; // 库存未变化，丢弃（但总库存为0时需要强制修复）
+                            }
+                            
+                            // 如果总库存为0，即使指纹相同也要检查数据库状态，确保数据一致性
+                            if ($lastQuota !== null && (int)$lastQuota === $newQuota && $newQuota === 0) {
+                                // 检查数据库中是否存在不一致的数据
+                                $existingInventory = \App\Models\Inventory::where('room_type_id', $roomTypeModel->id)
+                                    ->where('date', $date)
+                                    ->first();
+                                
+                                // 如果数据库中存在不一致（available_quantity > 0 或 locked_quantity > 0），需要修复
+                                if ($existingInventory && 
+                                    ($existingInventory->available_quantity > 0 || $existingInventory->locked_quantity > 0)) {
+                                    Log::warning('资源方库存推送：检测到数据不一致，强制修复', [
+                                        'room_type_id' => $roomTypeModel->id,
+                                        'date' => $date,
+                                        'total_quantity' => $existingInventory->total_quantity,
+                                        'available_quantity' => $existingInventory->available_quantity,
+                                        'locked_quantity' => $existingInventory->locked_quantity,
+                                        'redis_fingerprint' => $lastQuota,
+                                    ]);
+                                    // 继续处理，强制修复数据
+                                } else {
+                                    // 数据一致，跳过
+                                    continue;
+                                }
                             }
 
                             // 值不同或不存在，记录为脏数据
@@ -468,17 +494,21 @@ class ResourceController extends Controller
                                 'date' => $date,
                                 'error' => $e->getMessage(),
                             ]);
-                            $dirtyInventories[] = [
+                            $inventoryData = [
                                 'room_type_id' => $roomTypeModel->id,
                                 'date' => $date,
                                 'total_quantity' => $newQuota,
                                 'available_quantity' => $newQuota,
-                                'locked_quantity' => $newQuota === 0 ? 0 : null, // 总库存为0时，清空锁定库存
                                 'source' => PriceSource::API->value,
                                 'is_closed' => false,
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ];
+                            // 总库存为0时，清空锁定库存
+                            if ($newQuota === 0) {
+                                $inventoryData['locked_quantity'] = 0;
+                            }
+                            $dirtyInventories[] = $inventoryData;
                             $changedDates[] = $date;
                         }
                     }
