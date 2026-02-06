@@ -449,15 +449,14 @@ class ResourceController extends Controller
                                 'date' => $date,
                                 'total_quantity' => $newQuota,
                                 'available_quantity' => $newQuota,
+                                // 修复：统一包含locked_quantity字段，避免SQL列数不匹配
+                                // 当total_quantity = 0时，locked_quantity必须为0；否则设置为0（资源方推送不改变锁定库存）
+                                'locked_quantity' => $newQuota === 0 ? 0 : 0,
                                 'source' => PriceSource::API->value,
                                 'is_closed' => false,
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ];
-                            // 总库存为0时，清空锁定库存
-                            if ($newQuota === 0) {
-                                $inventoryData['locked_quantity'] = 0;
-                            }
                             $dirtyInventories[] = $inventoryData;
                             $changedDates[] = $date;
 
@@ -476,15 +475,14 @@ class ResourceController extends Controller
                                 'date' => $date,
                                 'total_quantity' => $newQuota,
                                 'available_quantity' => $newQuota,
+                                // 修复：统一包含locked_quantity字段，避免SQL列数不匹配
+                                // 当total_quantity = 0时，locked_quantity必须为0；否则设置为0（资源方推送不改变锁定库存）
+                                'locked_quantity' => $newQuota === 0 ? 0 : 0,
                                 'source' => PriceSource::API->value,
                                 'is_closed' => false,
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ];
-                            // 总库存为0时，清空锁定库存
-                            if ($newQuota === 0) {
-                                $inventoryData['locked_quantity'] = 0;
-                            }
                             $dirtyInventories[] = $inventoryData;
                             $changedDates[] = $date;
                         } catch (\Exception $e) {
@@ -499,15 +497,14 @@ class ResourceController extends Controller
                                 'date' => $date,
                                 'total_quantity' => $newQuota,
                                 'available_quantity' => $newQuota,
+                                // 修复：统一包含locked_quantity字段，避免SQL列数不匹配
+                                // 当total_quantity = 0时，locked_quantity必须为0；否则设置为0（资源方推送不改变锁定库存）
+                                'locked_quantity' => $newQuota === 0 ? 0 : 0,
                                 'source' => PriceSource::API->value,
                                 'is_closed' => false,
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ];
-                            // 总库存为0时，清空锁定库存
-                            if ($newQuota === 0) {
-                                $inventoryData['locked_quantity'] = 0;
-                            }
                             $dirtyInventories[] = $inventoryData;
                             $changedDates[] = $date;
                         }
@@ -517,16 +514,28 @@ class ResourceController extends Controller
                     if (!empty($dirtyInventories)) {
                         DB::beginTransaction();
                         try {
+                            // 修复：将所有记录统一包含 locked_quantity 字段，避免SQL列数不匹配
+                            // 确保所有记录都有相同的字段结构
+                            foreach ($dirtyInventories as &$item) {
+                                if (!isset($item['locked_quantity'])) {
+                                    // 如果记录中没有 locked_quantity，根据 total_quantity 设置
+                                    $item['locked_quantity'] = ($item['total_quantity'] ?? 0) === 0 ? 0 : 0;
+                                }
+                            }
+                            unset($item); // 释放引用
+                            
                             // 使用批量 upsert（高性能，不触发 Observer，但符合预期）
                             // 注意：更新字段列表中不包含 is_closed，确保不会覆盖手工关闭的库存状态
                             // 如果运营手工关闭了库存（is_closed = true），资源方推送时不会覆盖这个状态
                             // 这样推送到OTA时，is_closed = true 的库存会被正确处理为关闭状态（库存为0）
                             // 修复：当 total_quantity = 0 时，需要同时更新 locked_quantity 为 0，确保数据一致性
                             $updateFields = ['total_quantity', 'available_quantity', 'source', 'updated_at'];
-                            // 检查是否有需要清空锁定库存的记录
+                            // 检查是否有需要清空锁定库存的记录（total_quantity = 0 时 locked_quantity 必须为 0）
                             $hasZeroQuota = collect($dirtyInventories)->contains(function ($item) {
                                 return ($item['total_quantity'] ?? 0) === 0;
                             });
+                            // 只有当存在 total_quantity = 0 的记录时，才更新 locked_quantity 字段
+                            // 这样可以避免更新其他记录的 locked_quantity（保持原值）
                             if ($hasZeroQuota) {
                                 $updateFields[] = 'locked_quantity';
                             }
