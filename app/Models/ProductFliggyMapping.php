@@ -60,3 +60,4 @@ class ProductFliggyMapping extends Model
     }
 }
 
+

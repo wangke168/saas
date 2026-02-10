@@ -195,8 +195,21 @@ class CtripService
         // 获取库存数据（按房型汇总）
         $inventories = \App\Models\Inventory::whereIn('room_type_id', $roomTypes);
 
+        // 只查询未来日期（包括今天）
+        $today = \Carbon\Carbon::today()->format('Y-m-d');
+        $inventories->where('date', '>=', $today);
+
         if ($dates !== null) {
-            $inventories->whereIn('date', $dates);
+            // 过滤掉过去的日期
+            $futureDates = array_filter($dates, function($date) use ($today) {
+                return $date >= $today;
+            });
+            
+            if (empty($futureDates)) {
+                return ['success' => false, 'message' => '没有未来的库存数据'];
+            }
+            
+            $inventories->whereIn('date', array_values($futureDates));
         }
 
         $inventoryList = $inventories->get();
@@ -647,8 +660,21 @@ class CtripService
         // 获取该房型的库存数据
         $inventories = \App\Models\Inventory::where('room_type_id', $roomType->id);
 
+        // 只查询未来日期（包括今天）
+        $today = \Carbon\Carbon::today()->format('Y-m-d');
+        $inventories->where('date', '>=', $today);
+
         if ($dates !== null) {
-            $inventories->whereIn('date', $dates);
+            // 过滤掉过去的日期
+            $futureDates = array_filter($dates, function($date) use ($today) {
+                return $date >= $today;
+            });
+            
+            if (empty($futureDates)) {
+                return ['success' => false, 'message' => '没有未来的库存数据'];
+            }
+            
+            $inventories->whereIn('date', array_values($futureDates));
         }
 
         $inventoryList = $inventories->get();
