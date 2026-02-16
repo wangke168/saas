@@ -122,6 +122,12 @@ class FliggyOrderDataBuilder
                 }
             }
 
+            Log::info('FliggyOrderDataBuilder: 开始查询飞猪价格', [
+                'fliggy_product_id' => $fliggyProductId,
+                'date' => $date,
+                'date_timestamp' => $dateTimestamp,
+            ]);
+
             // 查询价格/库存
             $result = $this->getClient()->queryProductPriceStock(
                 $fliggyProductId,
@@ -133,12 +139,25 @@ class FliggyOrderDataBuilder
                 Log::error('FliggyOrderDataBuilder: 查询飞猪价格失败', [
                     'fliggy_product_id' => $fliggyProductId,
                     'date' => $date,
+                    'date_timestamp' => $dateTimestamp,
+                    'code' => $result['code'] ?? '',
                     'error' => $result['message'] ?? '未知错误',
+                    'response_data' => $result['data'] ?? null,
                 ]);
                 return null;
             }
 
             $data = $result['data'] ?? [];
+            
+            // 记录原始返回数据（用于调试）
+            Log::debug('FliggyOrderDataBuilder: 飞猪价格查询返回数据', [
+                'fliggy_product_id' => $fliggyProductId,
+                'date' => $date,
+                'data_keys' => array_keys($data),
+                'has_calendarStock' => isset($data['calendarStock']),
+                'has_distributionPrice' => isset($data['distributionPrice']),
+                'data_preview' => json_encode($data, JSON_UNESCAPED_UNICODE),
+            ]);
             
             // 解析价格数据
             // 根据飞猪接口文档，返回的数据结构可能包含 calendarStock 或 totalStock
@@ -147,33 +166,138 @@ class FliggyOrderDataBuilder
 
             if (isset($data['calendarStock']) && is_array($data['calendarStock'])) {
                 // 日历库存模式
-                foreach ($data['calendarStock'] as $stockItem) {
-                    if (isset($stockItem['date']) && isset($stockItem['distributionPrice'])) {
-                        $itemDate = $stockItem['date'];
-                        // 如果是查询特定日期，只取该日期的价格
-                        if ($dateTimestamp && $itemDate == $dateTimestamp) {
-                            $price = (int)($stockItem['distributionPrice'] * 100); // 转换为分
-                            $stock = (int)($stockItem['stock'] ?? 0);
-                            break;
-                        } elseif (!$dateTimestamp) {
-                            // 如果没有指定日期，取第一个
-                            $price = (int)($stockItem['distributionPrice'] * 100);
-                            $stock = (int)($stockItem['stock'] ?? 0);
-                            break;
+                Log::debug('FliggyOrderDataBuilder: 使用日历库存模式', [
+                    'calendarStock_count' => count($data['calendarStock']),
+                ]);
+                
+                foreach ($data['calendarStock'] as $index => $stockItem) {
+                    // 检查多种可能的价格字段名
+                    $distributionPrice = $stockItem['distributionPrice'] 
+                        ?? $stockItem['price'] 
+                        ?? $stockItem['salePrice'] 
+                        ?? null;
+                    
+                    if (!isset($stockItem['date']) || $distributionPrice === null) {
+                        Log::debug('FliggyOrderDataBuilder: 跳过无效的库存项', [
+                            'index' => $index,
+                            'stock_item' => $stockItem,
+                        ]);
+                        continue;
+                    }
+                    
+                    $itemDate = $stockItem['date'];
+                    // 转换为整数进行比较（处理字符串类型的时间戳）
+                    $itemDateInt = (int)$itemDate;
+                    $dateTimestampInt = $dateTimestamp ? (int)$dateTimestamp : null;
+                    
+                    Log::debug('FliggyOrderDataBuilder: 比较日期', [
+                        'index' => $index,
+                        'item_date' => $itemDate,
+                        'item_date_int' => $itemDateInt,
+                        'target_date_timestamp' => $dateTimestampInt,
+                        'match' => $dateTimestampInt && $itemDateInt == $dateTimestampInt,
+                    ]);
+                    
+                    // 如果是查询特定日期，只取该日期的价格
+                    if ($dateTimestampInt && $itemDateInt == $dateTimestampInt) {
+                        // distributionPrice 可能是元或分，需要判断
+                        // 如果值很大（>10000），可能是分，否则是元
+                        $priceValue = (float)$distributionPrice;
+                        if ($priceValue < 10000) {
+                            // 认为是元，转换为分
+                            $price = (int)($priceValue * 100);
+                        } else {
+                            // 认为是分
+                            $price = (int)$priceValue;
+                        }
+                        $stock = (int)($stockItem['stock'] ?? 0);
+                        Log::info('FliggyOrderDataBuilder: 找到匹配日期的价格', [
+                            'date' => $date,
+                            'price' => $price,
+                            'stock' => $stock,
+                            'original_price' => $distributionPrice,
+                        ]);
+                        break;
+                    } elseif (!$dateTimestamp) {
+                        // 如果没有指定日期，取第一个有效价格
+                        $priceValue = (float)$distributionPrice;
+                        if ($priceValue < 10000) {
+                            $price = (int)($priceValue * 100);
+                        } else {
+                            $price = (int)$priceValue;
+                        }
+                        $stock = (int)($stockItem['stock'] ?? 0);
+                        Log::info('FliggyOrderDataBuilder: 使用第一个有效价格', [
+                            'price' => $price,
+                            'stock' => $stock,
+                        ]);
+                        break;
+                    }
+                }
+                
+                // 如果指定了日期但没有找到匹配的价格，尝试不指定日期重新查询
+                if ($price <= 0 && $dateTimestamp) {
+                    Log::warning('FliggyOrderDataBuilder: 指定日期未找到价格，尝试查询所有价格', [
+                        'fliggy_product_id' => $fliggyProductId,
+                        'date' => $date,
+                    ]);
+                    
+                    // 不指定日期范围，查询所有价格
+                    $resultAll = $this->getClient()->queryProductPriceStock($fliggyProductId);
+                    
+                    if (($resultAll['success'] ?? false) && isset($resultAll['data']['calendarStock'])) {
+                        foreach ($resultAll['data']['calendarStock'] as $stockItem) {
+                            $distributionPrice = $stockItem['distributionPrice'] 
+                                ?? $stockItem['price'] 
+                                ?? $stockItem['salePrice'] 
+                                ?? null;
+                            
+                            if ($distributionPrice !== null) {
+                                $priceValue = (float)$distributionPrice;
+                                if ($priceValue < 10000) {
+                                    $price = (int)($priceValue * 100);
+                                } else {
+                                    $price = (int)$priceValue;
+                                }
+                                $stock = (int)($stockItem['stock'] ?? 0);
+                                Log::info('FliggyOrderDataBuilder: 从不指定日期的查询中找到价格', [
+                                    'price' => $price,
+                                    'stock' => $stock,
+                                ]);
+                                break;
+                            }
                         }
                     }
                 }
             } elseif (isset($data['distributionPrice'])) {
                 // 总库存模式
-                $price = (int)($data['distributionPrice'] * 100); // 转换为分
+                $priceValue = (float)$data['distributionPrice'];
+                if ($priceValue < 10000) {
+                    $price = (int)($priceValue * 100); // 转换为分
+                } else {
+                    $price = (int)$priceValue; // 已经是分
+                }
                 $stock = (int)($data['stock'] ?? 0);
+                Log::info('FliggyOrderDataBuilder: 使用总库存模式', [
+                    'price' => $price,
+                    'stock' => $stock,
+                ]);
+            } else {
+                // 尝试其他可能的数据结构
+                Log::warning('FliggyOrderDataBuilder: 未找到预期的价格字段', [
+                    'fliggy_product_id' => $fliggyProductId,
+                    'data_keys' => array_keys($data),
+                    'data' => $data,
+                ]);
             }
 
             if ($price <= 0) {
                 Log::warning('FliggyOrderDataBuilder: 飞猪价格无效', [
                     'fliggy_product_id' => $fliggyProductId,
                     'date' => $date,
+                    'date_timestamp' => $dateTimestamp,
                     'data' => $data,
+                    'price' => $price,
                 ]);
                 return null;
             }
@@ -195,6 +319,7 @@ class FliggyOrderDataBuilder
                 'fliggy_product_id' => $fliggyProductId,
                 'date' => $date,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             return null;
         }
