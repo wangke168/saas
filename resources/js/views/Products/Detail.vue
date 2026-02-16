@@ -288,17 +288,25 @@
                             <el-table-column prop="name" label="规则名称" width="150" />
                             <el-table-column prop="type" label="规则类型" width="120">
                                 <template #default="{ row }">
-                                    <el-tag>{{ row.type === 'weekday' ? '周几规则' : '日期区间规则' }}</el-tag>
+                                    <el-tag v-if="row.type === 'weekday'">周几规则</el-tag>
+                                    <el-tag v-else-if="row.type === 'date_range'">日期区间规则</el-tag>
+                                    <el-tag v-else type="success">统一规则</el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column label="规则内容" width="200">
+                            <el-table-column label="规则内容" width="300">
                                 <template #default="{ row }">
-                                    <span v-if="row.type === 'weekday'">
-                                        周{{ formatWeekdays(row.weekdays) }}
-                                    </span>
-                                    <span v-else>
-                                        {{ formatDateOnly(row.start_date) }} 至 {{ formatDateOnly(row.end_date) }}
-                                    </span>
+                                    <div>
+                                        <span v-if="row.start_date && row.end_date">
+                                            {{ formatDateOnly(row.start_date) }} 至 {{ formatDateOnly(row.end_date) }}
+                                        </span>
+                                        <span v-else style="color: #909399;">全时段</span>
+                                        <span v-if="row.weekdays" style="margin-left: 10px;">
+                                            周{{ formatWeekdays(row.weekdays) }}
+                                        </span>
+                                        <span v-else-if="row.start_date || row.end_date" style="margin-left: 10px; color: #909399;">
+                                            （所有日期）
+                                        </span>
+                                    </div>
                                 </template>
                             </el-table-column>
                             <el-table-column label="价格调整" width="300">
@@ -340,32 +348,7 @@
                                 <el-form-item label="规则名称" prop="name">
                                     <el-input v-model="priceRuleForm.name" placeholder="请输入规则名称" />
                                 </el-form-item>
-                                <el-form-item label="规则类型" prop="type">
-                                    <el-radio-group v-model="priceRuleForm.type">
-                                        <el-radio label="weekday">周几规则</el-radio>
-                                        <el-radio label="date_range">日期区间规则</el-radio>
-                                    </el-radio-group>
-                                </el-form-item>
-                                <el-form-item
-                                    v-if="priceRuleForm.type === 'weekday'"
-                                    label="选择周几"
-                                    prop="weekdays"
-                                >
-                                    <el-checkbox-group v-model="priceRuleForm.weekdays">
-                                        <el-checkbox label="1">周一</el-checkbox>
-                                        <el-checkbox label="2">周二</el-checkbox>
-                                        <el-checkbox label="3">周三</el-checkbox>
-                                        <el-checkbox label="4">周四</el-checkbox>
-                                        <el-checkbox label="5">周五</el-checkbox>
-                                        <el-checkbox label="6">周六</el-checkbox>
-                                        <el-checkbox label="7">周日</el-checkbox>
-                                    </el-checkbox-group>
-                                </el-form-item>
-                                <el-form-item
-                                    v-if="priceRuleForm.type === 'date_range'"
-                                    label="日期区间"
-                                    prop="dateRange"
-                                >
+                                <el-form-item label="日期范围（可选）" prop="dateRange">
                                     <el-date-picker
                                         v-model="priceRuleForm.dateRange"
                                         type="daterange"
@@ -376,6 +359,23 @@
                                         format="YYYY-MM-DD"
                                         value-format="YYYY-MM-DD"
                                     />
+                                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                                        不选择表示全时段生效
+                                    </span>
+                                </el-form-item>
+                                <el-form-item label="选择周几（可选）" prop="weekdays">
+                                    <el-checkbox-group v-model="priceRuleForm.weekdays">
+                                        <el-checkbox label="1">周一</el-checkbox>
+                                        <el-checkbox label="2">周二</el-checkbox>
+                                        <el-checkbox label="3">周三</el-checkbox>
+                                        <el-checkbox label="4">周四</el-checkbox>
+                                        <el-checkbox label="5">周五</el-checkbox>
+                                        <el-checkbox label="6">周六</el-checkbox>
+                                        <el-checkbox label="7">周日</el-checkbox>
+                                    </el-checkbox-group>
+                                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                                        不选择表示日期范围内的所有日期都生效
+                                    </span>
                                 </el-form-item>
                                 <el-form-item label="门市价调整（元）" prop="market_price_adjustment">
                                     <el-input-number
@@ -622,7 +622,6 @@ const priceRuleSubmitting = ref(false);
 const priceRuleFormRef = ref(null);
 const priceRuleForm = ref({
     name: '',
-    type: 'weekday',
     weekdays: [],
     dateRange: null,
     market_price_adjustment: 0,
@@ -671,15 +670,11 @@ const priceFormRules = {
 
 const priceRuleFormRules = {
     name: [{ required: true, message: '请输入规则名称', trigger: 'blur' }],
-    type: [{ required: true, message: '请选择规则类型', trigger: 'change' }],
     weekdays: [
         {
             validator: (rule, value, callback) => {
-                if (priceRuleForm.value.type === 'weekday' && (!value || value.length === 0)) {
-                    callback(new Error('请至少选择一个周几'));
-                } else {
-                    callback();
-                }
+                // 周几可选，不需要验证
+                callback();
             },
             trigger: 'change',
         },
@@ -687,10 +682,16 @@ const priceRuleFormRules = {
     dateRange: [
         {
             validator: (rule, value, callback) => {
-                if (priceRuleForm.value.type === 'date_range' && (!value || value.length !== 2)) {
-                    callback(new Error('请选择日期区间'));
+                // 日期范围可选，但如果选择了必须完整
+                if (value && value.length !== 2) {
+                    callback(new Error('请选择完整的日期区间'));
                 } else {
-                    callback();
+                    // 至少要有日期范围或周几
+                    if (!value && (!priceRuleForm.value.weekdays || priceRuleForm.value.weekdays.length === 0)) {
+                        callback(new Error('请至少设置日期范围或周几'));
+                    } else {
+                        callback();
+                    }
                 }
             },
             trigger: 'change',
@@ -1196,15 +1197,36 @@ const handleEditPriceRule = async (row) => {
         // 如果 row 已经包含 items，直接使用，否则从 API 获取
         const rule = row.items ? row : (await axios.get(`/price-rules/${row.id}`)).data.data || row;
 
+        // 兼容旧数据：根据 type 自动填充表单
+        let dateRange = null;
+        let weekdays = [];
+        
+        if (rule.type === 'weekday') {
+            // 旧格式：只有周几，日期范围为空（全时段）
+            weekdays = rule.weekdays ? rule.weekdays.split(',') : [];
+            dateRange = null;
+        } else if (rule.type === 'date_range') {
+            // 旧格式：只有日期范围，周几为空（范围内所有日期）
+            dateRange = rule.start_date && rule.end_date 
+                ? [rule.start_date, rule.end_date] 
+                : null;
+            weekdays = [];
+        } else {
+            // 新格式：同时有日期范围和周几
+            dateRange = rule.start_date && rule.end_date 
+                ? [rule.start_date, rule.end_date] 
+                : null;
+            weekdays = rule.weekdays ? rule.weekdays.split(',') : [];
+        }
+
         priceRuleForm.value = {
-            name: rule.name,
-            type: rule.type,
-            weekdays: rule.weekdays ? rule.weekdays.split(',') : [],
-            dateRange: rule.start_date && rule.end_date ? [rule.start_date, rule.end_date] : null,
+            name: rule.name || '',
+            weekdays: weekdays,
+            dateRange: dateRange,
             market_price_adjustment: parseFloat(rule.market_price_adjustment) || 0, // 单位：元
             settlement_price_adjustment: parseFloat(rule.settlement_price_adjustment) || 0, // 单位：元
             sale_price_adjustment: parseFloat(rule.sale_price_adjustment) || 0, // 单位：元
-            is_active: rule.is_active,
+            is_active: rule.is_active ?? true,
             items: rule.items && rule.items.length > 0
                 ? rule.items.map(item => ({
                     hotel_id: item.hotel_id,
@@ -1250,12 +1272,18 @@ const handleSubmitPriceRule = async () => {
 
     await priceRuleFormRef.value.validate(async (valid) => {
         if (valid) {
+            // 验证：至少要有日期范围或周几
+            if (!priceRuleForm.value.dateRange && (!priceRuleForm.value.weekdays || priceRuleForm.value.weekdays.length === 0)) {
+                ElMessage.error('请至少设置日期范围或周几');
+                return;
+            }
+
             priceRuleSubmitting.value = true;
             try {
                 const data = {
                     product_id: product.value.id,
                     name: priceRuleForm.value.name,
-                    type: priceRuleForm.value.type,
+                    type: 'combined', // 统一使用新格式
                     market_price_adjustment: priceRuleForm.value.market_price_adjustment,
                     settlement_price_adjustment: priceRuleForm.value.settlement_price_adjustment,
                     sale_price_adjustment: priceRuleForm.value.sale_price_adjustment,
@@ -1263,12 +1291,15 @@ const handleSubmitPriceRule = async () => {
                     items: priceRuleForm.value.items,
                 };
 
-                if (priceRuleForm.value.type === 'weekday') {
+                // 日期范围（可选）
+                if (priceRuleForm.value.dateRange && priceRuleForm.value.dateRange.length === 2) {
+                    data.start_date = priceRuleForm.value.dateRange[0];
+                    data.end_date = priceRuleForm.value.dateRange[1];
+                }
+
+                // 周几（可选）
+                if (priceRuleForm.value.weekdays && priceRuleForm.value.weekdays.length > 0) {
                     data.weekdays = priceRuleForm.value.weekdays.join(',');
-                } else {
-                    const [startDate, endDate] = priceRuleForm.value.dateRange;
-                    data.start_date = startDate;
-                    data.end_date = endDate;
                 }
 
                 if (editingPriceRuleId.value) {
@@ -1295,7 +1326,6 @@ const handleSubmitPriceRule = async () => {
 const resetPriceRuleForm = () => {
     priceRuleForm.value = {
         name: '',
-        type: 'weekday',
         weekdays: [],
         dateRange: null,
         market_price_adjustment: 0,

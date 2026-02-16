@@ -81,16 +81,39 @@ class ProductService
         foreach ($rules as $rule) {
             $shouldApply = false;
 
+            // 兼容旧数据：根据 type 字段判断
             if ($rule->type->value === 'weekday') {
+                // 旧格式：只有周几规则（全时段生效）
                 $weekday = date('N', strtotime($date));
                 $weekdays = explode(',', $rule->weekdays ?? '');
                 $shouldApply = in_array($weekday, $weekdays);
             } elseif ($rule->type->value === 'date_range') {
-                // 将字符串日期转换为 Carbon 对象进行比较，确保日期范围判断准确
+                // 旧格式：只有日期范围规则（范围内所有日期生效）
                 $dateCarbon = Carbon::parse($date)->startOfDay();
                 $startDate = Carbon::parse($rule->start_date)->startOfDay();
                 $endDate = Carbon::parse($rule->end_date)->startOfDay();
                 $shouldApply = $dateCarbon->gte($startDate) && $dateCarbon->lte($endDate);
+            } else {
+                // 新格式：统一规则（日期范围 + 周几可选）
+                // 检查日期范围
+                $inDateRange = true;
+                if ($rule->start_date && $rule->end_date) {
+                    $dateCarbon = Carbon::parse($date)->startOfDay();
+                    $startDate = Carbon::parse($rule->start_date)->startOfDay();
+                    $endDate = Carbon::parse($rule->end_date)->startOfDay();
+                    $inDateRange = $dateCarbon->gte($startDate) && $dateCarbon->lte($endDate);
+                }
+
+                // 检查周几（如果设置了周几）
+                $matchWeekday = true;
+                if ($rule->weekdays) {
+                    $weekday = date('N', strtotime($date));
+                    $weekdays = explode(',', $rule->weekdays);
+                    $matchWeekday = in_array($weekday, $weekdays);
+                }
+
+                // 同时满足日期范围和周几条件
+                $shouldApply = $inDateRange && $matchWeekday;
             }
 
             if ($shouldApply) {

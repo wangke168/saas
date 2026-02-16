@@ -39,9 +39,9 @@ class PriceRuleController extends Controller
             'product_id' => 'required|exists:products,id',
             'name' => 'required|string|max:255',
             'type' => ['required', 'in:' . implode(',', array_column(PriceRuleType::cases(), 'value'))],
-            'weekdays' => 'required_if:type,weekday|string',
-            'start_date' => 'required_if:type,date_range|date',
-            'end_date' => 'required_if:type,date_range|date|after_or_equal:start_date',
+            'weekdays' => 'nullable|string',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
             'market_price_adjustment' => 'required|numeric',
             'settlement_price_adjustment' => 'required|numeric',
             'sale_price_adjustment' => 'required|numeric',
@@ -50,6 +50,30 @@ class PriceRuleController extends Controller
             'items.*.hotel_id' => 'required|exists:hotels,id',
             'items.*.room_type_id' => 'required|exists:room_types,id',
         ]);
+
+        // 统一规则（combined）验证：日期范围和周几至少有一个
+        if ($validated['type'] === 'combined') {
+            if (empty($validated['start_date']) && empty($validated['end_date']) && empty($validated['weekdays'])) {
+                return response()->json([
+                    'message' => '统一规则必须至少设置日期范围或周几',
+                ], 422);
+            }
+        }
+        
+        // 兼容旧格式验证
+        if ($validated['type'] === 'weekday' && empty($validated['weekdays'])) {
+            return response()->json([
+                'message' => '周几规则必须设置周几',
+            ], 422);
+        }
+        
+        if ($validated['type'] === 'date_range') {
+            if (empty($validated['start_date']) || empty($validated['end_date'])) {
+                return response()->json([
+                    'message' => '日期区间规则必须设置开始日期和结束日期',
+                ], 422);
+            }
+        }
 
         $rule = DB::transaction(function () use ($validated) {
             $rule = PriceRule::create([
