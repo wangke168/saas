@@ -66,6 +66,8 @@ class Product extends Model
         'stay_days',
         'sale_start_date',
         'sale_end_date',
+        'order_mode',
+        'order_provider_id',
     ];
 
     protected function casts(): array
@@ -100,6 +102,14 @@ class Product extends Model
     public function softwareProvider(): BelongsTo
     {
         return $this->belongsTo(SoftwareProvider::class);
+    }
+
+    /**
+     * 订单下发服务商（可选，当order_mode为other时使用）
+     */
+    public function orderProvider(): BelongsTo
+    {
+        return $this->belongsTo(SoftwareProvider::class, 'order_provider_id');
     }
 
     /**

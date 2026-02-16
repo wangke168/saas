@@ -224,6 +224,45 @@
                         产品结束销售的日期（必填），不能早于开始日期
                     </span>
                 </el-form-item>
+                <el-form-item label="订单处理方式" prop="order_mode">
+                    <el-select
+                        v-model="form.order_mode"
+                        placeholder="使用景区配置（默认）"
+                        clearable
+                        style="width: 100%"
+                    >
+                        <el-option label="使用景区配置（默认）" :value="null" />
+                        <el-option label="系统直连" value="auto" />
+                        <el-option label="手工接单" value="manual" />
+                        <el-option label="其他系统" value="other" />
+                    </el-select>
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        选择订单处理方式。留空则使用景区配置；系统直连=自动调用资源方接口；手工接单=需要人工处理；其他系统=对接其他订单系统
+                    </span>
+                </el-form-item>
+                <el-form-item 
+                    label="订单下发服务商" 
+                    prop="order_provider_id"
+                    v-if="form.order_mode === 'other'"
+                >
+                    <el-select
+                        v-model="form.order_provider_id"
+                        placeholder="请选择订单下发服务商"
+                        clearable
+                        style="width: 100%"
+                        :disabled="!form.scenic_spot_id"
+                    >
+                        <el-option
+                            v-for="provider in availableSoftwareProviders"
+                            :key="provider.id"
+                            :label="`${provider.name} (${provider.api_type || '无类型'})`"
+                            :value="provider.id"
+                        />
+                    </el-select>
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        当订单处理方式为"其他系统"时，需要选择具体的订单下发服务商。留空则使用景区配置的订单下发服务商。
+                    </span>
+                </el-form-item>
                 <el-form-item label="状态" prop="is_active">
                     <el-switch v-model="form.is_active" />
                 </el-form-item>
@@ -276,6 +315,8 @@ const form = ref({
     stay_days: 1, // 默认值为1，必填
     sale_start_date: null,
     sale_end_date: null,
+    order_mode: null, // 订单处理方式：null=使用景区配置, auto=系统直连, manual=手工接单, other=其他系统
+    order_provider_id: null, // 订单下发服务商ID（当order_mode为other时使用）
     is_active: true,
 });
 
@@ -491,6 +532,8 @@ const handleEdit = async (row) => {
         stay_days: row.stay_days || 1, // 默认值为1，必填
         sale_start_date: formatDateForPicker(row.sale_start_date),
         sale_end_date: formatDateForPicker(row.sale_end_date),
+        order_mode: row.order_mode || null, // 订单处理方式
+        order_provider_id: row.order_provider_id || null, // 订单下发服务商ID
         is_active: row.is_active,
     };
     
@@ -523,6 +566,21 @@ const handleSubmit = async () => {
                 // external_code 如果为空字符串，转换为 null
                 if (submitData.external_code === '') {
                     submitData.external_code = null;
+                }
+                
+                // order_mode 如果为空字符串，转换为 null
+                if (submitData.order_mode === '') {
+                    submitData.order_mode = null;
+                }
+                
+                // order_provider_id 如果为空字符串，转换为 null
+                if (submitData.order_provider_id === '') {
+                    submitData.order_provider_id = null;
+                }
+                
+                // 如果 order_mode 不是 'other'，清空 order_provider_id
+                if (submitData.order_mode !== 'other') {
+                    submitData.order_provider_id = null;
                 }
                 
                 if (isEdit.value) {
@@ -584,6 +642,8 @@ const resetForm = () => {
         stay_days: 1, // 默认值为1，必填
         sale_start_date: null,
         sale_end_date: null,
+        order_mode: null, // 订单处理方式，null 表示使用景区配置
+        order_provider_id: null, // 订单下发服务商ID
         is_active: true,
     };
     availableSoftwareProviders.value = [];

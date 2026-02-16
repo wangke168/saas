@@ -563,6 +563,7 @@ const viewDetail = (row) => {
             <p><strong>订单金额：</strong>¥${formatPrice(row.total_amount)}</p>
             <p><strong>联系人：</strong>${row.contact_name}</p>
             <p><strong>联系电话：</strong>${row.contact_phone}</p>
+            <p><strong>身份证号码：</strong>${row.card_no}</p>
         </div>
         `,
         '订单详情',

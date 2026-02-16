@@ -7,7 +7,7 @@ use App\Enums\OrderStatus;
 use App\Models\ExceptionOrder;
 use App\Models\Inventory;
 use App\Models\Order;
-use App\Services\Resource\HengdianService;
+use App\Services\Resource\ResourceServiceFactory;
 use App\Services\InventoryService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -17,7 +17,6 @@ class OrderProcessorService
 {
     public function __construct(
         protected OrderService $orderService,
-        protected HengdianService $hengdianService,
         protected InventoryService $inventoryService
     ) {}
 
@@ -54,12 +53,44 @@ class OrderProcessorService
             // 2. 更新订单状态为确认中
             $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '开始处理订单');
 
-            // 3. 调用资源方接口
-            $result = $this->hengdianService->book($order);
+            // 3. 判断是否系统直连
+            $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+            
+            if (!$isSystemConnected) {
+                // 手工接单：创建异常订单供人工处理
+                Log::info('订单处理：检测到手工接单模式，创建异常订单', [
+                    'order_id' => $order->id,
+                    'order_no' => $order->order_no,
+                ]);
+                
+                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, '订单需要手工接单处理');
+                
+                // 保持订单状态为确认中，等待人工处理
+                DB::commit();
+                return;
+            }
+
+            // 4. 系统直连：获取资源服务并调用接口
+            $resourceService = ResourceServiceFactory::getService($order, 'order');
+            
+            if (!$resourceService) {
+                // 无法获取服务（配置错误等），创建异常订单
+                Log::error('订单处理：无法获取资源服务', [
+                    'order_id' => $order->id,
+                    'order_no' => $order->order_no,
+                ]);
+                
+                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, '无法获取资源服务，请检查配置');
+                DB::commit();
+                return;
+            }
+
+            // 调用资源方接口确认订单
+            $result = $resourceService->confirmOrder($order);
 
             if ($result['success']) {
                 // 预订成功
-                $confirmNo = $result['data']->ConfirmNo ?? '';
+                $confirmNo = $result['data']['ConfirmNo'] ?? $result['data']['order_no'] ?? $result['data']['resource_order_no'] ?? '';
                 $order->update([
                     'status' => OrderStatus::CONFIRMED,
                     'resource_order_no' => $confirmNo,
@@ -72,8 +103,9 @@ class OrderProcessorService
                 \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
             } else {
                 // 预订失败
-                $this->orderService->updateOrderStatus($order, OrderStatus::REJECTED, '预订失败：' . ($result['message'] ?? ''));
-                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, $result['message'] ?? '预订失败');
+                $errorMessage = $result['message'] ?? '预订失败';
+                $this->orderService->updateOrderStatus($order, OrderStatus::REJECTED, '预订失败：' . $errorMessage);
+                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, $errorMessage);
             }
 
             DB::commit();

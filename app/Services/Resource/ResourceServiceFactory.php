@@ -92,16 +92,53 @@ class ResourceServiceFactory
             throw new \Exception('服务商API地址未配置，无法处理订单。请在软件服务商管理页面配置API地址。');
         }
 
-        // 根据操作类型判断是否系统直连（方案A）
+        // 根据操作类型判断是否系统直连（方案C：优先级覆盖）
+        // 优先使用产品级别的 order_mode 配置，如果产品未配置则使用景区配置
         $syncMode = $config->extra_config['sync_mode'] ?? [];
         
         if ($operation === 'order') {
-            // 订单操作：检查 order 配置
-            $orderMode = $syncMode['order'] ?? 'manual';
+            // 订单操作：优先检查产品级别的 order_mode 配置
+            $productOrderMode = $product->order_mode;
             
-            // 订单下发服务商分离：如果配置了 order_provider，使用指定的服务商
+            // 如果产品配置了 order_mode，优先使用产品配置；否则使用景区配置
+            if ($productOrderMode !== null) {
+                $orderMode = $productOrderMode;
+                Log::info('ResourceServiceFactory: 使用产品级别的订单处理方式配置', [
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'product_order_mode' => $productOrderMode,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            } else {
+                // 产品未配置，使用景区配置
+                $orderMode = $syncMode['order'] ?? 'manual';
+                Log::info('ResourceServiceFactory: 产品未配置订单处理方式，使用景区配置', [
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'scenic_spot_order_mode' => $orderMode,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            }
+            
+            // 订单下发服务商分离：优先使用产品级别的 order_provider_id，如果没有则使用景区配置
             // 注意：order_provider 存储的是服务商ID，需要通过ID查找服务商
-            $orderProviderId = $config->extra_config['order_provider'] ?? null;
+            $orderProviderId = $product->order_provider_id ?? $config->extra_config['order_provider'] ?? null;
+            
+            if ($product->order_provider_id) {
+                Log::info('ResourceServiceFactory: 使用产品级别的订单下发服务商配置', [
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'product_order_provider_id' => $product->order_provider_id,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            } elseif ($config->extra_config['order_provider'] ?? null) {
+                Log::info('ResourceServiceFactory: 产品未配置订单下发服务商，使用景区配置', [
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'scenic_spot_order_provider_id' => $config->extra_config['order_provider'],
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            }
             
             // 如果订单处理方式是 manual，直接返回 null（走手工流程）
             if ($orderMode === 'manual') {
@@ -353,10 +390,32 @@ class ResourceServiceFactory
             return false;
         }
 
+        // 优先使用产品级别的 order_mode 配置，如果产品未配置则使用景区配置
         $syncMode = $config->extra_config['sync_mode'] ?? [];
         
         if ($operation === 'order') {
-            $orderMode = $syncMode['order'] ?? 'manual';
+            // 优先检查产品级别的 order_mode 配置
+            $productOrderMode = $product->order_mode;
+            
+            // 如果产品配置了 order_mode，优先使用产品配置；否则使用景区配置
+            if ($productOrderMode !== null) {
+                $orderMode = $productOrderMode;
+                Log::info('ResourceServiceFactory::isSystemConnected: 使用产品级别的订单处理方式配置', [
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'product_order_mode' => $productOrderMode,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            } else {
+                // 产品未配置，使用景区配置
+                $orderMode = $syncMode['order'] ?? 'manual';
+                Log::info('ResourceServiceFactory::isSystemConnected: 产品未配置订单处理方式，使用景区配置', [
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'scenic_spot_order_mode' => $orderMode,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            }
             
             // 如果订单处理方式是 manual，直接返回 false
             if ($orderMode === 'manual') {
@@ -382,7 +441,8 @@ class ResourceServiceFactory
             
             // 如果订单处理方式是 other（其他系统），需要检查是否配置了订单下发服务商
             if ($orderMode === 'other') {
-                $orderProviderId = $config->extra_config['order_provider'] ?? null;
+                // 优先使用产品级别的 order_provider_id，如果没有则使用景区配置
+                $orderProviderId = $product->order_provider_id ?? $config->extra_config['order_provider'] ?? null;
                 
                 if (!$orderProviderId) {
                     // 没有配置订单下发服务商，返回 false（走其他系统的手工流程）

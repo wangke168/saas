@@ -394,6 +394,7 @@ class DingTalkNotificationService
         $message .= "- 取消类型：{$cancelTypeLabel}\n";
         $message .= "- 申请时间：{$order->updated_at}\n\n";
         $message .= "**原订单信息：**\n";
+        $message .= "- 联系人：{$order->contact_name}\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
         $message .= "- 房间数：{$order->room_count}\n";
@@ -435,6 +436,7 @@ class DingTalkNotificationService
         }
         $message .= "**取消时间：** {$cancelledAt}\n\n";
         $message .= "**原订单信息：**\n";
+        $message .= "- 联系人：{$order->contact_name}\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
         $message .= "- 房间数：{$order->room_count}\n";

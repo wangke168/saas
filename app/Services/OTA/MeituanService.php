@@ -106,8 +106,6 @@ class MeituanService
         string $startDate,
         string $endDate
     ): array {
-        $body = [];
-
         // 生成日期范围
         $start = \Carbon\Carbon::parse($startDate);
         $end = \Carbon\Carbon::parse($endDate);
@@ -117,10 +115,9 @@ class MeituanService
             $start->addDay();
         }
 
+        // 先收集所有日期的库存数据
+        $inventoryByDate = [];
         foreach ($dates as $date) {
-            // 计算价格
-            $priceData = $this->productService->calculatePrice($product, $roomType->id, $date);
-            
             // 获取库存
             $inventory = \App\Models\Inventory::where('room_type_id', $roomType->id)
                 ->where('date', $date)
@@ -148,6 +145,70 @@ class MeituanService
                     $isClosed = false;
                 }
             }
+
+            $inventoryByDate[$date] = [
+                'quantity' => $stock,
+                'is_closed' => $isClosed,
+            ];
+        }
+
+        // 如果产品设置了入住天数（stay_days > 1），需要检查连续入住天数的库存
+        $stayDays = $product->stay_days;
+        if ($stayDays && $stayDays > 1) {
+            // 对于每个日期，检查从该日期开始的连续 N 天（N = stay_days）的库存
+            $adjustedInventoryByDate = [];
+            foreach ($inventoryByDate as $date => $data) {
+                $dateObj = \Carbon\Carbon::parse($date);
+                $canAccommodate = true;
+                
+                // 检查从该日期开始的连续 N 天
+                for ($i = 0; $i < $stayDays; $i++) {
+                    $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
+                    
+                    // 检查该日期是否有库存记录
+                    if (!isset($inventoryByDate[$checkDate])) {
+                        // 该日期没有库存记录，无法满足连续入住
+                        $canAccommodate = false;
+                        break;
+                    }
+                    
+                    // 检查该日期是否关闭或库存为0
+                    $checkData = $inventoryByDate[$checkDate];
+                    if ($checkData['is_closed'] || $checkData['quantity'] <= 0) {
+                        $canAccommodate = false;
+                        break;
+                    }
+                }
+                
+                // 如果无法满足连续入住，该日期的库存设为0
+                if (!$canAccommodate) {
+                    $adjustedInventoryByDate[$date] = 0;
+                } else {
+                    // 可以满足连续入住，使用该日期的实际库存
+                    $adjustedInventoryByDate[$date] = $data['quantity'];
+                }
+            }
+            
+            // 替换原来的库存数据
+            $inventoryByDate = $adjustedInventoryByDate;
+        } else {
+            // 入住天数为空或1，按原逻辑处理（只考虑关闭状态）
+            $adjustedInventoryByDate = [];
+            foreach ($inventoryByDate as $date => $data) {
+                // 如果该日期关闭，库存为0；否则使用实际库存
+                $adjustedInventoryByDate[$date] = $data['is_closed'] ? 0 : $data['quantity'];
+            }
+            $inventoryByDate = $adjustedInventoryByDate;
+        }
+
+        // 构建body数据
+        $body = [];
+        foreach ($dates as $date) {
+            // 计算价格
+            $priceData = $this->productService->calculatePrice($product, $roomType->id, $date);
+            
+            // 获取调整后的库存
+            $stock = isset($inventoryByDate[$date]) ? $inventoryByDate[$date] : 0;
 
             // 生成partnerPrimaryKey
             $partnerPrimaryKey = $this->generatePartnerPrimaryKey($hotel->id, $roomType->id, $date);
@@ -196,16 +257,13 @@ class MeituanService
         \App\Models\RoomType $roomType,
         array $dates
     ): array {
-        $body = [];
-
         // 去重并排序日期
         $dates = array_unique($dates);
         sort($dates);
 
+        // 先收集所有日期的库存数据
+        $inventoryByDate = [];
         foreach ($dates as $date) {
-            // 计算价格
-            $priceData = $this->productService->calculatePrice($product, $roomType->id, $date);
-            
             // 获取库存
             $inventory = \App\Models\Inventory::where('room_type_id', $roomType->id)
                 ->where('date', $date)
@@ -233,6 +291,70 @@ class MeituanService
                     $isClosed = false;
                 }
             }
+
+            $inventoryByDate[$date] = [
+                'quantity' => $stock,
+                'is_closed' => $isClosed,
+            ];
+        }
+
+        // 如果产品设置了入住天数（stay_days > 1），需要检查连续入住天数的库存
+        $stayDays = $product->stay_days;
+        if ($stayDays && $stayDays > 1) {
+            // 对于每个日期，检查从该日期开始的连续 N 天（N = stay_days）的库存
+            $adjustedInventoryByDate = [];
+            foreach ($inventoryByDate as $date => $data) {
+                $dateObj = \Carbon\Carbon::parse($date);
+                $canAccommodate = true;
+                
+                // 检查从该日期开始的连续 N 天
+                for ($i = 0; $i < $stayDays; $i++) {
+                    $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
+                    
+                    // 检查该日期是否有库存记录
+                    if (!isset($inventoryByDate[$checkDate])) {
+                        // 该日期没有库存记录，无法满足连续入住
+                        $canAccommodate = false;
+                        break;
+                    }
+                    
+                    // 检查该日期是否关闭或库存为0
+                    $checkData = $inventoryByDate[$checkDate];
+                    if ($checkData['is_closed'] || $checkData['quantity'] <= 0) {
+                        $canAccommodate = false;
+                        break;
+                    }
+                }
+                
+                // 如果无法满足连续入住，该日期的库存设为0
+                if (!$canAccommodate) {
+                    $adjustedInventoryByDate[$date] = 0;
+                } else {
+                    // 可以满足连续入住，使用该日期的实际库存
+                    $adjustedInventoryByDate[$date] = $data['quantity'];
+                }
+            }
+            
+            // 替换原来的库存数据
+            $inventoryByDate = $adjustedInventoryByDate;
+        } else {
+            // 入住天数为空或1，按原逻辑处理（只考虑关闭状态）
+            $adjustedInventoryByDate = [];
+            foreach ($inventoryByDate as $date => $data) {
+                // 如果该日期关闭，库存为0；否则使用实际库存
+                $adjustedInventoryByDate[$date] = $data['is_closed'] ? 0 : $data['quantity'];
+            }
+            $inventoryByDate = $adjustedInventoryByDate;
+        }
+
+        // 构建body数据
+        $body = [];
+        foreach ($dates as $date) {
+            // 计算价格
+            $priceData = $this->productService->calculatePrice($product, $roomType->id, $date);
+            
+            // 获取调整后的库存
+            $stock = isset($inventoryByDate[$date]) ? $inventoryByDate[$date] : 0;
 
             // 生成partnerPrimaryKey
             $partnerPrimaryKey = $this->generatePartnerPrimaryKey($hotel->id, $roomType->id, $date);
@@ -281,20 +403,13 @@ class MeituanService
         \App\Models\Res\ResRoomType $roomType,
         array $dates
     ): array {
-        $body = [];
-
         // 去重并排序日期
         $dates = array_unique($dates);
         sort($dates);
 
+        // 先收集所有日期的库存数据
+        $inventoryByDate = [];
         foreach ($dates as $date) {
-            // 获取打包产品的每日价格（价格单位：分）
-            $dailyPrice = \App\Models\Pkg\PkgProductDailyPrice::where('pkg_product_id', $product->id)
-                ->where('hotel_id', $hotel->id)
-                ->where('room_type_id', $roomType->id)
-                ->where('biz_date', $date)
-                ->first();
-
             // 获取库存
             $dailyStock = \App\Models\Res\ResHotelDailyStock::where('hotel_id', $hotel->id)
                 ->where('room_type_id', $roomType->id)
@@ -324,10 +439,78 @@ class MeituanService
                 }
             }
 
+            $inventoryByDate[$date] = [
+                'quantity' => $stock,
+                'is_closed' => $isClosed,
+            ];
+        }
+
+        // 如果产品设置了入住天数（stay_days > 1），需要检查连续入住天数的库存
+        $stayDays = $product->stay_days;
+        if ($stayDays && $stayDays > 1) {
+            // 对于每个日期，检查从该日期开始的连续 N 天（N = stay_days）的库存
+            $adjustedInventoryByDate = [];
+            foreach ($inventoryByDate as $date => $data) {
+                $dateObj = \Carbon\Carbon::parse($date);
+                $canAccommodate = true;
+                
+                // 检查从该日期开始的连续 N 天
+                for ($i = 0; $i < $stayDays; $i++) {
+                    $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
+                    
+                    // 检查该日期是否有库存记录
+                    if (!isset($inventoryByDate[$checkDate])) {
+                        // 该日期没有库存记录，无法满足连续入住
+                        $canAccommodate = false;
+                        break;
+                    }
+                    
+                    // 检查该日期是否关闭或库存为0
+                    $checkData = $inventoryByDate[$checkDate];
+                    if ($checkData['is_closed'] || $checkData['quantity'] <= 0) {
+                        $canAccommodate = false;
+                        break;
+                    }
+                }
+                
+                // 如果无法满足连续入住，该日期的库存设为0
+                if (!$canAccommodate) {
+                    $adjustedInventoryByDate[$date] = 0;
+                } else {
+                    // 可以满足连续入住，使用该日期的实际库存
+                    $adjustedInventoryByDate[$date] = $data['quantity'];
+                }
+            }
+            
+            // 替换原来的库存数据
+            $inventoryByDate = $adjustedInventoryByDate;
+        } else {
+            // 入住天数为空或1，按原逻辑处理（只考虑关闭状态）
+            $adjustedInventoryByDate = [];
+            foreach ($inventoryByDate as $date => $data) {
+                // 如果该日期关闭，库存为0；否则使用实际库存
+                $adjustedInventoryByDate[$date] = $data['is_closed'] ? 0 : $data['quantity'];
+            }
+            $inventoryByDate = $adjustedInventoryByDate;
+        }
+
+        // 构建body数据
+        $body = [];
+        foreach ($dates as $date) {
+            // 获取打包产品的每日价格（价格单位：分）
+            $dailyPrice = \App\Models\Pkg\PkgProductDailyPrice::where('pkg_product_id', $product->id)
+                ->where('hotel_id', $hotel->id)
+                ->where('room_type_id', $roomType->id)
+                ->where('biz_date', $date)
+                ->first();
+
             // 如果没有价格数据，跳过（不会出现在body中）
             if (!$dailyPrice) {
                 continue;
             }
+
+            // 获取调整后的库存
+            $stock = isset($inventoryByDate[$date]) ? $inventoryByDate[$date] : 0;
 
             // 生成partnerPrimaryKey
             $partnerPrimaryKey = $this->generatePartnerPrimaryKey($hotel->id, $roomType->id, $date);

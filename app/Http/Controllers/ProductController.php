@@ -139,6 +139,27 @@ class ProductController extends Controller
             'stay_days' => 'required|integer|min:1|max:30', // 改为必填
             'sale_start_date' => 'required|date',
             'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
+            'order_mode' => 'nullable|in:auto,manual,other',
+            'order_provider_id' => [
+                'nullable',
+                'exists:software_providers,id',
+                function ($attribute, $value, $fail) use ($request) {
+                    // 如果 order_mode 为 other，验证 order_provider_id 必须属于该景区的服务商列表
+                    $orderMode = $request->input('order_mode');
+                    if ($orderMode === 'other' && $value) {
+                        $scenicSpotId = $request->input('scenic_spot_id');
+                        if ($scenicSpotId) {
+                            $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
+                            if ($scenicSpot) {
+                                $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
+                                if (!in_array($value, $providerIds)) {
+                                    $fail('选择的订单下发服务商不属于该景区的服务商列表');
+                                }
+                            }
+                        }
+                    }
+                },
+            ],
             'is_active' => 'boolean',
         ]);
 
@@ -199,6 +220,27 @@ class ProductController extends Controller
             'stay_days' => 'required|integer|min:1|max:30', // 改为必填
             'sale_start_date' => 'required|date',
             'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
+            'order_mode' => 'nullable|in:auto,manual,other',
+            'order_provider_id' => [
+                'nullable',
+                'exists:software_providers,id',
+                function ($attribute, $value, $fail) use ($request, $product) {
+                    // 如果 order_mode 为 other，验证 order_provider_id 必须属于该景区的服务商列表
+                    $orderMode = $request->input('order_mode', $product->order_mode);
+                    if ($orderMode === 'other' && $value) {
+                        $scenicSpotId = $request->input('scenic_spot_id', $product->scenic_spot_id);
+                        if ($scenicSpotId) {
+                            $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
+                            if ($scenicSpot) {
+                                $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
+                                if (!in_array($value, $providerIds)) {
+                                    $fail('选择的订单下发服务商不属于该景区的服务商列表');
+                                }
+                            }
+                        }
+                    }
+                },
+            ],
             'is_active' => 'sometimes|boolean',
         ]);
 
