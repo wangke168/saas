@@ -5,6 +5,7 @@ namespace App\Services\OTA;
 use App\Enums\OtaPlatform;
 use App\Http\Client\CtripClient;
 use App\Models\OtaConfig;
+use App\Services\OTA\OtaInventoryHelper;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\ProductService;
 use Illuminate\Support\Facades\Log;
@@ -341,7 +342,7 @@ class CtripService
             }
             
             $bodyData['inventorys'][] = [
-                'quantity' => $totalQuantity, // 确保是整数类型
+                'quantity' => OtaInventoryHelper::adjustQuantityForOta($totalQuantity), // 真实库存≤2时推0
                 // 注意：非指定日期模式不包含 date 字段
             ];
         } else {
@@ -357,7 +358,7 @@ class CtripService
                 }
                 
                 $inventoryItem = [
-                    'quantity' => $quantityInt, // 确保是整数类型
+                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt), // 真实库存≤2时推0
                     'date' => $date,
                 ];
 
@@ -889,7 +890,7 @@ class CtripService
             }
             
             $bodyData['inventorys'][] = [
-                'quantity' => $totalQuantity,
+                'quantity' => OtaInventoryHelper::adjustQuantityForOta($totalQuantity), // 真实库存≤2时推0
             ];
         } else {
             foreach ($inventoryByDate as $date => $quantity) {
@@ -901,7 +902,7 @@ class CtripService
                 }
                 
                 $bodyData['inventorys'][] = [
-                    'quantity' => $quantityInt,
+                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt), // 真实库存≤2时推0
                     'date' => $date,
                 ];
             }

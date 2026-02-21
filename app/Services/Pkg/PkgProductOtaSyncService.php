@@ -8,6 +8,7 @@ use App\Models\Res\ResHotel;
 use App\Models\Res\ResRoomType;
 use App\Models\Res\ResHotelDailyStock;
 use App\Services\OTA\CtripService;
+use App\Services\OTA\OtaInventoryHelper;
 use App\Http\Client\CtripClient;
 use App\Models\OtaConfig;
 use App\Helpers\CtripErrorCodeHelper;
@@ -508,12 +509,12 @@ class PkgProductOtaSyncService
                 'supplierOptionId' => $compositeCode, // 使用复合编码作为产品标识
             ];
 
-            // 转换库存数据
+            // 转换库存数据（真实库存≤2时推送到OTA为0）
             foreach ($inventoryByDate as $date => $quantity) {
                 $quantityInt = max(0, (int) $quantity);
                 
                 $bodyData['inventorys'][] = [
-                    'quantity' => $quantityInt,
+                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt),
                     'date' => $date,
                 ];
             }

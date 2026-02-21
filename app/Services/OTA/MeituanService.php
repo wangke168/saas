@@ -5,6 +5,7 @@ namespace App\Services\OTA;
 use App\Enums\OtaPlatform;
 use App\Http\Client\MeituanClient;
 use App\Models\OtaConfig;
+use App\Services\OTA\OtaInventoryHelper;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\ProductService;
 use Illuminate\Support\Facades\Log;
@@ -234,7 +235,7 @@ class MeituanService
                 'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
                 'mtPrice' => round(floatval($priceData['sale_price']), 2),
                 'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
-                'stock' => $stock,
+                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock), // 真实库存≤2时推0
                 'attr' => null,
             ];
         }
@@ -380,7 +381,7 @@ class MeituanService
                 'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
                 'mtPrice' => round(floatval($priceData['sale_price']), 2),
                 'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
-                'stock' => $stock,
+                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock), // 真实库存≤2时推0
                 'attr' => null,
             ];
         }
@@ -542,7 +543,7 @@ class MeituanService
                 'marketPrice' => $marketPriceInYuan,
                 'mtPrice' => $salePriceInYuan,
                 'settlementPrice' => $settlementPriceInYuan,
-                'stock' => $stock,
+                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock), // 真实库存≤2时推0
                 'attr' => null,
             ];
         }
