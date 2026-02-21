@@ -762,14 +762,45 @@ class MeituanController extends Controller
                 }
 
                 // 查找产品关联的酒店和房型（通过价格表）
-                $price = $product->prices()->where('date', $useDate)->first();
-                if (!$price) {
+                // 若请求带 partnerPrimaryKey，则按 key 匹配用户选择的酒店+房型（与打包产品一致）
+                $partnerPrimaryKey = $body['partnerPrimaryKey'] ?? null;
+                $prices = $product->prices()->where('date', $useDate)->with(['roomType.hotel'])->get();
+                if ($prices->isEmpty()) {
                     DB::rollBack();
                     Log::error('美团订单创建V2：指定日期没有价格', [
                         'product_id' => $product->id,
                         'use_date' => $useDate,
                     ]);
                     return $this->errorResponse(400, '指定日期没有价格', $partnerId, true);  // 订单创建V2需要加密
+                }
+
+                $price = null;
+                if (!empty($partnerPrimaryKey)) {
+                    $meituanService = app(MeituanService::class);
+                    foreach ($prices as $p) {
+                        $rt = $p->roomType;
+                        $ht = $rt->hotel ?? null;
+                        if (!$ht || !$rt) {
+                            continue;
+                        }
+                        $calculatedKey = $meituanService->generatePartnerPrimaryKey($ht->id, $rt->id, $useDate);
+                        if ($calculatedKey === $partnerPrimaryKey) {
+                            $price = $p;
+                            break;
+                        }
+                    }
+                    if (!$price) {
+                        DB::rollBack();
+                        Log::error('美团订单创建V2：常规产品无法匹配酒店和房型', [
+                            'partner_deal_id' => $partnerDealId,
+                            'partner_primary_key' => $partnerPrimaryKey,
+                            'use_date' => $useDate,
+                            'prices_count' => $prices->count(),
+                        ]);
+                        return $this->errorResponse(400, '无法匹配酒店和房型', $partnerId, true);
+                    }
+                } else {
+                    $price = $prices->first();
                 }
 
                 $roomType = $price->roomType;
@@ -780,7 +811,7 @@ class MeituanController extends Controller
                     Log::error('美团订单创建V2：产品未关联酒店或房型', [
                         'product_id' => $product->id,
                     ]);
-                    return $this->errorResponse(400, '产品未关联酒店或房型', $partnerId);
+                    return $this->errorResponse(400, '产品未关联酒店或房型', $partnerId, true);
                 }
 
                 // 检查库存（考虑入住天数）
