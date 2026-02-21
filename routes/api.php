@@ -157,6 +157,14 @@ Route::middleware('auth:sanctum')->group(function () {
         // 携程同步
         Route::post('/{product}/sync-price-to-ctrip', [\App\Http\Controllers\CtripSyncController::class, 'syncPrice']);
         Route::post('/{product}/sync-stock-to-ctrip', [\App\Http\Controllers\CtripSyncController::class, 'syncStock']);
+        // 外部编码时间段映射管理（需要在通用路由之前）
+        Route::prefix('{product}/external-code-mappings')->group(function () {
+            Route::get('/', [\App\Http\Controllers\ProductExternalCodeMappingController::class, 'index']);
+            Route::post('/', [\App\Http\Controllers\ProductExternalCodeMappingController::class, 'store']);
+            Route::get('/{productExternalCodeMapping}', [\App\Http\Controllers\ProductExternalCodeMappingController::class, 'show']);
+            Route::put('/{productExternalCodeMapping}', [\App\Http\Controllers\ProductExternalCodeMappingController::class, 'update']);
+            Route::delete('/{productExternalCodeMapping}', [\App\Http\Controllers\ProductExternalCodeMappingController::class, 'destroy']);
+        });
         // 通用路由放在最后
         Route::get('/{product}', [\App\Http\Controllers\ProductController::class, 'show']);
         Route::put('/{product}', [\App\Http\Controllers\ProductController::class, 'update']);

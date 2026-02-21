@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\ResourceConfig;
 use App\Models\SoftwareProvider;
 use App\Models\ExceptionOrder;
+use App\Models\ProductExternalCodeMapping;
 use App\Enums\ExceptionOrderType;
 use App\Enums\ExceptionOrderStatus;
 use App\Enums\OrderStatus;
@@ -239,6 +240,58 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
+     * 根据订单获取对应的外部编码
+     * 优先查找时间段映射，如果没有则使用产品的默认 external_code
+     * 
+     * @param Order $order 订单
+     * @return string|null 外部编码
+     */
+    protected function getExternalCodeForOrder(Order $order): ?string
+    {
+        $product = $order->product;
+        if (!$product) {
+            return null;
+        }
+        
+        $checkInDate = $order->check_in_date;
+        
+        // 1. 优先查找时间段映射
+        $mappingCode = ProductExternalCodeMapping::findExternalCodeByDate(
+            $product->id,
+            $checkInDate
+        );
+        
+        if ($mappingCode) {
+            Log::info('横店订单：使用时间段映射的外部编码', [
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'check_in_date' => $checkInDate->format('Y-m-d'),
+                'external_code' => $mappingCode,
+            ]);
+            return $mappingCode;
+        }
+        
+        // 2. 如果没有映射，使用产品的默认 external_code
+        if ($product->external_code) {
+            Log::info('横店订单：使用产品默认外部编码', [
+                'order_id' => $order->id,
+                'product_id' => $product->id,
+                'external_code' => $product->external_code,
+            ]);
+            return $product->external_code;
+        }
+        
+        // 3. 如果都没有，返回 null（后续会使用系统内部编码）
+        Log::info('横店订单：未找到外部编码，将使用系统内部编码', [
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'product_code' => $product->code,
+        ]);
+        
+        return null;
+    }
+
+    /**
      * 创建异常订单
      */
     protected function createExceptionOrder(Order $order, string $api, string $error, array $data = []): void
@@ -410,9 +463,12 @@ class HengdianService implements ResourceServiceInterface
                 ]);
             }
 
+            // 根据订单入住日期获取对应的外部编码
+            $externalCode = $this->getExternalCodeForOrder($order);
+            
             $data = [
                 'OtaOrderId' => $order->ota_order_no,
-                'PackageId' => $order->product->external_code ?? $order->product->code ?? '', // 优先使用外部编码，如果没有则使用系统内部编码
+                'PackageId' => $externalCode ?? $order->product->code ?? '', // 优先使用时间段映射的外部编码，如果没有则使用产品默认外部编码，最后使用系统内部编码
                 'HotelId' => $order->hotel->external_code ?? $order->hotel->code ?? '',
                 'RoomType' => $order->roomType->external_code ?? $order->roomType->name ?? '',
                 'CheckIn' => $order->check_in_date->format('Y-m-d'),

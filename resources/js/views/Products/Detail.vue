@@ -32,6 +32,12 @@
                     <el-descriptions-item label="销售结束日期">
                         {{ product.sale_end_date ? formatDateOnly(product.sale_end_date) : '不限制' }}
                     </el-descriptions-item>
+                    <el-descriptions-item label="外部产品编码（默认）" :span="2">
+                        {{ product.external_code || '未设置' }}
+                        <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                            （当没有时间段映射时使用此编码）
+                        </span>
+                    </el-descriptions-item>
                     <el-descriptions-item label="产品描述" :span="2">
                         {{ product.description || '-' }}
                     </el-descriptions-item>
@@ -468,6 +474,108 @@
                         </el-dialog>
 </el-tab-pane>
 
+                    <!-- 外部编码时间段映射管理标签页 -->
+                    <el-tab-pane label="外部编码映射" name="externalCodeMappings">
+                        <div style="margin-bottom: 20px;">
+                            <el-button type="primary" @click="handleAddExternalCodeMapping">添加时间段映射</el-button>
+                            <el-alert
+                                type="info"
+                                :closable="false"
+                                style="margin-top: 10px;"
+                            >
+                                <template #title>
+                                    <span>说明：同一产品在不同时间段可以对应不同的横店系统产品编码。时间段不能重叠。</span>
+                                </template>
+                            </el-alert>
+                        </div>
+                        <el-table :data="externalCodeMappings" border v-loading="externalCodeMappingsLoading">
+                            <el-table-column prop="external_code" label="横店产品编码" width="200" />
+                            <el-table-column label="生效时间段" width="300">
+                                <template #default="{ row }">
+                                    {{ formatDateOnly(row.start_date) }} 至 {{ formatDateOnly(row.end_date) }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="is_active" label="状态" width="100">
+                                <template #default="{ row }">
+                                    <el-tag :type="row.is_active ? 'success' : 'danger'">
+                                        {{ row.is_active ? '启用' : '禁用' }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="sort_order" label="排序" width="100" />
+                            <el-table-column prop="created_at" label="创建时间" width="180">
+                                <template #default="{ row }">
+                                    {{ formatDate(row.created_at) }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="200" fixed="right">
+                                <template #default="{ row }">
+                                    <el-button size="small" @click="handleEditExternalCodeMapping(row)">编辑</el-button>
+                                    <el-button size="small" type="danger" @click="handleDeleteExternalCodeMapping(row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+
+                        <!-- 外部编码映射对话框 -->
+                        <el-dialog
+                            v-model="externalCodeMappingDialogVisible"
+                            :title="externalCodeMappingDialogTitle"
+                            width="600px"
+                            @close="resetExternalCodeMappingForm"
+                        >
+                            <el-form
+                                ref="externalCodeMappingFormRef"
+                                :model="externalCodeMappingForm"
+                                :rules="externalCodeMappingFormRules"
+                                label-width="140px"
+                            >
+                                <el-form-item label="横店产品编码" prop="external_code">
+                                    <el-input
+                                        v-model="externalCodeMappingForm.external_code"
+                                        placeholder="请输入横店系统产品编码"
+                                    />
+                                </el-form-item>
+                                <el-form-item label="开始日期" prop="start_date">
+                                    <el-date-picker
+                                        v-model="externalCodeMappingForm.start_date"
+                                        type="date"
+                                        placeholder="选择开始日期"
+                                        format="YYYY-MM-DD"
+                                        value-format="YYYY-MM-DD"
+                                        style="width: 100%"
+                                    />
+                                </el-form-item>
+                                <el-form-item label="结束日期" prop="end_date">
+                                    <el-date-picker
+                                        v-model="externalCodeMappingForm.end_date"
+                                        type="date"
+                                        placeholder="选择结束日期"
+                                        format="YYYY-MM-DD"
+                                        value-format="YYYY-MM-DD"
+                                        style="width: 100%"
+                                    />
+                                </el-form-item>
+                                <el-form-item label="状态" prop="is_active">
+                                    <el-switch v-model="externalCodeMappingForm.is_active" />
+                                </el-form-item>
+                                <el-form-item label="排序" prop="sort_order">
+                                    <el-input-number
+                                        v-model="externalCodeMappingForm.sort_order"
+                                        :min="0"
+                                        style="width: 100%"
+                                    />
+                                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                                        数字越小越优先（当时间段重叠时）
+                                    </span>
+                                </el-form-item>
+                            </el-form>
+                            <template #footer>
+                                <el-button @click="externalCodeMappingDialogVisible = false">取消</el-button>
+                                <el-button type="primary" @click="handleSubmitExternalCodeMapping" :loading="externalCodeMappingSubmitting">确定</el-button>
+                            </template>
+                        </el-dialog>
+                    </el-tab-pane>
+
                     <!-- OTA推送管理标签页 -->
                     <el-tab-pane label="OTA推送" name="otaProducts">
                         <div style="margin-bottom: 20px;">
@@ -595,10 +703,12 @@ const loading = ref(false);
 const pricesLoading = ref(false);
 const priceRulesLoading = ref(false);
 const otaProductsLoading = ref(false);
+const externalCodeMappingsLoading = ref(false);
 const product = ref(null);
 const prices = ref([]);
 const priceRules = ref([]);
 const otaProducts = ref([]);
+const externalCodeMappings = ref([]);
 const activeTab = ref('prices');
 
 // 价格管理相关
@@ -643,6 +753,45 @@ const otaBindSubmitting = ref(false);
 const otaBindForm = ref({
     ota_platform_id: null,
 });
+
+// 外部编码映射相关
+const externalCodeMappingDialogVisible = ref(false);
+const externalCodeMappingSubmitting = ref(false);
+const externalCodeMappingFormRef = ref(null);
+const editingExternalCodeMappingId = ref(null);
+const externalCodeMappingForm = ref({
+    external_code: '',
+    start_date: '',
+    end_date: '',
+    is_active: true,
+    sort_order: 0,
+});
+
+const externalCodeMappingFormRules = {
+    external_code: [{ required: true, message: '请输入横店产品编码', trigger: 'blur' }],
+    start_date: [{ required: true, message: '请选择开始日期', trigger: 'change' }],
+    end_date: [
+        { required: true, message: '请选择结束日期', trigger: 'change' },
+        {
+            validator: (rule, value, callback) => {
+                if (externalCodeMappingForm.value.start_date && value) {
+                    if (new Date(value) < new Date(externalCodeMappingForm.value.start_date)) {
+                        callback(new Error('结束日期不能早于开始日期'));
+                    } else {
+                        callback();
+                    }
+                } else {
+                    callback();
+                }
+            },
+            trigger: 'change',
+        },
+    ],
+};
+
+const externalCodeMappingDialogTitle = computed(() => 
+    editingExternalCodeMappingId.value ? '编辑时间段映射' : '添加时间段映射'
+);
 
 // 轮询相关
 const pollingIntervals = ref({}); // 存储每个 ota_product_id 的轮询定时器
@@ -880,6 +1029,9 @@ const fetchProduct = async () => {
         prices.value = product.value.prices || [];
         priceRules.value = product.value.price_rules || [];
         otaProducts.value = product.value.ota_products || [];
+        
+        // 获取外部编码映射列表
+        await fetchExternalCodeMappings();
 
         // 如果产品已加载，获取酒店和房型列表
         if (product.value && product.value.scenic_spot_id) {
@@ -1567,6 +1719,113 @@ onMounted(async () => {
         await fetchRoomTypes();
     }
 });
+
+// 获取外部编码映射列表
+const fetchExternalCodeMappings = async () => {
+    externalCodeMappingsLoading.value = true;
+    try {
+        const response = await axios.get(`/products/${route.params.id}/external-code-mappings`);
+        externalCodeMappings.value = response.data.data || [];
+    } catch (error) {
+        console.error('获取外部编码映射列表失败', error);
+        ElMessage.error('获取外部编码映射列表失败');
+    } finally {
+        externalCodeMappingsLoading.value = false;
+    }
+};
+
+// 添加外部编码映射
+const handleAddExternalCodeMapping = () => {
+    editingExternalCodeMappingId.value = null;
+    resetExternalCodeMappingForm();
+    externalCodeMappingDialogVisible.value = true;
+};
+
+// 编辑外部编码映射
+const handleEditExternalCodeMapping = (row) => {
+    editingExternalCodeMappingId.value = row.id;
+    externalCodeMappingForm.value = {
+        external_code: row.external_code,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        is_active: row.is_active,
+        sort_order: row.sort_order,
+    };
+    externalCodeMappingDialogVisible.value = true;
+};
+
+// 删除外部编码映射
+const handleDeleteExternalCodeMapping = async (row) => {
+    try {
+        await ElMessageBox.confirm('确定要删除该时间段映射吗？', '提示', {
+            type: 'warning',
+        });
+        await axios.delete(`/products/${route.params.id}/external-code-mappings/${row.id}`);
+        ElMessage.success('删除成功');
+        await fetchExternalCodeMappings();
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '删除失败';
+            ElMessage.error(message);
+        }
+    }
+};
+
+// 提交外部编码映射
+const handleSubmitExternalCodeMapping = async () => {
+    if (!externalCodeMappingFormRef.value) return;
+
+    await externalCodeMappingFormRef.value.validate(async (valid) => {
+        if (valid) {
+            externalCodeMappingSubmitting.value = true;
+            try {
+                const data = {
+                    external_code: externalCodeMappingForm.value.external_code,
+                    start_date: externalCodeMappingForm.value.start_date,
+                    end_date: externalCodeMappingForm.value.end_date,
+                    is_active: externalCodeMappingForm.value.is_active,
+                    sort_order: externalCodeMappingForm.value.sort_order,
+                };
+
+                if (editingExternalCodeMappingId.value) {
+                    await axios.put(
+                        `/products/${route.params.id}/external-code-mappings/${editingExternalCodeMappingId.value}`,
+                        data
+                    );
+                    ElMessage.success('时间段映射更新成功');
+                } else {
+                    await axios.post(
+                        `/products/${route.params.id}/external-code-mappings`,
+                        data
+                    );
+                    ElMessage.success('时间段映射创建成功');
+                }
+
+                externalCodeMappingDialogVisible.value = false;
+                resetExternalCodeMappingForm();
+                await fetchExternalCodeMappings();
+            } catch (error) {
+                const message = error.response?.data?.message || '操作失败';
+                ElMessage.error(message);
+            } finally {
+                externalCodeMappingSubmitting.value = false;
+            }
+        }
+    });
+};
+
+// 重置外部编码映射表单
+const resetExternalCodeMappingForm = () => {
+    externalCodeMappingForm.value = {
+        external_code: '',
+        start_date: '',
+        end_date: '',
+        is_active: true,
+        sort_order: 0,
+    };
+    editingExternalCodeMappingId.value = null;
+    externalCodeMappingFormRef.value?.clearValidate();
+};
 
 onUnmounted(() => {
     // 组件卸载时清理所有轮询

@@ -143,4 +143,12 @@ class Product extends Model
     {
         return $this->hasMany(Order::class);
     }
+
+    /**
+     * 外部编码时间段映射列表
+     */
+    public function externalCodeMappings(): HasMany
+    {
+        return $this->hasMany(ProductExternalCodeMapping::class);
+    }
 }
