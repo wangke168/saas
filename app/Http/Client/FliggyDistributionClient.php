@@ -351,6 +351,11 @@ class FliggyDistributionClient
             
             $value = $params[$part] ?? '';
             
+            // 订单接口传入的是 orderData，productId 在 productInfo 内，需从嵌套结构取值
+            if ($value === '' && $part === 'productId' && isset($params['productInfo']['productId'])) {
+                $value = $params['productInfo']['productId'];
+            }
+            
             // 如果参数为空，根据文档说明可能不拼接
             if ($value === '') {
                 continue;
