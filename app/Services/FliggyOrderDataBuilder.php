@@ -60,6 +60,7 @@ class FliggyOrderDataBuilder
         }
 
         // 2. 构建 productInfo
+        // 飞猪要求出游结束时间为 yyyy-MM-dd HH:mm:ss 格式（travelDate 或相关字段）
         $productInfo = [
             'productId' => $fliggyProductId,
             'price' => $fliggyPrice['price'], // 单位：分
@@ -387,16 +388,17 @@ class FliggyOrderDataBuilder
 
     /**
      * 格式化出行日期
+     * 飞猪订单校验/创建接口要求出游结束时间为 yyyy-MM-dd HH:mm:ss 格式
      * 
      * @param \Carbon\Carbon|string|null $date
-     * @return string YYYYMMDD 格式
+     * @return string yyyy-MM-dd HH:mm:ss 格式（日期当天 00:00:00）
      */
     protected function formatTravelDate($date): string
     {
         if ($date instanceof Carbon) {
-            return $date->format('Ymd');
+            return $date->format('Y-m-d 00:00:00');
         } elseif ($date) {
-            return Carbon::parse($date)->format('Ymd');
+            return Carbon::parse($date)->format('Y-m-d 00:00:00');
         }
         return '';
     }
