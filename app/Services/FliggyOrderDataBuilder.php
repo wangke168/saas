@@ -388,17 +388,17 @@ class FliggyOrderDataBuilder
 
     /**
      * 格式化出行日期
-     * 飞猪订单校验/创建接口要求出游结束时间为 yyyy-MM-dd HH:mm:ss 格式
+     * 飞猪订单接口文档（fliggy_order.txt）：ProductInfo.travelDate 为「出行日期（yyyy-MM-dd）」仅日期，无时间
      * 
      * @param \Carbon\Carbon|string|null $date
-     * @return string yyyy-MM-dd HH:mm:ss 格式（日期当天 00:00:00）
+     * @return string yyyy-MM-dd 格式
      */
     protected function formatTravelDate($date): string
     {
         if ($date instanceof Carbon) {
-            return $date->format('Y-m-d 00:00:00');
+            return $date->format('Y-m-d');
         } elseif ($date) {
-            return Carbon::parse($date)->format('Y-m-d 00:00:00');
+            return Carbon::parse($date)->format('Y-m-d');
         }
         return '';
     }
