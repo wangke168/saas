@@ -63,7 +63,7 @@ class OrderProcessorService
                     'order_no' => $order->order_no,
                 ]);
                 
-                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, '订单需要手工接单处理');
+                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, '订单需要手工接单处理', ['operation' => 'confirm']);
                 
                 // 保持订单状态为确认中，等待人工处理
                 DB::commit();
@@ -80,7 +80,7 @@ class OrderProcessorService
                     'order_no' => $order->order_no,
                 ]);
                 
-                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, '无法获取资源服务，请检查配置');
+                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, '无法获取资源服务，请检查配置', ['operation' => 'confirm']);
                 DB::commit();
                 return;
             }
@@ -102,10 +102,10 @@ class OrderProcessorService
                 // 通知OTA平台订单确认
                 \App\Jobs\NotifyOtaOrderStatusJob::dispatch($order);
             } else {
-                // 预订失败
+                // 预订失败：转异常订单供人工处理，保持状态为确认中
                 $errorMessage = $result['message'] ?? '预订失败';
-                $this->orderService->updateOrderStatus($order, OrderStatus::REJECTED, '预订失败：' . $errorMessage);
-                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, $errorMessage);
+                $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, $errorMessage, ['operation' => 'confirm']);
+                // 保持订单状态为 CONFIRMING，不更新为 REJECTED，供人工接单处理
             }
 
             DB::commit();
@@ -117,7 +117,7 @@ class OrderProcessorService
                 'error' => $e->getMessage(),
             ]);
 
-            $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, $e->getMessage());
+            $this->createExceptionOrder($order, ExceptionOrderType::API_ERROR, $e->getMessage(), ['operation' => 'confirm']);
         }
     }
 
@@ -176,14 +176,17 @@ class OrderProcessorService
     }
 
     /**
-     * 创建异常订单
+     * 创建异常订单（接单/创建订单不成功时转人工处理）
+     *
+     * @param array $exceptionData 可选，如 ['operation' => 'confirm'] 便于人工接单时识别
      */
-    protected function createExceptionOrder(Order $order, ExceptionOrderType $type, string $message): void
+    protected function createExceptionOrder(Order $order, ExceptionOrderType $type, string $message, array $exceptionData = []): void
     {
         ExceptionOrder::create([
             'order_id' => $order->id,
             'exception_type' => $type,
             'exception_message' => $message,
+            'exception_data' => $exceptionData,
             'status' => \App\Enums\ExceptionOrderStatus::PENDING,
         ]);
     }

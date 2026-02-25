@@ -271,9 +271,10 @@ class ResourceController extends Controller
                         });
                     });
                     
-                    $hotel = $hotelQuery->first();
+                    // 一推多写：取所有匹配的酒店（多景区可能配置了相同横店酒店编码），逐个更新库存
+                    $hotels = $hotelQuery->get();
 
-                    if (!$hotel) {
+                    if ($hotels->isEmpty()) {
                         $failCount++;
                         $errors[] = "未找到酒店：{$hotelNo}（软件服务商ID：{$softwareProviderId}）";
                         Log::warning('资源方库存推送：未找到酒店', [
@@ -283,6 +284,7 @@ class ResourceController extends Controller
                         continue;
                     }
 
+                    foreach ($hotels as $hotel) {
                     // 查找房型（严格匹配：优先external_code，避免误匹配）
                     // 修复：当房型标识变更时（如"标准间"改为"豪华标准间"），避免通过name匹配到错误的房型
                     $roomTypeModel = null;
@@ -589,6 +591,8 @@ class ResourceController extends Controller
                         ]);
                         $successCount++;
                     }
+
+                    } // end foreach ($hotels as $hotel)
 
                 } catch (\Exception $e) {
                     $failCount++;

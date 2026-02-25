@@ -533,6 +533,7 @@ class FliggyDistributionService implements ResourceServiceInterface
             'exception_message' => "飞猪接口调用失败：{$message}",
             'exception_data' => array_merge([
                 'message' => $message,
+                'operation' => 'confirm', // 接单失败，转人工操作时可被 confirmOrder 识别
             ], $data),
             'status' => ExceptionOrderStatus::PENDING,
         ]);
