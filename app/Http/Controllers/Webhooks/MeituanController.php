@@ -2395,6 +2395,15 @@ class MeituanController extends Controller
                 ];
             }
 
+            // 美团拉取价格日历时，记录推送给美团的具体信息
+            Log::info('美团拉取价格日历：推送给美团的数据', [
+                'partnerDealId' => $partnerDealId,
+                'startTime' => $startTime,
+                'endTime' => $endTime,
+                'sku_count' => count($responseBody),
+                'body' => $responseBody,
+            ]);
+
             return $this->successResponse($responseBody);
         } catch (\Exception $e) {
             Log::error('美团拉取价格日历失败', [
@@ -2500,6 +2509,15 @@ class MeituanController extends Controller
             
             // 如果异步拉取，返回code=999，然后通过"多层价格日历变化通知V2"推送
             if ($asyncType === 1) {
+                Log::info('美团拉取多层价格日历V2：异步拉取，推送给美团的响应', [
+                    'partnerDealId' => $partnerDealId,
+                    'startTime' => $startTime,
+                    'endTime' => $endTime,
+                    'asyncType' => $asyncType,
+                    'response_code' => 999,
+                    'response_describe' => '异步拉取，将通过通知接口推送',
+                    'body' => [],
+                ]);
                 // TODO: 触发异步推送任务
                 // 根据美团文档，异步拉取时外层code应该是999
                 return $this->successResponse(
@@ -2595,6 +2613,19 @@ class MeituanController extends Controller
                     $responseBody = array_merge($responseBody, $bodyItems);
                 }
             }
+
+            // 美团多次拉取多层价格日历时，记录每次推送给美团的具体信息
+            $datesInBody = array_unique(array_column($responseBody, 'priceDate'));
+            sort($datesInBody);
+            Log::info('美团拉取多层价格日历V2：同步拉取，推送给美团的数据', [
+                'partnerDealId' => $partnerDealId,
+                'startTime' => $startTime,
+                'endTime' => $endTime,
+                'isPkgProduct' => $isPkgProduct,
+                'sku_count' => count($responseBody),
+                'date_range' => empty($datesInBody) ? [] : [min($datesInBody), max($datesInBody)],
+                'body' => $responseBody,
+            ]);
 
             // 返回成功响应，传递 partnerId 和 partnerDealId
             // 根据请求的加密状态决定响应是否加密
