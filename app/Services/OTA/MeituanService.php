@@ -679,6 +679,22 @@ class MeituanService
                     'end_date' => $batchEndDate,
                 ]);
 
+                // 记录本批推送数据（便于排查库存/价格推送问题）
+                Log::info('美团价格推送（增量）：本批推送数据', [
+                    'batch_index' => $batchIndex + 1,
+                    'total_batches' => $totalBatches,
+                    'partnerDealId' => $productCode,
+                    'startTime' => $batchStartDate,
+                    'endTime' => $batchEndDate,
+                    'items' => array_map(fn ($item) => [
+                        'priceDate' => $item['priceDate'],
+                        'marketPrice' => $item['marketPrice'] ?? null,
+                        'mtPrice' => $item['mtPrice'],
+                        'settlementPrice' => $item['settlementPrice'] ?? null,
+                        'stock' => $item['stock'],
+                    ], $batchBody),
+                ]);
+
                 $result = $client->notifyLevelPriceStock($requestData);
 
                 // 记录批次结果
@@ -850,6 +866,22 @@ class MeituanService
                     'batch_size' => count($batchBody),
                     'start_date' => $batchStartDate,
                     'end_date' => $batchEndDate,
+                ]);
+
+                // 记录本批推送数据（便于排查库存/价格推送问题）
+                Log::info('美团价格推送：本批推送数据', [
+                    'batch_index' => $batchIndex + 1,
+                    'total_batches' => $totalBatches,
+                    'partnerDealId' => $productCode,
+                    'startTime' => $batchStartDate,
+                    'endTime' => $batchEndDate,
+                    'items' => array_map(fn ($item) => [
+                        'priceDate' => $item['priceDate'],
+                        'marketPrice' => $item['marketPrice'] ?? null,
+                        'mtPrice' => $item['mtPrice'],
+                        'settlementPrice' => $item['settlementPrice'] ?? null,
+                        'stock' => $item['stock'],
+                    ], $batchBody),
                 ]);
 
                 $result = $client->notifyLevelPriceStock($requestData);
