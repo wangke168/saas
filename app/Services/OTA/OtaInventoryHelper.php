@@ -15,6 +15,14 @@ class OtaInventoryHelper
     private const OTA_ZERO_THRESHOLD = 2;
 
     /**
+     * 获取「视为 0」的库存阈值（与 adjustQuantityForOta 一致，用于判断是否触发美团推送等）
+     */
+    public static function getZeroThreshold(): int
+    {
+        return self::OTA_ZERO_THRESHOLD;
+    }
+
+    /**
      * 根据真实库存计算推送到 OTA 的数量
      * 当真实库存 ≤ 2 时，推送到 OTA 为 0；否则为原值。
      *

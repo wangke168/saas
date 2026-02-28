@@ -64,11 +64,12 @@ class InventoryPushController extends Controller
                 ], 400);
             }
 
-            // 推送库存
+            // 推送库存（手动推送始终包含美团）
             PushChangedInventoryToOtaJob::dispatch(
                 $roomType->id,
                 [$inventory->date->format('Y-m-d')],
-                null // 推送到所有已推送的平台
+                null,
+                true // 手动推送：推送到所有平台（含美团）
             )->onQueue('ota-push');
 
             Log::info('手动推送库存到OTA', [
@@ -146,11 +147,12 @@ class InventoryPushController extends Controller
                 ], 400);
             }
 
-            // 推送库存
+            // 推送库存（批量手动推送始终包含美团）
             PushChangedInventoryToOtaJob::dispatch(
                 $roomType->id,
                 $validated['dates'],
-                $validated['ota_platform_id'] ?? null
+                $validated['ota_platform_id'] ?? null,
+                true // 手动推送：推送到所有平台（含美团）
             )->onQueue('ota-push');
 
             Log::info('批量推送库存到OTA', [

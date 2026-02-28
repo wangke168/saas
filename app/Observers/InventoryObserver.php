@@ -4,10 +4,9 @@ namespace App\Observers;
 
 use App\Models\Inventory;
 use App\Enums\PriceSource;
-use App\Enums\OtaPlatform;
 use App\Jobs\PushChangedInventoryToOtaJob;
-use App\Models\Product;
 use App\Models\OtaPlatform as OtaPlatformModel;
+use App\Services\OTA\OtaInventoryHelper;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
@@ -23,8 +22,20 @@ use Illuminate\Support\Facades\Log;
 class InventoryObserver
 {
     /**
+     * 库存更新前：缓存旧的可售数量，供 saved 时判断是否「变紧」或「恢复」
+     */
+    public function updating(Inventory $inventory): void
+    {
+        if (!$inventory->exists) {
+            return;
+        }
+        $oldQty = $inventory->getOriginal('available_quantity');
+        Cache::put("inventory_old_avail:{$inventory->id}", $oldQty, now()->addSeconds(30));
+    }
+
+    /**
      * 库存保存后（创建或更新）
-     * 
+     *
      * @param Inventory $inventory
      */
     public function saved(Inventory $inventory): void
@@ -79,10 +90,18 @@ class InventoryObserver
                 return;
             }
 
-            // 使用 Redis 缓存，合并5秒内的推送请求
-            $cacheKey = "inventory_push:{$inventory->room_type_id}";
             $pushDelay = (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5);
-            
+            $threshold = OtaInventoryHelper::getZeroThreshold();
+
+            // 判断本次变更是否「变紧」或「恢复」，用于是否推美团
+            $oldQty = Cache::pull("inventory_old_avail:{$inventory->id}");
+            $newQty = (int) $inventory->available_quantity;
+            $becameLow = $newQty <= $threshold && ($oldQty === null || (int) $oldQty > $threshold);
+            $recovered = $newQty > $threshold && $oldQty !== null && (int) $oldQty <= $threshold;
+            $pushToMeituanThis = $becameLow || $recovered;
+
+            // 合并 5 秒内的推送请求
+            $cacheKey = "inventory_push:{$inventory->room_type_id}";
             $cachedDates = Cache::get($cacheKey, []);
             $dateStr = $inventory->date->format('Y-m-d');
 
@@ -91,22 +110,26 @@ class InventoryObserver
                 Cache::put($cacheKey, $cachedDates, now()->addSeconds($pushDelay + 1));
             }
 
+            if ($pushToMeituanThis) {
+                Cache::put("inventory_push_meituan:{$inventory->room_type_id}", true, now()->addSeconds($pushDelay + 5));
+            }
+
             // 只在一个日期首次变化时创建任务（避免重复创建）
             $taskKey = "inventory_push_task:{$inventory->room_type_id}";
             if (!Cache::has($taskKey)) {
-                // 延迟执行，合并多个库存变化
+                $pushToMeituan = Cache::pull("inventory_push_meituan:{$inventory->room_type_id}") ?? false;
+
                 $job = PushChangedInventoryToOtaJob::dispatch(
                     $inventory->room_type_id,
-                    array_unique($cachedDates), // 包含所有需要推送的日期
-                    null // 默认推送到携程
+                    array_unique($cachedDates),
+                    null,
+                    $pushToMeituan
                 )->onQueue('ota-push');
-                
-                // 只有在延迟时间 > 0 时才设置延迟
+
                 if ($pushDelay > 0) {
                     $job->delay(now()->addSeconds($pushDelay));
                 }
 
-                // 标记任务已创建（防止短时间内重复创建）
                 $taskTtl = $pushDelay > 0 ? $pushDelay : 1;
                 Cache::put($taskKey, true, now()->addSeconds($taskTtl));
 
@@ -116,6 +139,7 @@ class InventoryObserver
                     'date' => $dateStr,
                     'dates' => array_unique($cachedDates),
                     'delay_seconds' => $pushDelay,
+                    'push_to_meituan' => $pushToMeituan,
                 ]);
             } else {
                 Log::debug('InventoryObserver：推送任务已存在，跳过创建', [

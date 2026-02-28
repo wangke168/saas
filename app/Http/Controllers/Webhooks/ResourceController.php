@@ -12,6 +12,7 @@ use App\Models\OtaPlatform;
 use App\Enums\PriceSource;
 use App\Enums\OtaPlatform as OtaPlatformEnum;
 use App\Jobs\PushChangedInventoryToOtaJob;
+use App\Services\OTA\OtaInventoryHelper;
 use App\Services\Resource\ScenicSpotIdentificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -514,6 +515,12 @@ class ResourceController extends Controller
 
                     // 批量更新数据库（只更新变化的库存）
                     if (!empty($dirtyInventories)) {
+                        // 查询旧库存，用于判断是否「变紧」或「恢复」以决定是否推美团
+                        $existingInventories = Inventory::where('room_type_id', $roomTypeModel->id)
+                            ->whereIn('date', $changedDates)
+                            ->get()
+                            ->keyBy(fn ($i) => $i->date->format('Y-m-d'));
+
                         DB::beginTransaction();
                         try {
                             // 修复：将所有记录统一包含 locked_quantity 字段，避免SQL列数不匹配
@@ -566,9 +573,17 @@ class ResourceController extends Controller
                                 ]);
                             }
 
-                            // 触发推送到携程（如果启用自动推送）
+                            // 触发推送到 OTA（如果启用自动推送）
                             if (!empty($changedDates) && env('ENABLE_AUTO_PUSH_INVENTORY_TO_OTA', true)) {
-                                $this->triggerOtaPushForRoomType($roomTypeModel, array_unique($changedDates));
+                                $pushToMeituan = $this->computePushToMeituanForResource(
+                                    $dirtyInventories,
+                                    $existingInventories
+                                );
+                                $this->triggerOtaPushForRoomType(
+                                    $roomTypeModel,
+                                    array_unique($changedDates),
+                                    $pushToMeituan
+                                );
                             }
 
                         } catch (\Exception $e) {
@@ -625,29 +640,61 @@ class ResourceController extends Controller
     }
 
     /**
+     * 根据本批变更计算是否推送到美团：仅当存在「变紧」(→≤2) 或「恢复」(≤2→>2) 时为 true
+     *
+     * @param array $dirtyInventories 本批要写入的新数据（含 date、available_quantity）
+     * @param \Illuminate\Support\Collection $existingInventories 变更前已存在的库存，key 为 Y-m-d
+     * @return bool
+     */
+    protected function computePushToMeituanForResource(array $dirtyInventories, $existingInventories): bool
+    {
+        $threshold = OtaInventoryHelper::getZeroThreshold();
+
+        foreach ($dirtyInventories as $item) {
+            $dateStr = isset($item['date']) ? (\Carbon\Carbon::parse($item['date'])->format('Y-m-d')) : null;
+            if ($dateStr === null) {
+                continue;
+            }
+            $newQty = (int) ($item['available_quantity'] ?? 0);
+            $oldInv = $existingInventories->get($dateStr);
+            $oldQty = $oldInv !== null ? (int) $oldInv->available_quantity : null;
+
+            $becameLow = $newQty <= $threshold && ($oldQty === null || $oldQty > $threshold);
+            $recovered = $newQty > $threshold && $oldQty !== null && $oldQty <= $threshold;
+
+            if ($becameLow || $recovered) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * 触发推送到OTA平台（针对特定房型和日期）
-     * 推送到所有已推送的平台（包括携程和美团）
-     * 
+     * 推送到所有已推送的平台（携程始终推；美团仅当 pushToMeituan 为 true 时推）
+     *
      * @param RoomType $roomType 房型
      * @param array $dates 变化的日期数组
+     * @param bool $pushToMeituan 是否推送到美团（仅当库存「变紧」或「恢复」时为 true）
      */
-    protected function triggerOtaPushForRoomType(RoomType $roomType, array $dates): void
+    protected function triggerOtaPushForRoomType(RoomType $roomType, array $dates, bool $pushToMeituan = true): void
     {
         try {
-            // 推送到所有已推送的平台（传入 null 表示推送到所有平台）
-            // 放入队列（延迟合并，避免频繁推送）
             $pushDelay = (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5);
             PushChangedInventoryToOtaJob::dispatch(
                 $roomType->id,
                 $dates,
-                null // null 表示推送到所有已推送的平台（包括携程和美团）
+                null,
+                $pushToMeituan
             )->onQueue('ota-push')->delay(now()->addSeconds($pushDelay));
 
-            Log::info('资源方库存推送：已触发OTA推送任务（推送到所有平台）', [
+            Log::info('资源方库存推送：已触发OTA推送任务', [
                 'room_type_id' => $roomType->id,
                 'dates_count' => count($dates),
-                'dates' => array_slice($dates, 0, 10), // 只记录前10个日期
+                'dates' => array_slice($dates, 0, 10),
                 'delay_seconds' => $pushDelay,
+                'push_to_meituan' => $pushToMeituan,
             ]);
         } catch (\Exception $e) {
             Log::error('资源方库存推送：触发OTA推送失败', [
@@ -655,7 +702,6 @@ class ResourceController extends Controller
                 'dates' => $dates,
                 'error' => $e->getMessage(),
             ]);
-            // 不抛出异常，避免影响主流程
         }
     }
 

@@ -41,11 +41,13 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
      * @param int $roomTypeId 房型ID
      * @param array $dates 需要推送的日期数组，格式：['2025-12-27', '2025-12-28']
      * @param int|null $otaPlatformId OTA平台ID，如果为null则推送到所有已推送的平台（默认携程）
+     * @param bool $pushToMeituan 是否推送到美团。仅当库存「变紧」(→≤2) 或「恢复」(≤2→>2) 时为 true，避免 1→1 等重复推送；手动推送时传 true
      */
     public function __construct(
         public int $roomTypeId,
         public array $dates,
-        public ?int $otaPlatformId = null
+        public ?int $otaPlatformId = null,
+        public bool $pushToMeituan = true
     ) {
         $this->onQueue('ota-push');
     }
@@ -60,6 +62,7 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
             'dates' => $this->dates,
             'dates_count' => count($this->dates),
             'ota_platform_id' => $this->otaPlatformId,
+            'push_to_meituan' => $this->pushToMeituan,
         ]);
 
         try {
@@ -178,10 +181,22 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                         continue;
                     }
 
+                    // 美团：仅当本次变更存在「变紧」或「恢复」时推送，避免 1→1 等重复全量推送
+                    if ($platform->code->value === 'meituan') {
+                        if (!$this->pushToMeituan) {
+                            Log::info('推送库存变化：未满足美团推送条件（无库存跨越阈值），跳过美团', [
+                                'room_type_id' => $this->roomTypeId,
+                                'dates' => $this->dates,
+                            ]);
+                            continue;
+                        }
+                        $this->pushToMeituan($product, $hotel, $roomType, $meituanService);
+                        continue;
+                    }
+
                     // 根据平台类型推送
                     match ($platform->code->value) {
                         'ctrip' => $this->pushToCtrip($product, $hotel, $roomType, $ctripService),
-                        'meituan' => $this->pushToMeituan($product, $hotel, $roomType, $meituanService),
                         default => Log::info('推送库存变化：暂不支持该OTA平台', [
                             'product_id' => $product->id,
                             'platform_code' => $platform->code->value,
@@ -331,7 +346,7 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
     }
 
     /**
-     * 推送到美团（与产品管理推送相同逻辑：按销售日期范围分批全量推送）
+     * 推送到美团（库存变化时：仅增量推送变化的日期，每批最多40 SKU；产品管理推送仍为全量）
      */
     protected function pushToMeituan(
         Product $product,
@@ -340,37 +355,70 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
         MeituanService $meituanService
     ): void {
         try {
-            // 与产品管理推送一致：使用销售日期范围，分批全量推送（每批最多40个SKU）
-            $startDate = $product->sale_start_date
-                ? $product->sale_start_date->format('Y-m-d')
-                : now()->format('Y-m-d');
-            $endDate = $product->sale_end_date
-                ? $product->sale_end_date->format('Y-m-d')
-                : now()->addMonths(3)->format('Y-m-d');
+            if (empty($this->dates)) {
+                Log::info('推送库存变化到美团：dates 为空，跳过推送', [
+                    'product_id' => $product->id,
+                    'room_type_id' => $roomType->id,
+                ]);
+                return;
+            }
 
-            $result = $meituanService->syncLevelPriceStock(
+            $queryDates = $this->filterFutureDates($this->dates);
+            if (empty($queryDates)) {
+                Log::info('推送库存变化到美团：过滤后无未来日期，跳过推送', [
+                    'product_id' => $product->id,
+                    'room_type_id' => $roomType->id,
+                    'original_dates' => $this->dates,
+                ]);
+                return;
+            }
+
+            $stayDays = $product->stay_days ?: 1;
+            if ($stayDays > 1) {
+                $expandedDates = [];
+                foreach ($queryDates as $date) {
+                    $dateObj = \Carbon\Carbon::parse($date);
+                    for ($i = -($stayDays - 1); $i <= 0; $i++) {
+                        $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
+                        if (!in_array($checkDate, $expandedDates)) {
+                            $expandedDates[] = $checkDate;
+                        }
+                    }
+                }
+                sort($expandedDates);
+                $queryDates = $this->filterFutureDates($expandedDates);
+                if (empty($queryDates)) {
+                    Log::info('推送库存变化到美团：扩大日期范围后无未来日期，跳过推送', [
+                        'product_id' => $product->id,
+                        'room_type_id' => $roomType->id,
+                        'stay_days' => $stayDays,
+                        'original_dates' => $this->dates,
+                    ]);
+                    return;
+                }
+            }
+
+            $result = $meituanService->syncLevelPriceStockByDates(
                 $product,
                 $hotel,
                 $roomType,
-                $startDate,
-                $endDate
+                $queryDates
             );
 
             if ($result['success'] ?? false) {
-                Log::info('库存变化自动推送到美团成功（全量分批）', [
+                Log::info('库存变化自动推送到美团成功（增量）', [
                     'product_id' => $product->id,
                     'hotel_id' => $hotel->id,
                     'room_type_id' => $roomType->id,
-                    'start_date' => $startDate,
-                    'end_date' => $endDate,
+                    'query_dates_count' => count($queryDates),
+                    'query_dates' => array_slice($queryDates, 0, 10),
                 ]);
             } else {
                 Log::warning('库存变化自动推送到美团失败', [
                     'product_id' => $product->id,
                     'hotel_id' => $hotel->id,
                     'room_type_id' => $roomType->id,
-                    'start_date' => $startDate,
-                    'end_date' => $endDate,
+                    'query_dates' => $queryDates,
                     'result' => $result,
                     'error_message' => $result['message'] ?? '未知错误',
                 ]);
