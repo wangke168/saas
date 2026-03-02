@@ -578,6 +578,23 @@ class MeituanService
     }
 
     /**
+     * 只保留今天及以后的日期（推送与自动拉取均只使用今天起的日期）
+     *
+     * @param array $dates 日期数组，格式：['2025-01-01', ...]
+     * @return array 过滤后的日期数组
+     */
+    protected function filterDatesFromToday(array $dates): array
+    {
+        if (empty($dates)) {
+            return [];
+        }
+        $today = \Carbon\Carbon::today()->format('Y-m-d');
+        $filtered = array_values(array_filter($dates, fn (string $d) => $d >= $today));
+        sort($filtered);
+        return $filtered;
+    }
+
+    /**
      * 判断一批 body 是否全部为库存 0（美团不接受单次推送全为 0）
      */
     protected function batchIsAllZeroStock(array $batch): bool
@@ -654,9 +671,16 @@ class MeituanService
             $client = $this->getClient();
             $partnerId = $client->getPartnerId();
 
-            // 去重并排序日期
+            // 去重、排序，并只保留今天及以后的日期
             $dates = array_unique($dates);
             sort($dates);
+            $dates = $this->filterDatesFromToday($dates);
+            if (empty($dates)) {
+                return [
+                    'success' => false,
+                    'message' => '没有今天及以后的日期，跳过推送',
+                ];
+            }
 
             // 计算最小和最大日期作为 startTime 和 endTime（用于日志）
             $startDate = min($dates);
@@ -706,6 +730,7 @@ class MeituanService
                 $expandEnd = \Carbon\Carbon::parse($endDate)->addDays(self::EXPAND_DAYS_FOR_NONZERO)->format('Y-m-d');
                 $expandedDates = $this->generateDateRange($expandStart, $expandEnd);
                 $extraDates = array_values(array_diff($expandedDates, $dates));
+                $extraDates = $this->filterDatesFromToday($extraDates);
                 if (!empty($extraDates)) {
                     $extraBody = $isPkgProduct
                         ? $this->buildPkgLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates)
@@ -902,10 +927,25 @@ class MeituanService
             // 判断产品类型
             $isPkgProduct = $product instanceof \App\Models\Pkg\PkgProduct;
 
-            // 构建所有SKU数据
+            $today = \Carbon\Carbon::today()->format('Y-m-d');
+            if ($endDate < $today) {
+                return [
+                    'success' => false,
+                    'message' => '结束日期早于今天，没有可推送的日期',
+                ];
+            }
+            $startDate = max($startDate, $today);
+
+            // 构建所有SKU数据（仅今天及以后的日期）
             if ($isPkgProduct) {
-                // 打包产品：构建日期范围，然后调用 buildPkgLevelPriceStockDataByDates
                 $dates = $this->generateDateRange($startDate, $endDate);
+                $dates = $this->filterDatesFromToday($dates);
+                if (empty($dates)) {
+                    return [
+                        'success' => false,
+                        'message' => '没有今天及以后的日期，跳过推送',
+                    ];
+                }
                 $allBodyItems = $this->buildPkgLevelPriceStockDataByDates(
                     $product,
                     $hotel,
@@ -913,8 +953,8 @@ class MeituanService
                     $dates
                 );
                 $productCode = $product->product_code;
+                $requestedDates = $dates;
             } else {
-                // 常规产品：使用现有方法
                 $allBodyItems = $this->buildLevelPriceStockData(
                     $product,
                     $hotel,
@@ -923,6 +963,7 @@ class MeituanService
                     $endDate
                 );
                 $productCode = $product->code;
+                $requestedDates = $this->generateDateRange($startDate, $endDate);
             }
 
             if (empty($allBodyItems)) {
@@ -933,7 +974,6 @@ class MeituanService
             }
 
             // 组批：保证每批至少一条库存>0（美团不接受单次推送全为0）
-            $requestedDates = $this->generateDateRange($startDate, $endDate);
             $batches = $this->formBatchesAvoidingAllZero($allBodyItems);
             $allZeroBatchIndices = [];
             foreach ($batches as $idx => $batch) {
@@ -946,6 +986,7 @@ class MeituanService
                 $expandEnd = \Carbon\Carbon::parse($endDate)->addDays(self::EXPAND_DAYS_FOR_NONZERO)->format('Y-m-d');
                 $expandedDates = $this->generateDateRange($expandStart, $expandEnd);
                 $extraDates = array_values(array_diff($expandedDates, $requestedDates));
+                $extraDates = $this->filterDatesFromToday($extraDates);
                 if (!empty($extraDates)) {
                     $extraBody = $isPkgProduct
                         ? $this->buildPkgLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates)
