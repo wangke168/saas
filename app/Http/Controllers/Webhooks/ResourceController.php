@@ -579,6 +579,14 @@ class ResourceController extends Controller
                                     $dirtyInventories,
                                     $existingInventories
                                 );
+                                if (!$pushToMeituan) {
+                                    Log::info('资源方库存推送：本次变更未满足美团推送条件（无库存跨越阈值），不推美团', [
+                                        'room_type_id' => $roomTypeModel->id,
+                                        'hotel_id' => $hotel->id,
+                                        'dates_count' => count($changedDates),
+                                        'dates' => array_slice(array_unique($changedDates), 0, 10),
+                                    ]);
+                                }
                                 $this->triggerOtaPushForRoomType(
                                     $roomTypeModel,
                                     array_unique($changedDates),

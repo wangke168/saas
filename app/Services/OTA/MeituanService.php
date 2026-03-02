@@ -17,6 +17,11 @@ class MeituanService
      */
     private const MAX_SKU_PER_REQUEST = 40;
 
+    /**
+     * 扩大日期范围的天数（用于在“本批全为0”时拉取非零库存日期，满足美团“单次推送不能全为0”的约束）
+     */
+    private const EXPAND_DAYS_FOR_NONZERO = 60;
+
     protected ?MeituanClient $client = null;
 
     public function __construct(
@@ -573,6 +578,56 @@ class MeituanService
     }
 
     /**
+     * 判断一批 body 是否全部为库存 0（美团不接受单次推送全为 0）
+     */
+    protected function batchIsAllZeroStock(array $batch): bool
+    {
+        foreach ($batch as $item) {
+            if (($item['stock'] ?? 0) > 0) {
+                return false;
+            }
+        }
+        return !empty($batch);
+    }
+
+    /**
+     * 组批时避免“整批全为 0”：每批尽量包含至少一条库存 >0，满足美团限制且能推送 0 库存日期。
+     * 返回批次数组，每批最多 MAX_SKU_PER_REQUEST 条；若存在全零批次则排在最后。
+     *
+     * @param array $bodyItems 已构建的 body 项列表
+     * @return array 批次列表，每批为 body 项数组
+     */
+    protected function formBatchesAvoidingAllZero(array $bodyItems): array
+    {
+        $nonzero = [];
+        $zero = [];
+        foreach ($bodyItems as $item) {
+            if (($item['stock'] ?? 0) > 0) {
+                $nonzero[] = $item;
+            } else {
+                $zero[] = $item;
+            }
+        }
+
+        $batches = [];
+        while (!empty($nonzero) || !empty($zero)) {
+            $batch = [];
+            if (!empty($nonzero)) {
+                $batch[] = array_shift($nonzero);
+            }
+            while (count($batch) < self::MAX_SKU_PER_REQUEST && (!empty($zero) || !empty($nonzero))) {
+                if (!empty($zero)) {
+                    $batch[] = array_shift($zero);
+                } else {
+                    $batch[] = array_shift($nonzero);
+                }
+            }
+            $batches[] = $batch;
+        }
+        return $batches;
+    }
+
+    /**
      * 同步多层价格日历变化通知V2（增量推送，支持日期数组）
      * 支持常规产品和打包产品，支持分批推送（每批最多40个SKU）
      * 
@@ -638,8 +693,33 @@ class MeituanService
                 ];
             }
 
-            // 分批处理（每批最多40个SKU）
-            $batches = array_chunk($allBodyItems, self::MAX_SKU_PER_REQUEST);
+            // 组批：保证每批至少一条库存>0（美团不接受单次推送全为0），同时把需推送的 0 库存日期都带上
+            $batches = $this->formBatchesAvoidingAllZero($allBodyItems);
+            $allZeroBatchIndices = [];
+            foreach ($batches as $idx => $batch) {
+                if ($this->batchIsAllZeroStock($batch)) {
+                    $allZeroBatchIndices[] = $idx;
+                }
+            }
+            if (!empty($allZeroBatchIndices)) {
+                $expandStart = \Carbon\Carbon::parse($startDate)->subDays(self::EXPAND_DAYS_FOR_NONZERO)->format('Y-m-d');
+                $expandEnd = \Carbon\Carbon::parse($endDate)->addDays(self::EXPAND_DAYS_FOR_NONZERO)->format('Y-m-d');
+                $expandedDates = $this->generateDateRange($expandStart, $expandEnd);
+                $extraDates = array_values(array_diff($expandedDates, $dates));
+                if (!empty($extraDates)) {
+                    $extraBody = $isPkgProduct
+                        ? $this->buildPkgLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates)
+                        : $this->buildLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates);
+                    $nonZeroExtra = array_values(array_filter($extraBody, fn ($item) => ($item['stock'] ?? 0) > 0));
+                    $needCount = count($allZeroBatchIndices);
+                    $toAdd = array_slice($nonZeroExtra, 0, $needCount);
+                    if (!empty($toAdd)) {
+                        $allBodyItems = array_merge($allBodyItems, $toAdd);
+                        $batches = $this->formBatchesAvoidingAllZero($allBodyItems);
+                    }
+                }
+            }
+
             $totalBatches = count($batches);
             $allResults = [];
 
@@ -657,6 +737,17 @@ class MeituanService
             ]);
 
             foreach ($batches as $batchIndex => $batchBody) {
+                if ($this->batchIsAllZeroStock($batchBody)) {
+                    Log::warning('美团价格推送（增量）：本批库存全为0，美团不支持单次推送全为0，跳过本批次（可能造成超订，请关注）', [
+                        'batch_index' => $batchIndex + 1,
+                        'total_batches' => $totalBatches,
+                        'batch_dates' => array_column($batchBody, 'priceDate'),
+                        'product_id' => $product->id,
+                        'room_type_id' => $roomType->id,
+                    ]);
+                    continue;
+                }
+
                 // 计算当前批次的日期范围
                 $batchDates = array_column($batchBody, 'priceDate');
                 $batchStartDate = min($batchDates);
@@ -715,6 +806,19 @@ class MeituanService
                         'result' => $result,
                     ]);
                 }
+            }
+
+            if (!empty($batches) && empty($allResults)) {
+                Log::error('同步美团多层价格日历（增量推送）：所有批次均为全0库存，美团不支持单次推送全为0，未推送任何批次，可能造成超订', [
+                    'product_id' => $product->id,
+                    'room_type_id' => $roomType->id,
+                    'dates' => $dates,
+                ]);
+                return [
+                    'success' => false,
+                    'message' => '本次推送的日期库存均为0，美团不支持单次推送全为0，已跳过全部批次，可能造成超订',
+                    'data' => [],
+                ];
             }
 
             // 检查所有批次是否都成功
@@ -828,8 +932,34 @@ class MeituanService
                 ];
             }
 
-            // 分批处理（每批最多40个SKU）
-            $batches = array_chunk($allBodyItems, self::MAX_SKU_PER_REQUEST);
+            // 组批：保证每批至少一条库存>0（美团不接受单次推送全为0）
+            $requestedDates = $this->generateDateRange($startDate, $endDate);
+            $batches = $this->formBatchesAvoidingAllZero($allBodyItems);
+            $allZeroBatchIndices = [];
+            foreach ($batches as $idx => $batch) {
+                if ($this->batchIsAllZeroStock($batch)) {
+                    $allZeroBatchIndices[] = $idx;
+                }
+            }
+            if (!empty($allZeroBatchIndices)) {
+                $expandStart = \Carbon\Carbon::parse($startDate)->subDays(self::EXPAND_DAYS_FOR_NONZERO)->format('Y-m-d');
+                $expandEnd = \Carbon\Carbon::parse($endDate)->addDays(self::EXPAND_DAYS_FOR_NONZERO)->format('Y-m-d');
+                $expandedDates = $this->generateDateRange($expandStart, $expandEnd);
+                $extraDates = array_values(array_diff($expandedDates, $requestedDates));
+                if (!empty($extraDates)) {
+                    $extraBody = $isPkgProduct
+                        ? $this->buildPkgLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates)
+                        : $this->buildLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates);
+                    $nonZeroExtra = array_values(array_filter($extraBody, fn ($item) => ($item['stock'] ?? 0) > 0));
+                    $needCount = count($allZeroBatchIndices);
+                    $toAdd = array_slice($nonZeroExtra, 0, $needCount);
+                    if (!empty($toAdd)) {
+                        $allBodyItems = array_merge($allBodyItems, $toAdd);
+                        $batches = $this->formBatchesAvoidingAllZero($allBodyItems);
+                    }
+                }
+            }
+
             $totalBatches = count($batches);
             $allResults = [];
 
@@ -846,6 +976,17 @@ class MeituanService
             ]);
 
             foreach ($batches as $batchIndex => $batchBody) {
+                if ($this->batchIsAllZeroStock($batchBody)) {
+                    Log::warning('美团价格推送：本批库存全为0，美团不支持单次推送全为0，跳过本批次（可能造成超订，请关注）', [
+                        'batch_index' => $batchIndex + 1,
+                        'total_batches' => $totalBatches,
+                        'batch_dates' => array_column($batchBody, 'priceDate'),
+                        'product_id' => $product->id,
+                        'room_type_id' => $roomType->id,
+                    ]);
+                    continue;
+                }
+
                 // 计算当前批次的日期范围
                 $batchDates = array_column($batchBody, 'priceDate');
                 $batchStartDate = min($batchDates);
@@ -904,6 +1045,20 @@ class MeituanService
                         'result' => $result,
                     ]);
                 }
+            }
+
+            if (!empty($batches) && empty($allResults)) {
+                Log::error('同步美团多层价格日历：所有批次均为全0库存，美团不支持单次推送全为0，未推送任何批次，可能造成超订', [
+                    'product_id' => $product->id,
+                    'room_type_id' => $roomType->id,
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                ]);
+                return [
+                    'success' => false,
+                    'message' => '本次推送的日期库存均为0，美团不支持单次推送全为0，已跳过全部批次，可能造成超订',
+                    'data' => [],
+                ];
             }
 
             // 检查所有批次是否都成功
