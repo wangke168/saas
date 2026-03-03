@@ -595,6 +595,28 @@ class MeituanService
     }
 
     /**
+     * 只保留不晚于产品销售结束日期的日期（若产品有 sale_end_date）
+     *
+     * @param array $dates 日期数组，格式：['2025-01-01', ...]
+     * @param \App\Models\Product|\App\Models\Pkg\PkgProduct $product 产品
+     * @return array 过滤后的日期数组
+     */
+    protected function filterDatesNotAfterSaleEnd(array $dates, $product): array
+    {
+        if (empty($dates)) {
+            return [];
+        }
+        $saleEnd = $product->sale_end_date ?? null;
+        if (!$saleEnd) {
+            return $dates;
+        }
+        $saleEndStr = $saleEnd instanceof \Carbon\Carbon ? $saleEnd->format('Y-m-d') : (string) $saleEnd;
+        $filtered = array_values(array_filter($dates, fn (string $d) => $d <= $saleEndStr));
+        sort($filtered);
+        return $filtered;
+    }
+
+    /**
      * 判断一批 body 是否全部为库存 0（美团不接受单次推送全为 0）
      */
     protected function batchIsAllZeroStock(array $batch): bool
@@ -675,6 +697,7 @@ class MeituanService
             $dates = array_unique($dates);
             sort($dates);
             $dates = $this->filterDatesFromToday($dates);
+            $dates = $this->filterDatesNotAfterSaleEnd($dates, $product);
             if (empty($dates)) {
                 return [
                     'success' => false,
@@ -731,6 +754,7 @@ class MeituanService
                 $expandedDates = $this->generateDateRange($expandStart, $expandEnd);
                 $extraDates = array_values(array_diff($expandedDates, $dates));
                 $extraDates = $this->filterDatesFromToday($extraDates);
+                $extraDates = $this->filterDatesNotAfterSaleEnd($extraDates, $product);
                 if (!empty($extraDates)) {
                     $extraBody = $isPkgProduct
                         ? $this->buildPkgLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates)
@@ -935,8 +959,20 @@ class MeituanService
                 ];
             }
             $startDate = max($startDate, $today);
+            $saleEndStr = $product->sale_end_date
+                ? ($product->sale_end_date instanceof \Carbon\Carbon ? $product->sale_end_date->format('Y-m-d') : (string) $product->sale_end_date)
+                : null;
+            if ($saleEndStr !== null && $endDate > $saleEndStr) {
+                $endDate = $saleEndStr;
+            }
+            if ($startDate > $endDate) {
+                return [
+                    'success' => false,
+                    'message' => '没有可推送的日期（今天起不晚于销售结束日期）',
+                ];
+            }
 
-            // 构建所有SKU数据（仅今天及以后的日期）
+            // 构建所有SKU数据（仅今天及以后的日期，且不超过销售结束日期）
             if ($isPkgProduct) {
                 $dates = $this->generateDateRange($startDate, $endDate);
                 $dates = $this->filterDatesFromToday($dates);
@@ -987,6 +1023,7 @@ class MeituanService
                 $expandedDates = $this->generateDateRange($expandStart, $expandEnd);
                 $extraDates = array_values(array_diff($expandedDates, $requestedDates));
                 $extraDates = $this->filterDatesFromToday($extraDates);
+                $extraDates = $this->filterDatesNotAfterSaleEnd($extraDates, $product);
                 if (!empty($extraDates)) {
                     $extraBody = $isPkgProduct
                         ? $this->buildPkgLevelPriceStockDataByDates($product, $hotel, $roomType, $extraDates)
