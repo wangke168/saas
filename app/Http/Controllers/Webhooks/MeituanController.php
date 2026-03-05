@@ -22,6 +22,7 @@ use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use App\Services\Resource\ResourceServiceFactory;
 use App\Services\OTA\MeituanService;
+use App\Services\OTA\NotificationFactory;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -1093,16 +1094,50 @@ class MeituanController extends Controller
                     'order_id' => $order->id,
                 ]);
             } else {
-                // 非系统直连：只更新状态为确认中，等待人工接单
-                $this->orderService->updateOrderStatus(
-                    $order,
-                    OrderStatus::CONFIRMING,
-                    '美团订单出票，等待人工接单'
-                );
-                
-                Log::info('美团订单出票：非系统直连，等待人工接单', [
-                    'order_id' => $order->id,
-                ]);
+                // 非系统直连：若启用「库存充裕时自动接单」且满足条件，则自动接单并通知美团 200；否则等待人工接单
+                $autoAcceptEnabled = filter_var(env('MEITUAN_AUTO_ACCEPT_WHEN_SUFFICIENT', true), FILTER_VALIDATE_BOOLEAN);
+                $sufficient = $autoAcceptEnabled && $this->isInventorySufficientForAutoAccept($order);
+
+                if ($sufficient) {
+                    try {
+                        $notification = NotificationFactory::create($order);
+                        if ($notification) {
+                            $notification->notifyOrderConfirmed($order);
+                        }
+                        $this->orderService->updateOrderStatus(
+                            $order,
+                            OrderStatus::CONFIRMED,
+                            '库存充裕自动接单，待人工补录',
+                            null
+                        );
+                        $order->update(['resource_order_no' => 'AUTO_MANUAL_' . $order->id]);
+                        Log::info('美团订单出票：非系统直连，库存充裕已自动接单并通知美团', [
+                            'order_id' => $order->id,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('美团订单出票：库存充裕自动接单失败，降级为人工接单', [
+                            'order_id' => $order->id,
+                            'error' => $e->getMessage(),
+                            'trace' => $e->getTraceAsString(),
+                        ]);
+                        $this->orderService->updateOrderStatus(
+                            $order,
+                            OrderStatus::CONFIRMING,
+                            '美团订单出票，等待人工接单'
+                        );
+                    }
+                } else {
+                    $this->orderService->updateOrderStatus(
+                        $order,
+                        OrderStatus::CONFIRMING,
+                        '美团订单出票，等待人工接单'
+                    );
+                    Log::info('美团订单出票：非系统直连，等待人工接单', [
+                        'order_id' => $order->id,
+                        'auto_accept_enabled' => $autoAcceptEnabled,
+                        'inventory_sufficient' => $sufficient,
+                    ]);
+                }
             }
 
             // 检查请求是否加密
@@ -2119,6 +2154,39 @@ class MeituanController extends Controller
         }
 
         return ['success' => true];
+    }
+
+    /**
+     * 判断订单是否满足「库存充裕」条件，用于非直连订单是否可自动接单（方案 D）
+     * 条件：订单占用日期范围内，每天该房型可用数量 − 本单数量 ≥ 余量阈值（默认 5）
+     */
+    protected function isInventorySufficientForAutoAccept(Order $order): bool
+    {
+        $buffer = (int) env('MEITUAN_AUTO_ACCEPT_STOCK_BUFFER', 5);
+        $stayDays = $order->product?->stay_days ?: 1;
+        $dates = $this->inventoryService->getDateRange(
+            $order->check_in_date->format('Y-m-d'),
+            $stayDays
+        );
+        $required = $order->room_count + $buffer;
+
+        foreach ($dates as $date) {
+            $inventory = \App\Models\Inventory::where('room_type_id', $order->room_type_id)
+                ->where('date', $date)
+                ->first();
+
+            if (!$inventory || $inventory->is_closed || $inventory->available_quantity < $required) {
+                Log::info('美团订单出票：库存未达充裕条件，不自动接单', [
+                    'order_id' => $order->id,
+                    'date' => $date,
+                    'available_quantity' => $inventory->available_quantity ?? null,
+                    'required' => $required,
+                ]);
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
