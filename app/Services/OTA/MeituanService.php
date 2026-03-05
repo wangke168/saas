@@ -1356,4 +1356,178 @@ class MeituanService
             ];
         }
     }
+
+    /**
+     * 同步多层价格日历（按产品维度：整个产品下所有酒店+房型合并为 1 次请求）
+     * 用于产品管理推送、库存变化推送：将产品关联的所有「酒店+房型」的 SKU 合并到一条 body，只发 1 次 API 请求。
+     *
+     * @param \App\Models\Product $product 常规产品（不支持 PkgProduct）
+     * @param string $startDate Y-m-d
+     * @param string $endDate Y-m-d
+     * @return array{success: bool, message: string, data?: array, combos_count?: int}
+     */
+    public function syncLevelPriceStockProductWide(
+        \App\Models\Product $product,
+        string $startDate,
+        string $endDate
+    ): array {
+        try {
+            $client = $this->getClient();
+            $partnerId = $client->getPartnerId();
+
+            if (empty($product->code)) {
+                return [
+                    'success' => false,
+                    'message' => '产品编码为空，请先设置产品编码',
+                ];
+            }
+
+            $today = \Carbon\Carbon::today()->format('Y-m-d');
+            if ($endDate < $today) {
+                return [
+                    'success' => false,
+                    'message' => '结束日期早于今天，没有可推送的日期',
+                ];
+            }
+            $startDate = max($startDate, $today);
+            $saleEndStr = $product->sale_end_date
+                ? ($product->sale_end_date instanceof \Carbon\Carbon ? $product->sale_end_date->format('Y-m-d') : (string) $product->sale_end_date)
+                : null;
+            if ($saleEndStr !== null && $endDate > $saleEndStr) {
+                $endDate = $saleEndStr;
+            }
+            if ($startDate > $endDate) {
+                return [
+                    'success' => false,
+                    'message' => '没有可推送的日期（今天起不晚于销售结束日期）',
+                ];
+            }
+
+            // 获取产品下所有有效的「酒店+房型」组合（与 PushProductToOtaJob 规则一致）
+            $prices = $product->prices()->with(['roomType.hotel'])->get();
+            $combos = [];
+            $seen = [];
+            foreach ($prices as $price) {
+                $roomType = $price->roomType;
+                if (!$roomType) {
+                    continue;
+                }
+                $hotel = $roomType->hotel;
+                if (!$hotel || empty($hotel->code) || empty($roomType->code)) {
+                    continue;
+                }
+                $key = $hotel->id . '_' . $roomType->id;
+                if (!isset($seen[$key])) {
+                    $combos[] = ['hotel' => $hotel, 'room_type' => $roomType];
+                    $seen[$key] = true;
+                }
+            }
+
+            if (empty($combos)) {
+                return [
+                    'success' => false,
+                    'message' => '产品未关联有效的酒店和房型（编码为空）',
+                ];
+            }
+
+            // 为每个组合构建 body，再合并成一条
+            $allBodyItems = [];
+            foreach ($combos as $combo) {
+                $items = $this->buildLevelPriceStockData(
+                    $product,
+                    $combo['hotel'],
+                    $combo['room_type'],
+                    $startDate,
+                    $endDate
+                );
+                foreach ($items as $item) {
+                    $allBodyItems[] = $item;
+                }
+            }
+
+            if (empty($allBodyItems)) {
+                return [
+                    'success' => false,
+                    'message' => '没有价格库存数据',
+                ];
+            }
+
+            // 美团不接受单次推送全为 0
+            $hasNonZero = false;
+            foreach ($allBodyItems as $item) {
+                if (($item['stock'] ?? 0) > 0) {
+                    $hasNonZero = true;
+                    break;
+                }
+            }
+            if (!$hasNonZero) {
+                Log::error('同步美团多层价格日历（整产品单次请求）：全部库存为0，美团不支持单次推送全为0，未推送', [
+                    'product_id' => $product->id,
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                    'combos_count' => count($combos),
+                ]);
+                return [
+                    'success' => false,
+                    'message' => '本次推送的日期库存均为0，美团不支持单次推送全为0，已跳过，可能造成超订',
+                    'data' => [],
+                ];
+            }
+
+            $requestData = [
+                'partnerId' => $partnerId,
+                'startTime' => $startDate,
+                'endTime' => $endDate,
+                'partnerDealId' => $product->code,
+                'body' => $allBodyItems,
+            ];
+
+            Log::info('美团价格推送（整产品单次请求）：开始全量推送', [
+                'product_code' => $product->code,
+                'product_id' => $product->id,
+                'combos_count' => count($combos),
+                'total_sku' => count($allBodyItems),
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+            ]);
+
+            $result = $client->notifyLevelPriceStock($requestData);
+
+            if (isset($result['code']) && $result['code'] == 200) {
+                Log::info('美团价格推送（整产品单次请求）：成功', [
+                    'product_id' => $product->id,
+                    'combos_count' => count($combos),
+                    'total_sku' => count($allBodyItems),
+                ]);
+                return [
+                    'success' => true,
+                    'message' => '同步成功',
+                    'data' => [$result],
+                    'combos_count' => count($combos),
+                ];
+            }
+
+            Log::error('美团价格推送（整产品单次请求）：失败', [
+                'product_id' => $product->id,
+                'combos_count' => count($combos),
+                'total_sku' => count($allBodyItems),
+                'result' => $result,
+            ]);
+            return [
+                'success' => false,
+                'message' => $result['describe'] ?? $result['message'] ?? '推送失败',
+                'data' => [$result],
+            ];
+        } catch (\Exception $e) {
+            Log::error('同步美团多层价格日历（整产品单次请求）异常', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return [
+                'success' => false,
+                'message' => '同步异常：' . $e->getMessage(),
+            ];
+        }
+    }
 }

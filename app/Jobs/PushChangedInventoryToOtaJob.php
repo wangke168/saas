@@ -346,9 +346,8 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
     }
 
     /**
-     * 推送到美团（库存变化且达到阈值时：全量 + 单次请求，不分批）
-     * 说明：仅当 pushToMeituan 为 true 时才会进入此方法，由调用方（如 ResourceController、InventoryObserver）
-     * 根据库存是否跨越阈值（变紧 →≤2 或 恢复 ≤2→>2）计算，未达阈值不推美团。
+     * 推送到美团（库存变化且达到阈值时：整个产品下所有酒店+房型只发 1 次请求）
+     * 说明：仅当 pushToMeituan 为 true 时才会进入此方法，由调用方根据库存是否跨越阈值计算。
      */
     protected function pushToMeituan(
         Product $product,
@@ -364,27 +363,22 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
                 ? $product->sale_end_date->format('Y-m-d')
                 : now()->addMonths(3)->format('Y-m-d');
 
-            $result = $meituanService->syncLevelPriceStockSingleRequest(
+            $result = $meituanService->syncLevelPriceStockProductWide(
                 $product,
-                $hotel,
-                $roomType,
                 $startDate,
                 $endDate
             );
 
             if ($result['success'] ?? false) {
-                Log::info('库存变化自动推送到美团成功（全量单次请求）', [
+                Log::info('库存变化自动推送到美团成功（整产品单次请求）', [
                     'product_id' => $product->id,
-                    'hotel_id' => $hotel->id,
-                    'room_type_id' => $roomType->id,
+                    'combos_count' => $result['combos_count'] ?? null,
                     'start_date' => $startDate,
                     'end_date' => $endDate,
                 ]);
             } else {
                 Log::warning('库存变化自动推送到美团失败', [
                     'product_id' => $product->id,
-                    'hotel_id' => $hotel->id,
-                    'room_type_id' => $roomType->id,
                     'start_date' => $startDate,
                     'end_date' => $endDate,
                     'result' => $result,
@@ -394,8 +388,6 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
         } catch (\Exception $e) {
             Log::error('库存变化自动推送到美团异常', [
                 'product_id' => $product->id,
-                'hotel_id' => $hotel->id,
-                'room_type_id' => $roomType->id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);

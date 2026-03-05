@@ -325,135 +325,41 @@ class PushProductToOtaJob implements ShouldQueue
     }
 
     /**
-     * 推送到美团
+     * 推送到美团（整个产品下所有酒店+房型只发 1 次请求）
      */
     protected function pushToMeituan(\App\Models\Product $product, MeituanService $meituanService): array
     {
         try {
-            // 检查产品是否关联酒店和房型
-            $prices = $product->prices()->with(['roomType.hotel'])->get();
-            
-            if ($prices->isEmpty()) {
+            $startDate = $product->sale_start_date
+                ? $product->sale_start_date->format('Y-m-d')
+                : now()->format('Y-m-d');
+            $endDate = $product->sale_end_date
+                ? $product->sale_end_date->format('Y-m-d')
+                : now()->addMonths(3)->format('Y-m-d');
+
+            $result = $meituanService->syncLevelPriceStockProductWide(
+                $product,
+                $startDate,
+                $endDate
+            );
+
+            if ($result['success'] ?? false) {
+                $combosCount = $result['combos_count'] ?? 0;
+                Log::info('推送产品到美团成功', [
+                    'product_id' => $product->id,
+                    'combos_count' => $combosCount,
+                ]);
                 return [
-                    'success' => false,
-                    'message' => '产品未关联酒店和房型，请先选择酒店和房型',
+                    'success' => true,
+                    'ota_product_id' => 'MEITUAN_' . $product->id,
+                    'message' => $combosCount > 0 ? "推送成功，共 {$combosCount} 个酒店+房型组合（1 次请求）" : '推送成功',
                 ];
             }
-
-            // 检查编码
-            if (empty($product->code)) {
-                return [
-                    'success' => false,
-                    'message' => '产品编码为空，请先设置产品编码',
-                ];
-            }
-
-            // 获取所有"产品-酒店-房型"组合
-            $combos = [];
-            $seen = [];
-            $missingCodes = [];
-
-            foreach ($prices as $price) {
-                $roomType = $price->roomType;
-                if (!$roomType) {
-                    continue;
-                }
-
-                $hotel = $roomType->hotel;
-                if (!$hotel) {
-                    continue;
-                }
-
-                // 检查编码
-                $missingCodeParts = [];
-                if (empty($hotel->code)) {
-                    $missingCodeParts[] = "酒店[{$hotel->name}]编码";
-                }
-                if (empty($roomType->code)) {
-                    $missingCodeParts[] = "房型[{$roomType->name}]编码";
-                }
-                
-                if (!empty($missingCodeParts)) {
-                    $missingCodes[] = "{$hotel->name} - {$roomType->name}：" . implode('、', $missingCodeParts);
-                    continue;
-                }
-
-                $key = "{$hotel->id}_{$roomType->id}";
-                if (!isset($seen[$key])) {
-                    $combos[] = [
-                        'hotel' => $hotel,
-                        'room_type' => $roomType,
-                    ];
-                    $seen[$key] = true;
-                }
-            }
-
-            if (empty($combos)) {
-                $errorMessage = '产品未关联有效的酒店和房型（编码为空）';
-                if (!empty($missingCodes)) {
-                    $errorMessage .= '。缺少编码的酒店/房型：' . implode('；', array_slice($missingCodes, 0, 5));
-                    if (count($missingCodes) > 5) {
-                        $errorMessage .= '等' . count($missingCodes) . '个';
-                    }
-                }
-                return [
-                    'success' => false,
-                    'message' => $errorMessage,
-                ];
-            }
-
-            // 为每个组合推送价格和库存
-            $successCount = 0;
-            $failCount = 0;
-            $errors = [];
-
-            foreach ($combos as $combo) {
-                $hotel = $combo['hotel'];
-                $roomType = $combo['room_type'];
-
-                // 获取销售日期范围
-                $startDate = $product->sale_start_date 
-                    ? $product->sale_start_date->format('Y-m-d') 
-                    : now()->format('Y-m-d');
-                $endDate = $product->sale_end_date 
-                    ? $product->sale_end_date->format('Y-m-d') 
-                    : now()->addMonths(3)->format('Y-m-d');
-
-                // 推送价格和库存（一次性推送，不分批；美团接口同时推送价格和库存）
-                $result = $meituanService->syncLevelPriceStockSingleRequest(
-                    $product,
-                    $hotel,
-                    $roomType,
-                    $startDate,
-                    $endDate
-                );
-
-                if ($result['success'] ?? false) {
-                    $successCount++;
-                } else {
-                    $failCount++;
-                    $errorMessage = $result['message'] ?? '推送失败';
-                    $errors[] = "酒店 {$hotel->name} 房型 {$roomType->name}: {$errorMessage}";
-                }
-            }
-
-            if ($failCount > 0) {
-                return [
-                    'success' => false,
-                    'message' => "部分推送失败：成功 {$successCount} 个，失败 {$failCount} 个",
-                    'errors' => $errors,
-                ];
-            }
-
-            Log::info('推送产品到美团成功', [
-                'product_id' => $product->id,
-                'combo_count' => count($combos),
-            ]);
 
             return [
-                'success' => true,
-                'ota_product_id' => 'MEITUAN_' . $product->id,
-                'message' => "推送成功，共推送 {$successCount} 个组合",
+                'success' => false,
+                'message' => $result['message'] ?? '推送失败',
+                'errors' => $result['errors'] ?? null,
             ];
         } catch (\Exception $e) {
             Log::error('推送到美团失败', [
