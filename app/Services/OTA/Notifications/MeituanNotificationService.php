@@ -193,13 +193,19 @@ class MeituanNotificationService implements OtaNotificationInterface
 
             $result = $client->notifyOrderPay($requestData);
 
-            // 检查响应格式
-            if (isset($result['code']) && $result['code'] == 200) {
+            // 检查响应：200=成功，300=支付通知阶段-美团内部处理中（已接收，视为成功）
+            $code = isset($result['code']) ? (int) $result['code'] : null;
+            if ($code === 200) {
                 Log::info('MeituanNotificationService: 美团订单出票通知成功', [
                     'order_id' => $order->id,
                 ]);
+            } elseif ($code === 300) {
+                Log::info('MeituanNotificationService: 美团订单出票通知已接收（code=300 处理中），视为成功', [
+                    'order_id' => $order->id,
+                    'describe' => $result['describe'] ?? '',
+                ]);
             } else {
-                // 构建详细的错误信息
+                // 其他 code 视为失败
                 $errorMessage = '美团订单出票通知失败';
                 if (isset($result['describe'])) {
                     $errorMessage .= '：' . $result['describe'];
@@ -208,12 +214,10 @@ class MeituanNotificationService implements OtaNotificationInterface
                 } else {
                     $errorMessage .= '：未知错误';
                 }
-                
                 Log::error('MeituanNotificationService: 美团订单出票通知失败', [
                     'order_id' => $order->id,
                     'result' => $result,
                 ]);
-                
                 throw new \Exception($errorMessage);
             }
         } catch (\Exception $e) {
