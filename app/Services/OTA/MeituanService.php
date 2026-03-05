@@ -1193,4 +1193,167 @@ class MeituanService
             ];
         }
     }
+
+    /**
+     * 同步多层价格日历（全量、单次请求，不分批）
+     * 用于库存变化场景：达到库存阈值时，按销售日期范围全量推送，且将所有 SKU 合并为一条请求发送（不按 40 条/批切分）。
+     *
+     * @param \App\Models\Product|\App\Models\Pkg\PkgProduct $product
+     * @param \App\Models\Hotel|\App\Models\Res\ResHotel $hotel
+     * @param \App\Models\RoomType|\App\Models\Res\ResRoomType $roomType
+     * @param string $startDate Y-m-d
+     * @param string $endDate Y-m-d
+     * @return array{success: bool, message: string, data?: array}
+     */
+    public function syncLevelPriceStockSingleRequest(
+        $product,
+        $hotel,
+        $roomType,
+        string $startDate,
+        string $endDate
+    ): array {
+        try {
+            $client = $this->getClient();
+            $partnerId = $client->getPartnerId();
+
+            $isPkgProduct = $product instanceof \App\Models\Pkg\PkgProduct;
+
+            $today = \Carbon\Carbon::today()->format('Y-m-d');
+            if ($endDate < $today) {
+                return [
+                    'success' => false,
+                    'message' => '结束日期早于今天，没有可推送的日期',
+                ];
+            }
+            $startDate = max($startDate, $today);
+            $saleEndStr = $product->sale_end_date
+                ? ($product->sale_end_date instanceof \Carbon\Carbon ? $product->sale_end_date->format('Y-m-d') : (string) $product->sale_end_date)
+                : null;
+            if ($saleEndStr !== null && $endDate > $saleEndStr) {
+                $endDate = $saleEndStr;
+            }
+            if ($startDate > $endDate) {
+                return [
+                    'success' => false,
+                    'message' => '没有可推送的日期（今天起不晚于销售结束日期）',
+                ];
+            }
+
+            if ($isPkgProduct) {
+                $dates = $this->generateDateRange($startDate, $endDate);
+                $dates = $this->filterDatesFromToday($dates);
+                if (empty($dates)) {
+                    return [
+                        'success' => false,
+                        'message' => '没有今天及以后的日期，跳过推送',
+                    ];
+                }
+                $allBodyItems = $this->buildPkgLevelPriceStockDataByDates(
+                    $product,
+                    $hotel,
+                    $roomType,
+                    $dates
+                );
+                $productCode = $product->product_code;
+            } else {
+                $allBodyItems = $this->buildLevelPriceStockData(
+                    $product,
+                    $hotel,
+                    $roomType,
+                    $startDate,
+                    $endDate
+                );
+                $productCode = $product->code;
+            }
+
+            if (empty($allBodyItems)) {
+                return [
+                    'success' => false,
+                    'message' => '没有价格库存数据',
+                ];
+            }
+
+            // 美团不接受单次推送全为 0：若全部为 0 则不发送
+            $hasNonZero = false;
+            foreach ($allBodyItems as $item) {
+                if (($item['stock'] ?? 0) > 0) {
+                    $hasNonZero = true;
+                    break;
+                }
+            }
+            if (!$hasNonZero) {
+                Log::error('同步美团多层价格日历（单次请求）：全部库存为0，美团不支持单次推送全为0，未推送', [
+                    'product_id' => $product->id,
+                    'room_type_id' => $roomType->id,
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
+                ]);
+                return [
+                    'success' => false,
+                    'message' => '本次推送的日期库存均为0，美团不支持单次推送全为0，已跳过，可能造成超订',
+                    'data' => [],
+                ];
+            }
+
+            $requestData = [
+                'partnerId' => $partnerId,
+                'startTime' => $startDate,
+                'endTime' => $endDate,
+                'partnerDealId' => $productCode,
+                'body' => $allBodyItems,
+            ];
+
+            Log::info('美团价格推送（单次请求）：开始全量推送', [
+                'product_type' => $isPkgProduct ? 'pkg' : 'regular',
+                'product_code' => $productCode,
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'total_sku' => count($allBodyItems),
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+            ]);
+
+            $result = $client->notifyLevelPriceStock($requestData);
+
+            if (isset($result['code']) && $result['code'] == 200) {
+                Log::info('美团价格推送（单次请求）：成功', [
+                    'product_id' => $product->id,
+                    'hotel_id' => $hotel->id,
+                    'room_type_id' => $roomType->id,
+                    'total_sku' => count($allBodyItems),
+                ]);
+                return [
+                    'success' => true,
+                    'message' => '同步成功',
+                    'data' => [$result],
+                ];
+            }
+
+            Log::error('美团价格推送（单次请求）：失败', [
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'total_sku' => count($allBodyItems),
+                'result' => $result,
+            ]);
+            return [
+                'success' => false,
+                'message' => $result['describe'] ?? $result['message'] ?? '推送失败',
+                'data' => [$result],
+            ];
+        } catch (\Exception $e) {
+            Log::error('同步美团多层价格日历（单次请求）异常', [
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return [
+                'success' => false,
+                'message' => '同步异常：' . $e->getMessage(),
+            ];
+        }
+    }
 }

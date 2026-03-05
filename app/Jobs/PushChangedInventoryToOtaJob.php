@@ -346,7 +346,9 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
     }
 
     /**
-     * 推送到美团（库存变化时：仅增量推送变化的日期，每批最多40 SKU；产品管理推送仍为全量）
+     * 推送到美团（库存变化且达到阈值时：全量 + 单次请求，不分批）
+     * 说明：仅当 pushToMeituan 为 true 时才会进入此方法，由调用方（如 ResourceController、InventoryObserver）
+     * 根据库存是否跨越阈值（变紧 →≤2 或 恢复 ≤2→>2）计算，未达阈值不推美团。
      */
     protected function pushToMeituan(
         Product $product,
@@ -355,70 +357,36 @@ class PushChangedInventoryToOtaJob implements ShouldQueue
         MeituanService $meituanService
     ): void {
         try {
-            if (empty($this->dates)) {
-                Log::info('推送库存变化到美团：dates 为空，跳过推送', [
-                    'product_id' => $product->id,
-                    'room_type_id' => $roomType->id,
-                ]);
-                return;
-            }
+            $startDate = $product->sale_start_date
+                ? $product->sale_start_date->format('Y-m-d')
+                : now()->format('Y-m-d');
+            $endDate = $product->sale_end_date
+                ? $product->sale_end_date->format('Y-m-d')
+                : now()->addMonths(3)->format('Y-m-d');
 
-            $queryDates = $this->filterFutureDates($this->dates);
-            if (empty($queryDates)) {
-                Log::info('推送库存变化到美团：过滤后无未来日期，跳过推送', [
-                    'product_id' => $product->id,
-                    'room_type_id' => $roomType->id,
-                    'original_dates' => $this->dates,
-                ]);
-                return;
-            }
-
-            $stayDays = $product->stay_days ?: 1;
-            if ($stayDays > 1) {
-                $expandedDates = [];
-                foreach ($queryDates as $date) {
-                    $dateObj = \Carbon\Carbon::parse($date);
-                    for ($i = -($stayDays - 1); $i <= 0; $i++) {
-                        $checkDate = $dateObj->copy()->addDays($i)->format('Y-m-d');
-                        if (!in_array($checkDate, $expandedDates)) {
-                            $expandedDates[] = $checkDate;
-                        }
-                    }
-                }
-                sort($expandedDates);
-                $queryDates = $this->filterFutureDates($expandedDates);
-                if (empty($queryDates)) {
-                    Log::info('推送库存变化到美团：扩大日期范围后无未来日期，跳过推送', [
-                        'product_id' => $product->id,
-                        'room_type_id' => $roomType->id,
-                        'stay_days' => $stayDays,
-                        'original_dates' => $this->dates,
-                    ]);
-                    return;
-                }
-            }
-
-            $result = $meituanService->syncLevelPriceStockByDates(
+            $result = $meituanService->syncLevelPriceStockSingleRequest(
                 $product,
                 $hotel,
                 $roomType,
-                $queryDates
+                $startDate,
+                $endDate
             );
 
             if ($result['success'] ?? false) {
-                Log::info('库存变化自动推送到美团成功（增量）', [
+                Log::info('库存变化自动推送到美团成功（全量单次请求）', [
                     'product_id' => $product->id,
                     'hotel_id' => $hotel->id,
                     'room_type_id' => $roomType->id,
-                    'query_dates_count' => count($queryDates),
-                    'query_dates' => array_slice($queryDates, 0, 10),
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
                 ]);
             } else {
                 Log::warning('库存变化自动推送到美团失败', [
                     'product_id' => $product->id,
                     'hotel_id' => $hotel->id,
                     'room_type_id' => $roomType->id,
-                    'query_dates' => $queryDates,
+                    'start_date' => $startDate,
+                    'end_date' => $endDate,
                     'result' => $result,
                     'error_message' => $result['message'] ?? '未知错误',
                 ]);

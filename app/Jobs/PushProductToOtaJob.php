@@ -419,8 +419,8 @@ class PushProductToOtaJob implements ShouldQueue
                     ? $product->sale_end_date->format('Y-m-d') 
                     : now()->addMonths(3)->format('Y-m-d');
 
-                // 推送价格和库存（美团接口同时推送价格和库存）
-                $result = $meituanService->syncLevelPriceStock(
+                // 推送价格和库存（一次性推送，不分批；美团接口同时推送价格和库存）
+                $result = $meituanService->syncLevelPriceStockSingleRequest(
                     $product,
                     $hotel,
                     $roomType,
