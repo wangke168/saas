@@ -118,6 +118,7 @@ class OrderService
         return match($from) {
             OrderStatus::PAID_PENDING => in_array($to, [
                 OrderStatus::CONFIRMING,
+                OrderStatus::CONFIRMED, // 库存充裕自动接单时一步到位
                 OrderStatus::REJECTED,
                 OrderStatus::CANCEL_APPROVED, // 允许预下单取消
                 OrderStatus::CANCEL_REQUESTED, // 允许取消申请

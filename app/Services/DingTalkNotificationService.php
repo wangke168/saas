@@ -108,6 +108,44 @@ class DingTalkNotificationService
     }
 
     /**
+     * 发送订单自动接单通知（库存充裕自动接单，标题标明「自动接单」）
+     */
+    public function sendOrderAutoConfirmedNotification(Order $order): bool
+    {
+        Log::info('DingTalkNotificationService: 开始发送订单自动接单通知', [
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+        ]);
+
+        if (!$this->isEnabled()) {
+            Log::warning('DingTalkNotificationService: 钉钉通知未启用', [
+                'order_id' => $order->id,
+            ]);
+            return false;
+        }
+
+        $order->load([
+            'otaPlatform',
+            'product.scenicSpot',
+            'hotel',
+            'roomType'
+        ]);
+
+        $users = $this->getUsersToNotify($order);
+        if ($users->isEmpty()) {
+            Log::warning('钉钉通知：没有找到需要通知的用户', [
+                'order_id' => $order->id,
+                'product_id' => $order->product_id,
+                'scenic_spot_id' => $order->product?->scenic_spot_id,
+            ]);
+            return false;
+        }
+
+        $message = $this->buildOrderAutoConfirmedMessage($order);
+        return $this->sendMessage($message, '📦 新订单通知（自动接单）');
+    }
+
+    /**
      * 发送订单取消申请通知
      */
     public function sendOrderCancelRequestedNotification(Order $order, array $cancelData = []): bool
@@ -365,6 +403,42 @@ class DingTalkNotificationService
         $message .= "---\n";
         $message .= "⏰ 创建时间：{$order->created_at}\n";
         $message .= "💡 提示：订单已进入确认中状态，请及时处理";
+
+        return $message;
+    }
+
+    /**
+     * 构建订单自动接单通知的消息
+     */
+    protected function buildOrderAutoConfirmedMessage(Order $order): string
+    {
+        $scenicSpotName = $order->product->scenicSpot->name ?? '未知景区';
+        $productName = $order->product->name ?? '未知产品';
+        $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
+        $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
+        $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
+
+        $message = "# 📦 新订单通知（自动接单）\n\n";
+        $message .= "**订单号：** {$order->order_no}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n";
+        $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
+        $message .= "**景区：** {$scenicSpotName}\n";
+        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**入住信息：**\n";
+        $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
+        $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
+        $message .= "- 房间数：{$order->room_count}\n";
+        $message .= "- 客人数量：{$order->guest_count}\n\n";
+        $message .= "**联系信息：**\n";
+        $message .= "- 联系人：{$order->contact_name}\n";
+        $message .= "- 联系电话：{$order->contact_phone}\n\n";
+        $message .= "**订单金额：**\n";
+        $message .= "- 总金额：¥{$totalAmount}元\n";
+        $message .= "- 结算金额：¥{$settlementAmount}元\n\n";
+        $message .= "**订单状态：** 已自动接单\n\n";
+        $message .= "---\n";
+        $message .= "⏰ 创建时间：{$order->created_at}\n";
+        $message .= "💡 提示：系统已自动接单，无需处理";
 
         return $message;
     }

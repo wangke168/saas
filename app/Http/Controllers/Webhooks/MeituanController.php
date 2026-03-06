@@ -1111,6 +1111,7 @@ class MeituanController extends Controller
                             null
                         );
                         $order->update(['resource_order_no' => 'AUTO_MANUAL_' . $order->id]);
+                        \App\Jobs\NotifyOrderAutoConfirmedJob::dispatch($order);
                         Log::info('美团订单出票：非系统直连，库存充裕已自动接单并通知美团', [
                             'order_id' => $order->id,
                         ]);
