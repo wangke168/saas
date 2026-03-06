@@ -37,6 +37,22 @@
                     <el-descriptions-item label="入住人数">{{ order.guest_count || 2 }} 人</el-descriptions-item>
                 </el-descriptions>
 
+                <!-- 入住人/游客列表 -->
+                <div class="section">
+                    <h3>入住人/游客列表</h3>
+                    <el-table v-if="guestList.length > 0" :data="guestList" border>
+                        <el-table-column type="index" label="序号" width="70" :index="(i) => i + 1" />
+                        <el-table-column prop="name" label="姓名" min-width="120" />
+                        <el-table-column prop="idCode" label="证件号" min-width="200" show-overflow-tooltip />
+                        <el-table-column prop="credentialType" label="证件类型" width="100">
+                            <template #default="{ row }">
+                                {{ getCredentialTypeLabel(row.credentialType) }}
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                    <el-empty v-else description="暂无入住人信息" :image-size="80" />
+                </div>
+
                 <!-- 拆单明细 -->
                 <div class="section">
                     <h3>拆单明细</h3>
@@ -194,6 +210,17 @@ const exceptionOrders = computed(() => {
     return order.value.exception_orders || [];
 });
 
+// 入住人列表：统一各 OTA 的 guest_info 字段名（name/Name, idCode/cardNo/credentialNo/IdCode 等）
+const guestList = computed(() => {
+    const raw = order.value.guest_info;
+    if (!Array.isArray(raw) || raw.length === 0) return [];
+    return raw.map((guest) => ({
+        name: guest.name ?? guest.Name ?? '-',
+        idCode: guest.idCode ?? guest.cardNo ?? guest.credentialNo ?? guest.IdCode ?? guest.id_code ?? '-',
+        credentialType: guest.credentialType ?? guest.credential_type ?? 0,
+    }));
+});
+
 // 获取订单详情
 const fetchOrder = async () => {
     loading.value = true;
@@ -297,6 +324,12 @@ const getExceptionStatusType = (status) => {
         'RESOLVED': 'success',
     };
     return typeMap[status] || '';
+};
+
+// 证件类型标签（常见：0 身份证等）
+const getCredentialTypeLabel = (type) => {
+    const map = { 0: '身份证', 1: '护照', 2: '港澳通行证', 3: '台湾通行证', 4: '其他' };
+    return map[type] ?? (type ? `类型${type}` : '-');
 };
 
 // 格式化日期

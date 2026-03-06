@@ -551,26 +551,7 @@ const getStatusType = (status) => {
 };
 
 const viewDetail = (row) => {
-    ElMessageBox.alert(
-        `
-        <div style="text-align: left;">
-            <p><strong>订单号：</strong>${row.order_no}</p>
-            <p><strong>OTA订单号：</strong>${row.ota_order_no || '-'}</p>
-            <p><strong>状态：</strong>${getStatusLabel(row.status)}</p>
-            <p><strong>入住日期：</strong>${row.check_in_date}</p>
-            <p><strong>离店日期：</strong>${row.check_out_date}</p>
-            <p><strong>房间数：</strong>${row.room_count}</p>
-            <p><strong>订单金额：</strong>¥${formatPrice(row.total_amount)}</p>
-            <p><strong>联系人：</strong>${row.contact_name}</p>
-            <p><strong>联系电话：</strong>${row.contact_phone}</p>
-            <p><strong>身份证号码：</strong>${row.card_no}</p>
-        </div>
-        `,
-        '订单详情',
-        {
-            dangerouslyUseHTMLString: true,
-        }
-    );
+    router.push(`/orders/${row.id}`);
 };
 
 const handleConfirmOrder = async (row) => {
