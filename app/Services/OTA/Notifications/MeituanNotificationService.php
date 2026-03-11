@@ -278,6 +278,88 @@ class MeituanNotificationService implements OtaNotificationInterface
     }
 
     /**
+     * 通知订单退款被拒绝（商家审核不通过）
+     * 使用美团订单退款通知接口，code=699 表示退款被拒绝
+     */
+    public function notifyOrderRefundRejected(Order $order, string $reason): void
+    {
+        Log::info('MeituanNotificationService: 准备通知美团订单退款被拒绝', [
+            'order_id' => $order->id,
+            'ota_order_no' => $order->ota_order_no,
+            'order_no' => $order->order_no,
+            'refund_serial_no' => $order->refund_serial_no,
+            'reason' => $reason,
+        ]);
+
+        try {
+            $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+            $client = $this->getClient($scenicSpotId);
+
+            // 获取退款流水号（refundId）
+            $refundId = $order->refund_serial_no;
+
+            if (empty($refundId)) {
+                Log::warning('MeituanNotificationService: 订单没有退款流水号，无法通知美团退款被拒绝', [
+                    'order_id' => $order->id,
+                    'order_status' => $order->status->value,
+                ]);
+                throw new \Exception('美团退款流水号缺失，无法通知退款被拒绝');
+            }
+
+            $describe = $reason !== '' ? $reason : 'refund rejected';
+
+            $requestData = [
+                'partnerId' => $client->getPartnerId(),
+                'code' => 699,  // 退款被拒绝
+                'describe' => $describe,
+                'body' => [
+                    'orderId' => intval($order->ota_order_no),
+                    'refundId' => $refundId,
+                    'partnerOrderId' => $order->order_no,
+                    'requestTime' => $order->cancelled_at ? $order->cancelled_at->format('Y-m-d H:i:s') : now()->format('Y-m-d H:i:s'),
+                    'responseTime' => now()->format('Y-m-d H:i:s'),
+                ],
+            ];
+
+            $result = $client->notifyOrderRefund($requestData);
+
+            if (isset($result['code']) && $result['code'] == 200) {
+                Log::info('MeituanNotificationService: 美团订单退款被拒绝通知成功', [
+                    'order_id' => $order->id,
+                    'refund_id' => $refundId,
+                    'reason' => $reason,
+                    'result' => $result,
+                ]);
+            } else {
+                $errorMessage = '美团订单退款被拒绝通知失败';
+                if (isset($result['describe'])) {
+                    $errorMessage .= '：' . $result['describe'];
+                } elseif (isset($result['message'])) {
+                    $errorMessage .= '：' . $result['message'];
+                } else {
+                    $errorMessage .= '：未知错误';
+                }
+
+                Log::error('MeituanNotificationService: 美团订单退款被拒绝通知失败', [
+                    'order_id' => $order->id,
+                    'refund_id' => $refundId,
+                    'reason' => $reason,
+                    'result' => $result,
+                ]);
+
+                throw new \Exception($errorMessage);
+            }
+        } catch (\Exception $e) {
+            Log::error('MeituanNotificationService: 美团订单退款被拒绝通知异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
      * 通知订单核销（已使用）
      * 注意：美团可能不支持订单核销通知，这里先留空
      */

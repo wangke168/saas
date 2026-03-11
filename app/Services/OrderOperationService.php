@@ -1206,22 +1206,20 @@ class OrderOperationService
                     throw $e; // 重新抛出异常，阻止后续状态更新
                 }
             } elseif ($order->otaPlatform?->code === OtaPlatform::MEITUAN) {
-                // 美团订单：同步通知
-                Log::info('OrderOperationService::rejectCancelManually: 美团订单，同步通知', [
+                // 美团订单：同步通知退款被拒绝结果
+                Log::info('OrderOperationService::rejectCancelManually: 美团订单，同步通知退款被拒绝', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 $notification = NotificationFactory::create($order);
                 if ($notification) {
-                    // 美团可能没有专门的拒绝取消接口，这里先记录日志
-                    Log::warning('OrderOperationService::rejectCancelManually: 美团订单拒绝取消，暂不支持通知接口', [
-                        'order_id' => $order->id,
-                    ]);
-                    // TODO: 如果美团支持拒绝取消接口，在这里调用
+                    /** @var \App\Services\OTA\Notifications\MeituanNotificationService $notification */
+                    $notification->notifyOrderRefundRejected($order, $reason);
                 } else {
                     Log::warning('OrderOperationService::rejectCancelManually: 无法创建美团通知服务', [
                         'order_id' => $order->id,
                     ]);
+                    throw new \Exception('无法创建美团通知服务');
                 }
             } else {
                 Log::warning('OrderOperationService::rejectCancelManually: 未知平台，跳过通知', [
