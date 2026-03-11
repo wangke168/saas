@@ -50,4 +50,12 @@ class OtaPlatform extends Model
     {
         return $this->hasMany(Order::class);
     }
+
+    /**
+     * 景区-平台-账号映射（仅 account 按景区区分）
+     */
+    public function scenicSpotOtaAccounts(): HasMany
+    {
+        return $this->hasMany(ScenicSpotOtaAccount::class);
+    }
 }

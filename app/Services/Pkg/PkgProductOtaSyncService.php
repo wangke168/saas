@@ -8,9 +8,9 @@ use App\Models\Res\ResHotel;
 use App\Models\Res\ResRoomType;
 use App\Models\Res\ResHotelDailyStock;
 use App\Services\OTA\CtripService;
+use App\Services\OTA\OtaConfigResolver;
 use App\Services\OTA\OtaInventoryHelper;
 use App\Http\Client\CtripClient;
-use App\Models\OtaConfig;
 use App\Helpers\CtripErrorCodeHelper;
 use App\Enums\OtaPlatform;
 use Illuminate\Support\Facades\Log;
@@ -28,40 +28,24 @@ use Carbon\Carbon;
 class PkgProductOtaSyncService
 {
     protected CtripService $ctripService;
-    protected ?CtripClient $ctripClient = null;
+    protected OtaConfigResolver $otaConfigResolver;
 
-    public function __construct(CtripService $ctripService)
+    public function __construct(CtripService $ctripService, OtaConfigResolver $otaConfigResolver)
     {
         $this->ctripService = $ctripService;
+        $this->otaConfigResolver = $otaConfigResolver;
     }
 
     /**
-     * 获取携程客户端实例
-     * 直接创建 CtripClient，避免通过 CtripService 的 protected 方法
+     * 获取携程客户端实例（按景区区分 account）
      */
-    protected function getCtripClient(): CtripClient
+    protected function getCtripClient(?int $scenicSpotId = null): CtripClient
     {
-        if ($this->ctripClient === null) {
-            // 创建配置对象（从环境变量读取，与 CtripService 保持一致）
-            $config = new OtaConfig();
-            $config->account = env('CTRIP_ACCOUNT_ID');
-            $config->secret_key = env('CTRIP_SECRET_KEY');
-            $config->aes_key = env('CTRIP_ENCRYPT_KEY', '');
-            $config->aes_iv = env('CTRIP_ENCRYPT_IV', '');
-            // API URL 配置（从环境变量读取，CtripClient 会根据接口类型使用对应的 URL）
-            $config->api_url = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
-            $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
-            $config->environment = 'production';
-            $config->is_active = true;
-
-            if (!$config->account || !$config->secret_key) {
-                throw new \Exception('携程配置不存在，请检查 .env 文件中的环境变量配置');
-            }
-
-            $this->ctripClient = new CtripClient($config);
+        $config = $this->otaConfigResolver->getCtripConfigForScenicSpot($scenicSpotId);
+        if (!$config) {
+            throw new \Exception('携程配置不存在，请检查 .env 文件中的环境变量配置');
         }
-
-        return $this->ctripClient;
+        return new CtripClient($config);
     }
 
     /**
@@ -304,8 +288,8 @@ class PkgProductOtaSyncService
             'price_count' => count($bodyData['prices']),
         ]);
 
-        // 直接使用 CtripClient 推送价格，避免通过 CtripService 的 protected 方法
-        $ctripClient = $this->getCtripClient();
+        // 按景区使用对应 account 的携程客户端
+        $ctripClient = $this->getCtripClient($product->scenic_spot_id);
         $priceResult = $ctripClient->syncPrice($bodyData);
 
         // 检查价格推送结果
@@ -534,8 +518,8 @@ class PkgProductOtaSyncService
                 'inventory_count' => count($bodyData['inventorys']),
             ]);
 
-            // 直接使用 CtripClient 推送库存，避免通过 CtripService 的 protected 方法
-            $ctripClient = $this->getCtripClient();
+            // 按景区使用对应 account 的携程客户端
+            $ctripClient = $this->getCtripClient($product->scenic_spot_id);
             $result = $ctripClient->syncStock($bodyData);
 
             return $result;

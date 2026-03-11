@@ -3,10 +3,9 @@
 namespace App\Services\OTA\Notifications;
 
 use App\Contracts\OtaNotificationInterface;
-use App\Enums\OtaPlatform;
 use App\Http\Client\MeituanClient;
 use App\Models\Order;
-use App\Models\OtaPlatform as OtaPlatformModel;
+use App\Services\OTA\OtaConfigResolver;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -14,57 +13,20 @@ use Illuminate\Support\Facades\Log;
  */
 class MeituanNotificationService implements OtaNotificationInterface
 {
-    protected ?MeituanClient $client = null;
+    public function __construct(
+        protected OtaConfigResolver $otaConfigResolver
+    ) {}
 
     /**
-     * 获取美团客户端
+     * 获取美团客户端（按订单所属景区区分 partnerId）
      */
-    protected function getClient(): MeituanClient
+    protected function getClient(?int $scenicSpotId = null): MeituanClient
     {
-        if ($this->client === null) {
-            // 优先使用环境变量配置（如果存在）
-            $config = $this->createConfigFromEnv();
-            
-            // 如果环境变量配置不存在，尝试从数据库读取
-            if (!$config) {
-                $platform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
-                $config = $platform?->config;
-            }
-
-            if (!$config) {
-                throw new \Exception('美团配置不存在，请检查数据库配置或环境变量');
-            }
-
-            $this->client = new MeituanClient($config);
+        $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
+        if (!$config) {
+            throw new \Exception('美团配置不存在，请检查 .env 文件中的环境变量配置');
         }
-
-        return $this->client;
-    }
-
-    /**
-     * 从环境变量创建配置对象
-     */
-    protected function createConfigFromEnv(): ?\App\Models\OtaConfig
-    {
-        // 检查环境变量是否存在
-        if (!env('MEITUAN_PARTNER_ID') || !env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
-            return null;
-        }
-
-        // 创建临时配置对象（不保存到数据库）
-        $config = new \App\Models\OtaConfig();
-        $config->account = env('MEITUAN_PARTNER_ID'); // PartnerId存储在account字段
-        $config->secret_key = env('MEITUAN_APP_KEY'); // AppKey存储在secret_key字段
-        $config->aes_key = env('MEITUAN_APP_SECRET'); // AppSecret存储在aes_key字段
-        $config->aes_iv = env('MEITUAN_AES_KEY', ''); // AES密钥存储在aes_iv字段
-        
-        // API URL 配置
-        $config->api_url = env('MEITUAN_API_URL', 'https://openapi.meituan.com');
-        $config->callback_url = env('MEITUAN_WEBHOOK_URL', '');
-        $config->environment = 'production';
-        $config->is_active = true;
-
-        return $config;
+        return new MeituanClient($config);
     }
 
     /**
@@ -79,8 +41,9 @@ class MeituanNotificationService implements OtaNotificationInterface
         ]);
 
         try {
-            $client = $this->getClient();
-            
+            $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+            $client = $this->getClient($scenicSpotId);
+
             // 根据文档，订单出票通知接口请求格式：
             // {issueType, describe, partnerId, body: {...}}
             // 注意：body 中不应该包含 code 和 describe（这些是响应字段）
@@ -244,8 +207,9 @@ class MeituanNotificationService implements OtaNotificationInterface
         ]);
 
         try {
-            $client = $this->getClient();
-            
+            $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+            $client = $this->getClient($scenicSpotId);
+
             // 获取退款流水号（refundId）
             $refundId = $order->refund_serial_no;
             

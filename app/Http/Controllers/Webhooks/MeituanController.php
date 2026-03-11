@@ -18,6 +18,7 @@ use App\Models\Res\ResRoomType;
 use App\Models\Res\ResHotelDailyStock;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
+use App\Services\OTA\OtaConfigResolver;
 use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use App\Services\Resource\ResourceServiceFactory;
@@ -37,59 +38,23 @@ class MeituanController extends Controller
         protected OrderService $orderService,
         protected OrderProcessorService $orderProcessorService,
         protected InventoryService $inventoryService,
-        protected OrderOperationService $orderOperationService
+        protected OrderOperationService $orderOperationService,
+        protected OtaConfigResolver $otaConfigResolver
     ) {}
 
     /**
-     * 获取美团客户端
+     * 获取美团客户端（平台级配置，用于 Webhook 解密/响应；多景区共用同一套密钥）
      */
     protected function getClient(): ?MeituanClient
     {
         if ($this->client === null) {
-            // 优先使用环境变量配置（如果存在）
-            $config = $this->createConfigFromEnv();
-            
-            // 如果环境变量配置不存在，尝试从数据库读取
-            if (!$config) {
-                $platform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
-                $config = $platform?->config;
-            }
-
+            $config = $this->otaConfigResolver->getPlatformConfigForMeituan();
             if (!$config) {
                 return null;
             }
-
             $this->client = new MeituanClient($config);
         }
-
         return $this->client;
-    }
-
-    /**
-     * 从环境变量创建配置对象
-     */
-    protected function createConfigFromEnv(): ?\App\Models\OtaConfig
-    {
-        // 检查环境变量是否存在
-        if (!env('MEITUAN_PARTNER_ID') || !env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
-            return null;
-        }
-
-        // 创建临时配置对象（不保存到数据库）
-        $config = new \App\Models\OtaConfig();
-        $config->account = env('MEITUAN_PARTNER_ID'); // PartnerId存储在account字段
-        $config->secret_key = env('MEITUAN_APP_KEY'); // AppKey存储在secret_key字段
-        $config->aes_key = env('MEITUAN_APP_SECRET'); // AppSecret存储在aes_key字段
-        $config->aes_iv = env('MEITUAN_AES_KEY', ''); // AES密钥存储在aes_iv字段
-        
-        // API URL 配置
-        // 根据美团文档，正确的API地址是 https://connectivity-adapter.meituan.com
-        $config->api_url = env('MEITUAN_API_URL', 'https://connectivity-adapter.meituan.com');
-        $config->callback_url = env('MEITUAN_WEBHOOK_URL', '');
-        $config->environment = 'production';
-        $config->is_active = true;
-
-        return $config;
     }
 
     /**

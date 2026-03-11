@@ -111,6 +111,7 @@ class CtripNotificationService implements OtaNotificationInterface
         ]);
 
         try {
+            $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
             $this->ctripService->notifyOrderConsumed(
                 $order->ota_order_no,
                 $order->order_no,
@@ -119,7 +120,9 @@ class CtripNotificationService implements OtaNotificationInterface
                 $useEndDate,
                 $quantity,
                 $useQuantity,
-                $passengers
+                $passengers,
+                [],
+                $scenicSpotId
             );
             
             Log::info('CtripNotificationService: 携程订单核销通知成功', [

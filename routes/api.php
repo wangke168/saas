@@ -349,4 +349,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'update']);
         Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);
     });
+
+    // 景区-OTA-账号映射（仅超级管理员）
+    Route::prefix('admin/scenic-spot-ota-accounts')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\ScenicSpotOtaAccountController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\ScenicSpotOtaAccountController::class, 'store']);
+        Route::put('/{scenicSpotOtaAccount}', [\App\Http\Controllers\Admin\ScenicSpotOtaAccountController::class, 'update']);
+        Route::delete('/{scenicSpotOtaAccount}', [\App\Http\Controllers\Admin\ScenicSpotOtaAccountController::class, 'destroy']);
+    });
 });

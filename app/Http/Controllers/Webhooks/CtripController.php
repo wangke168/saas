@@ -17,6 +17,7 @@ use App\Models\Pkg\PkgProductDailyPrice;
 use App\Models\Res\ResHotel;
 use App\Models\Res\ResRoomType;
 use App\Models\Res\ResHotelDailyStock;
+use App\Services\OTA\OtaConfigResolver;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\Resource\ResourceServiceFactory;
@@ -32,25 +33,22 @@ class CtripController extends Controller
 
     public function __construct(
         protected OrderService $orderService,
-        protected OrderProcessorService $orderProcessorService
+        protected OrderProcessorService $orderProcessorService,
+        protected OtaConfigResolver $otaConfigResolver
     ) {}
 
     /**
-     * 获取携程客户端
+     * 获取携程客户端（平台级配置，用于 Webhook 验签/解密；多景区共用同一套密钥）
      */
     protected function getClient(): ?CtripClient
     {
         if ($this->client === null) {
-            $platform = OtaPlatformModel::where('code', OtaPlatform::CTRIP->value)->first();
-            $config = $platform?->config;
-
+            $config = $this->otaConfigResolver->getPlatformConfigForCtrip();
             if (!$config) {
                 return null;
             }
-
             $this->client = new CtripClient($config);
         }
-
         return $this->client;
     }
 
@@ -84,15 +82,19 @@ class CtripController extends Controller
             // 获取请求中的 accountId
             $requestAccountId = $header['accountId'] ?? '';
 
-            // 验证账号：检查请求中的 accountId 是否与配置中的账号匹配
             $client = $this->getClient();
             if (!$client) {
                 return $this->errorResponse('0001', '供应商账户为空');
             }
 
-            // 获取配置中的账号
+            // 验证账号：在景区-平台-账号映射中查找，或与平台默认 account 一致
             $configAccount = $client->getConfigAccount();
-            if (empty($requestAccountId) || $requestAccountId !== $configAccount) {
+            $ctripPlatformId = $this->otaConfigResolver->getCtripPlatformId();
+            $scenicSpotIdFromMapping = $ctripPlatformId !== null && $requestAccountId !== ''
+                ? $this->otaConfigResolver->getScenicSpotIdByAccount($ctripPlatformId, $requestAccountId)
+                : null;
+            $isDefaultAccount = $requestAccountId !== '' && $requestAccountId === $configAccount;
+            if (empty($requestAccountId) || ($scenicSpotIdFromMapping === null && !$isDefaultAccount)) {
                 Log::warning('携程订单回调账号验证失败', [
                     'request_account_id' => $requestAccountId,
                     'config_account' => $configAccount,

@@ -41,10 +41,11 @@
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="280" fixed="right">
+                <el-table-column label="操作" width="360" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" @click="handleEdit(row)">编辑</el-button>
                         <el-button size="small" type="info" @click="handleConfigResource(row)">配置资源方</el-button>
+                        <el-button size="small" type="warning" @click="handleConfigOtaAccount(row)">OTA账号</el-button>
                         <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
                     </template>
                 </el-table-column>
@@ -406,6 +407,76 @@
                 <el-button type="primary" @click="handleSubmitResourceConfig" :loading="resourceConfigSubmitting">保存</el-button>
             </template>
         </el-dialog>
+
+        <!-- OTA账号配置对话框（携程 ACCOUNT_ID / 美团 PARTNER_ID 按景区） -->
+        <el-dialog
+            v-model="otaAccountDialogVisible"
+            :title="`OTA账号 - ${currentOtaScenicSpot?.name || ''}`"
+            width="560px"
+            @close="closeOtaAccountDialog"
+        >
+            <el-alert
+                title="说明"
+                type="info"
+                :closable="false"
+                style="margin-bottom: 16px;"
+            >
+                仅配置该景区在携程/美团的账号（携程填 ACCOUNT_ID，美团填 PARTNER_ID）。密钥、API 地址等共用系统 .env 配置。未配置时使用系统默认账号。
+            </el-alert>
+            <el-table :data="otaAccountList" v-loading="otaAccountLoading" border size="small">
+                <el-table-column prop="ota_platform" label="平台" width="100">
+                    <template #default="{ row }">
+                        {{ row.ota_platform?.name || row.ota_platform?.code || '-' }}
+                    </template>
+                </el-table-column>
+                <el-table-column prop="account" label="账号" />
+                <el-table-column label="操作" width="120" fixed="right">
+                    <template #default="{ row }">
+                        <el-button size="small" link type="primary" @click="handleEditOtaAccount(row)">编辑</el-button>
+                        <el-button size="small" link type="danger" @click="handleDeleteOtaAccount(row)">删除</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <div style="margin-top: 12px;">
+                <el-button size="small" type="primary" @click="showAddOtaAccountForm">添加账号</el-button>
+            </div>
+            <!-- 添加/编辑 OTA 账号表单 -->
+            <el-form
+                v-if="otaAccountFormVisible"
+                ref="otaAccountFormRef"
+                :model="otaAccountForm"
+                :rules="otaAccountFormRules"
+                label-width="80px"
+                style="margin-top: 16px; padding: 12px; background: var(--el-fill-color-light); border-radius: 4px;"
+            >
+                <el-form-item label="平台" prop="ota_platform_id">
+                    <el-select
+                        v-model="otaAccountForm.ota_platform_id"
+                        placeholder="请选择平台"
+                        style="width: 100%"
+                        :disabled="!!otaAccountEditingId"
+                    >
+                        <el-option
+                            v-for="p in otaPlatformsForAccount"
+                            :key="p.id"
+                            :label="p.name"
+                            :value="p.id"
+                        />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="账号" prop="account">
+                    <el-input
+                        v-model="otaAccountForm.account"
+                        :placeholder="otaAccountForm.ota_platform_id ? (otaPlatformAccountPlaceholder) : '请先选择平台'"
+                        clearable
+                    />
+                </el-form-item>
+                <el-form-item>
+                    <el-button size="small" @click="cancelOtaAccountForm">取消</el-button>
+                    <el-button size="small" type="primary" @click="submitOtaAccountForm" :loading="otaAccountSubmitting">保存</el-button>
+                </el-form-item>
+            </el-form>
+        </el-dialog>
     </div>
 </template>
 
@@ -436,6 +507,25 @@ const currentScenicSpotId = ref(null);
 const currentScenicSpotProviders = ref([]);
 const selectedProviderId = ref(null);
 const selectedParamTemplate = ref(null);
+
+// OTA 账号配置（景区-平台-account 映射）
+const otaAccountDialogVisible = ref(false);
+const currentOtaScenicSpot = ref(null);
+const otaAccountList = ref([]);
+const otaAccountLoading = ref(false);
+const otaAccountFormVisible = ref(false);
+const otaAccountFormRef = ref(null);
+const otaAccountSubmitting = ref(false);
+const otaAccountEditingId = ref(null); // 编辑时的 ScenicSpotOtaAccount id
+const otaAccountForm = ref({
+    ota_platform_id: null,
+    account: '',
+});
+const otaAccountFormRules = {
+    ota_platform_id: [{ required: true, message: '请选择平台', trigger: 'change' }],
+    account: [{ required: true, message: '请输入账号', trigger: 'blur' }, { max: 64, message: '账号不能超过64个字符', trigger: 'blur' }],
+};
+
 const resourceConfigForm = ref({
     username: '',
     password: '',
@@ -465,6 +555,21 @@ const resourceConfigForm = ref({
 
 const isEdit = computed(() => editingId.value !== null);
 const dialogTitle = computed(() => isEdit.value ? '编辑景区' : '创建景区');
+
+// 可用于添加 OTA 账号的平台（排除已配置的）
+const otaPlatformsForAccount = computed(() => {
+    const configuredIds = otaAccountList.value.map((item) => item.ota_platform_id);
+    return (otaPlatforms.value || []).filter((p) => !configuredIds.includes(p.id));
+});
+// 当前选择平台的账号占位提示
+const otaPlatformAccountPlaceholder = computed(() => {
+    if (!otaAccountForm.value.ota_platform_id) return '请先选择平台';
+    const p = otaPlatforms.value?.find((x) => x.id === otaAccountForm.value.ota_platform_id);
+    if (!p) return '请输入账号';
+    if (p.code === 'ctrip') return '携程 ACCOUNT_ID';
+    if (p.code === 'meituan') return '美团 PARTNER_ID';
+    return '请输入账号';
+});
 
 // 根据选中的服务商ID获取服务商对象
 const selectedSoftwareProvider = computed(() => {
@@ -990,6 +1095,100 @@ const handleTemplateChange = (template) => {
             resourceConfigForm.value.auth.params = [];
             break;
     }
+};
+
+// ---------- OTA 账号配置 ----------
+const handleConfigOtaAccount = async (row) => {
+    currentOtaScenicSpot.value = row;
+    otaAccountDialogVisible.value = true;
+    otaAccountFormVisible.value = false;
+    otaAccountEditingId.value = null;
+    await fetchOtaAccountList();
+};
+
+const fetchOtaAccountList = async () => {
+    if (!currentOtaScenicSpot.value?.id) return;
+    otaAccountLoading.value = true;
+    try {
+        const res = await axios.get('/admin/scenic-spot-ota-accounts', {
+            params: { scenic_spot_id: currentOtaScenicSpot.value.id, per_page: 50 },
+        });
+        otaAccountList.value = res.data.data || [];
+    } catch (e) {
+        ElMessage.error('获取OTA账号列表失败');
+        console.error(e);
+    } finally {
+        otaAccountLoading.value = false;
+    }
+};
+
+const showAddOtaAccountForm = () => {
+    otaAccountEditingId.value = null;
+    otaAccountForm.value = { ota_platform_id: null, account: '' };
+    otaAccountFormVisible.value = true;
+};
+
+const handleEditOtaAccount = (row) => {
+    otaAccountEditingId.value = row.id;
+    otaAccountForm.value = { ota_platform_id: row.ota_platform_id, account: row.account || '' };
+    otaAccountFormVisible.value = true;
+};
+
+const cancelOtaAccountForm = () => {
+    otaAccountFormVisible.value = false;
+    otaAccountFormRef.value?.resetFields();
+};
+
+const submitOtaAccountForm = async () => {
+    if (!otaAccountFormRef.value) return;
+    await otaAccountFormRef.value.validate(async (valid) => {
+        if (!valid) return;
+        otaAccountSubmitting.value = true;
+        try {
+            if (otaAccountEditingId.value) {
+                await axios.put(`/admin/scenic-spot-ota-accounts/${otaAccountEditingId.value}`, {
+                    account: otaAccountForm.value.account,
+                });
+                ElMessage.success('更新成功');
+            } else {
+                await axios.post('/admin/scenic-spot-ota-accounts', {
+                    scenic_spot_id: currentOtaScenicSpot.value.id,
+                    ota_platform_id: otaAccountForm.value.ota_platform_id,
+                    account: otaAccountForm.value.account,
+                });
+                ElMessage.success('添加成功');
+            }
+            otaAccountFormVisible.value = false;
+            await fetchOtaAccountList();
+        } catch (e) {
+            const msg = e.response?.data?.message || '操作失败';
+            ElMessage.error(msg);
+        } finally {
+            otaAccountSubmitting.value = false;
+        }
+    });
+};
+
+const handleDeleteOtaAccount = async (row) => {
+    try {
+        await ElMessageBox.confirm(`确定删除该景区在「${row.ota_platform?.name || row.ota_platform?.code}」的账号配置？`, '提示', {
+            type: 'warning',
+        });
+        await axios.delete(`/admin/scenic-spot-ota-accounts/${row.id}`);
+        ElMessage.success('已删除');
+        await fetchOtaAccountList();
+    } catch (e) {
+        if (e !== 'cancel') {
+            ElMessage.error(e.response?.data?.message || '删除失败');
+        }
+    }
+};
+
+const closeOtaAccountDialog = () => {
+    currentOtaScenicSpot.value = null;
+    otaAccountList.value = [];
+    otaAccountFormVisible.value = false;
+    otaAccountFormRef.value?.resetFields();
 };
 
 onMounted(() => {

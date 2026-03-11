@@ -4,9 +4,7 @@ namespace App\Services\OTA;
 
 use App\Enums\OtaPlatform;
 use App\Http\Client\MeituanClient;
-use App\Models\OtaConfig;
 use App\Services\OTA\OtaInventoryHelper;
-use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\ProductService;
 use Illuminate\Support\Facades\Log;
 
@@ -22,62 +20,28 @@ class MeituanService
      */
     private const EXPAND_DAYS_FOR_NONZERO = 60;
 
-    protected ?MeituanClient $client = null;
+    /** @var array<int|string, MeituanClient> 按景区或 'default' 缓存的 client */
+    protected array $clientByScenicSpot = [];
 
     public function __construct(
-        protected ProductService $productService
+        protected ProductService $productService,
+        protected OtaConfigResolver $otaConfigResolver
     ) {}
 
     /**
-     * 获取MeituanClient实例
+     * 获取 MeituanClient（按景区区分 partnerId，无 scenicSpotId 时使用平台默认）
      */
-    protected function getClient(): MeituanClient
+    protected function getClient(?int $scenicSpotId = null): MeituanClient
     {
-        if ($this->client === null) {
-            // 优先使用环境变量配置（如果存在）
-            $config = $this->createConfigFromEnv();
-            
-            // 如果环境变量配置不存在，尝试从数据库读取
+        $cacheKey = $scenicSpotId ?? 'default';
+        if (!isset($this->clientByScenicSpot[$cacheKey])) {
+            $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
             if (!$config) {
-                $platform = OtaPlatformModel::where('code', OtaPlatform::MEITUAN->value)->first();
-                $config = $platform?->config;
+                throw new \Exception('美团配置不存在，请检查 .env 文件中的环境变量配置');
             }
-
-            if (!$config) {
-                throw new \Exception('美团配置不存在，请检查数据库配置或环境变量');
-            }
-
-            $this->client = new MeituanClient($config);
+            $this->clientByScenicSpot[$cacheKey] = new MeituanClient($config);
         }
-
-        return $this->client;
-    }
-
-    /**
-     * 从环境变量创建配置对象
-     */
-    protected function createConfigFromEnv(): ?OtaConfig
-    {
-        // 检查环境变量是否存在
-        if (!env('MEITUAN_PARTNER_ID') || !env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
-            return null;
-        }
-
-        // 创建临时配置对象（不保存到数据库）
-        $config = new OtaConfig();
-        $config->account = env('MEITUAN_PARTNER_ID'); // PartnerId存储在account字段
-        $config->secret_key = env('MEITUAN_APP_KEY'); // AppKey存储在secret_key字段
-        $config->aes_key = env('MEITUAN_APP_SECRET'); // AppSecret存储在aes_key字段
-        $config->aes_iv = env('MEITUAN_AES_KEY', ''); // AES密钥存储在aes_iv字段
-        
-        // API URL 配置
-        // 根据美团文档，正确的API地址是 https://connectivity-adapter.meituan.com
-        $config->api_url = env('MEITUAN_API_URL', 'https://connectivity-adapter.meituan.com');
-        $config->callback_url = env('MEITUAN_WEBHOOK_URL', '');
-        $config->environment = 'production';
-        $config->is_active = true;
-
-        return $config;
+        return $this->clientByScenicSpot[$cacheKey];
     }
 
     /**
@@ -690,7 +654,8 @@ class MeituanService
                 ];
             }
 
-            $client = $this->getClient();
+            $scenicSpotId = $product->scenic_spot_id ?? null;
+            $client = $this->getClient($scenicSpotId);
             $partnerId = $client->getPartnerId();
 
             // 去重、排序，并只保留今天及以后的日期
@@ -945,7 +910,8 @@ class MeituanService
         string $endDate
     ): array {
         try {
-            $client = $this->getClient();
+            $scenicSpotId = $product->scenic_spot_id ?? null;
+            $client = $this->getClient($scenicSpotId);
             $partnerId = $client->getPartnerId();
 
             // 判断产品类型
@@ -1213,7 +1179,8 @@ class MeituanService
         string $endDate
     ): array {
         try {
-            $client = $this->getClient();
+            $scenicSpotId = $product->scenic_spot_id ?? null;
+            $client = $this->getClient($scenicSpotId);
             $partnerId = $client->getPartnerId();
 
             $isPkgProduct = $product instanceof \App\Models\Pkg\PkgProduct;
@@ -1372,7 +1339,7 @@ class MeituanService
         string $endDate
     ): array {
         try {
-            $client = $this->getClient();
+            $client = $this->getClient($product->scenic_spot_id);
             $partnerId = $client->getPartnerId();
 
             if (empty($product->code)) {

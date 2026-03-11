@@ -133,4 +133,12 @@ class ScenicSpot extends Model
     {
         return $this->hasMany(Product::class);
     }
+
+    /**
+     * 景区在各 OTA 平台的账号映射（仅 account/partnerId 按景区区分）
+     */
+    public function otaAccounts(): HasMany
+    {
+        return $this->hasMany(ScenicSpotOtaAccount::class);
+    }
 }

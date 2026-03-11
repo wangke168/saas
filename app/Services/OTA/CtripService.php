@@ -12,53 +12,28 @@ use Illuminate\Support\Facades\Log;
 
 class CtripService
 {
-    protected ?CtripClient $client = null;
+    /** @var array<int, CtripClient> 按景区缓存的 client，null 表示使用平台默认 */
+    protected array $clientByScenicSpot = [];
 
     public function __construct(
-        protected ProductService $productService
+        protected ProductService $productService,
+        protected OtaConfigResolver $otaConfigResolver
     ) {}
 
-    protected function getClient(): CtripClient
+    /**
+     * 获取携程客户端（按景区区分 account，无 scenicSpotId 时使用平台默认）
+     */
+    protected function getClient(?int $scenicSpotId = null): CtripClient
     {
-        if ($this->client === null) {
-            // 只从环境变量读取配置
-            $config = $this->createConfigFromEnv();
-
+        $cacheKey = $scenicSpotId ?? 'default';
+        if (!isset($this->clientByScenicSpot[$cacheKey])) {
+            $config = $this->otaConfigResolver->getCtripConfigForScenicSpot($scenicSpotId);
             if (!$config) {
                 throw new \Exception('携程配置不存在，请检查 .env 文件中的环境变量配置');
             }
-
-            $this->client = new CtripClient($config);
+            $this->clientByScenicSpot[$cacheKey] = new CtripClient($config);
         }
-
-        return $this->client;
-    }
-
-    /**
-     * 从环境变量创建配置对象
-     */
-    protected function createConfigFromEnv(): ?OtaConfig
-    {
-        // 检查必需的环境变量是否存在
-        if (!env('CTRIP_ACCOUNT_ID') || !env('CTRIP_SECRET_KEY')) {
-            return null;
-        }
-
-        // 创建临时配置对象（不保存到数据库）
-        $config = new OtaConfig();
-        $config->account = env('CTRIP_ACCOUNT_ID');
-        $config->secret_key = env('CTRIP_SECRET_KEY');
-        $config->aes_key = env('CTRIP_ENCRYPT_KEY', '');
-        $config->aes_iv = env('CTRIP_ENCRYPT_IV', '');
-        
-        // API URL 配置（从环境变量读取，CtripClient 会根据接口类型使用对应的 URL）
-        // 使用价格API URL作为基础URL（CtripClient会根据接口类型选择正确的URL）
-        $config->api_url = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
-        $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
-        $config->environment = 'production';
-        $config->is_active = true;
-
-        return $config;
+        return $this->clientByScenicSpot[$cacheKey];
     }
 
     /**
@@ -161,7 +136,7 @@ class CtripService
 
         Log::info('准备同步价格数据', ['bodyData' => $bodyData]);
 
-        return $this->getClient()->syncPrice($bodyData);
+        return $this->getClient($product->scenic_spot_id)->syncPrice($bodyData);
     }
 
     /**
@@ -368,23 +343,23 @@ class CtripService
 
         Log::info('准备同步库存数据', ['bodyData' => $bodyData]);
 
-        return $this->getClient()->syncStock($bodyData);
+        return $this->getClient($product->scenic_spot_id)->syncStock($bodyData);
     }
 
     /**
-     * 同步价格到携程（原始方法，保留兼容性）
+     * 同步价格到携程（原始方法，保留兼容性；无景区上下文时使用平台默认 account）
      */
-    public function syncPrice(array $priceData): array
+    public function syncPrice(array $priceData, ?int $scenicSpotId = null): array
     {
-        return $this->getClient()->syncPrice($priceData);
+        return $this->getClient($scenicSpotId)->syncPrice($priceData);
     }
 
     /**
-     * 同步库存到携程（原始方法，保留兼容性）
+     * 同步库存到携程（原始方法，保留兼容性；无景区上下文时使用平台默认 account）
      */
-    public function syncStock(array $stockData): array
+    public function syncStock(array $stockData, ?int $scenicSpotId = null): array
     {
-        return $this->getClient()->syncStock($stockData);
+        return $this->getClient($scenicSpotId)->syncStock($stockData);
     }
 
     /**
@@ -395,7 +370,8 @@ class CtripService
      */
     public function confirmOrder(\App\Models\Order $order): array
     {
-        $client = $this->getClient();
+        $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+        $client = $this->getClient($scenicSpotId);
         
         // 构建 items 数组
         $items = [];
@@ -434,7 +410,8 @@ class CtripService
      */
     public function confirmCancelOrder(\App\Models\Order $order): array
     {
-        $client = $this->getClient();
+        $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+        $client = $this->getClient($scenicSpotId);
         
         // 构建 items 数组
         $items = [];
@@ -486,9 +463,10 @@ class CtripService
         int $quantity,
         int $useQuantity,
         array $passengers = [],
-        array $vouchers = []
+        array $vouchers = [],
+        ?int $scenicSpotId = null
     ): array {
-        return $this->getClient()->notifyOrderConsumed(
+        return $this->getClient($scenicSpotId)->notifyOrderConsumed(
             $otaOrderId,
             $supplierOrderId,
             $itemId,
@@ -630,7 +608,7 @@ class CtripService
             'bodyData' => $bodyData,
         ]);
 
-        return $this->getClient()->syncPrice($bodyData);
+        return $this->getClient($product->scenic_spot_id)->syncPrice($bodyData);
     }
 
     /**
@@ -916,6 +894,6 @@ class CtripService
             'bodyData' => $bodyData,
         ]);
 
-        return $this->getClient()->syncStock($bodyData);
+        return $this->getClient($product->scenic_spot_id)->syncStock($bodyData);
     }
 }
