@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ScenicSpot extends Model
 {
@@ -140,5 +141,10 @@ class ScenicSpot extends Model
     public function otaAccounts(): HasMany
     {
         return $this->hasMany(ScenicSpotOtaAccount::class);
+    }
+
+    public function dingtalkConfig(): HasOne
+    {
+        return $this->hasOne(ScenicSpotDingTalkConfig::class);
     }
 }

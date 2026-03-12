@@ -2,19 +2,20 @@
 
 namespace App\Services;
 
-use App\Models\Order;
-use App\Models\User;
 use App\Enums\UserRole;
+use App\Models\Order;
+use App\Models\ScenicSpotDingTalkConfig;
+use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class DingTalkNotificationService
 {
-    protected ?string $webhookUrl;
+    protected ?string $defaultWebhookUrl;
 
     public function __construct()
     {
-        $this->webhookUrl = config('services.dingtalk.webhook_url') 
+        $this->defaultWebhookUrl = config('services.dingtalk.webhook_url')
             ?? env('DINGTALK_WEBHOOK_URL');
     }
 
@@ -23,15 +24,6 @@ class DingTalkNotificationService
      */
     public function isEnabled(): bool
     {
-        if (empty($this->webhookUrl)) {
-            Log::warning('钉钉通知：Webhook URL未配置', [
-                'config_key' => 'DINGTALK_WEBHOOK_URL',
-                'config_value_exists' => !empty(config('services.dingtalk.webhook_url')),
-                'env_value_exists' => !empty(env('DINGTALK_WEBHOOK_URL')),
-            ]);
-            return false;
-        }
-
         $enabled = env('DINGTALK_NOTIFICATION_ENABLED', true);
         if (!$enabled) {
             Log::info('钉钉通知：已禁用', [
@@ -104,7 +96,7 @@ class DingTalkNotificationService
         ]);
 
         // 发送消息
-        return $this->sendMessage($message, '📦 新订单通知');
+        return $this->sendMessageForOrder($order, $message, '📦 新订单通知');
     }
 
     /**
@@ -142,7 +134,7 @@ class DingTalkNotificationService
         }
 
         $message = $this->buildOrderAutoConfirmedMessage($order);
-        return $this->sendMessage($message, '📦 新订单通知（自动接单）');
+        return $this->sendMessageForOrder($order, $message, '📦 新订单通知（自动接单）');
     }
 
     /**
@@ -206,7 +198,7 @@ class DingTalkNotificationService
         ]);
 
         // 发送消息
-        return $this->sendMessage($message,'⚠️ 订单取消申请');
+        return $this->sendMessageForOrder($order, $message, '⚠️ 订单取消申请');
     }
 
     /**
@@ -277,7 +269,7 @@ class DingTalkNotificationService
 
             
         // 发送消息
-        return $this->sendMessage($message, $title);
+        return $this->sendMessageForOrder($order, $message, $title);
     }
 
     /**
@@ -522,21 +514,110 @@ class DingTalkNotificationService
         return $message;
     }
 
+    protected function sendMessageForOrder(Order $order, string $message, string $title = '订单通知'): bool
+    {
+        $resolution = $this->resolveWebhookUrlForOrder($order);
+
+        if ($resolution['should_send'] === false) {
+            return false;
+        }
+
+        $webhookUrl = $resolution['webhook_url'] ?? null;
+        if (empty($webhookUrl)) {
+            Log::warning('钉钉通知：未解析到可用Webhook，跳过发送', [
+                'order_id' => $order->id,
+                'scenic_spot_id' => $resolution['scenic_spot_id'] ?? null,
+                'reason' => $resolution['reason'] ?? 'unknown',
+                'default_webhook_configured' => !empty($this->defaultWebhookUrl),
+            ]);
+            return false;
+        }
+
+        return $this->sendMessage($webhookUrl, $message, $title, [
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+            'scenic_spot_id' => $resolution['scenic_spot_id'] ?? null,
+            'route' => $resolution['route'] ?? null,
+        ]);
+    }
+
+    protected function resolveWebhookUrlForOrder(Order $order): array
+    {
+        $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+        $default = $this->defaultWebhookUrl;
+
+        if (empty($scenicSpotId)) {
+            return [
+                'should_send' => true,
+                'scenic_spot_id' => null,
+                'webhook_url' => $default,
+                'route' => 'default',
+                'reason' => empty($default) ? 'default_webhook_not_configured' : 'no_scenic_spot',
+            ];
+        }
+
+        $config = null;
+        $scenicSpot = $order->product?->scenicSpot;
+        if ($scenicSpot && $scenicSpot->relationLoaded('dingtalkConfig')) {
+            $config = $scenicSpot->dingtalkConfig;
+        } elseif ($scenicSpot) {
+            $config = $scenicSpot->dingtalkConfig()->first();
+        } else {
+            $config = ScenicSpotDingTalkConfig::where('scenic_spot_id', $scenicSpotId)->first();
+        }
+
+        if ($config) {
+            if (!$config->enabled) {
+                Log::info('钉钉通知：景区专属配置已禁用，跳过发送', [
+                    'order_id' => $order->id,
+                    'scenic_spot_id' => $scenicSpotId,
+                ]);
+                return [
+                    'should_send' => false,
+                    'scenic_spot_id' => $scenicSpotId,
+                    'webhook_url' => null,
+                    'route' => 'disabled',
+                    'reason' => 'scenic_spot_disabled',
+                ];
+            }
+
+            $spotWebhook = $config->webhook_url;
+            if (!empty($spotWebhook)) {
+                return [
+                    'should_send' => true,
+                    'scenic_spot_id' => $scenicSpotId,
+                    'webhook_url' => $spotWebhook,
+                    'route' => 'scenic_spot',
+                    'reason' => 'scenic_spot_configured',
+                ];
+            }
+        }
+
+        return [
+            'should_send' => true,
+            'scenic_spot_id' => $scenicSpotId,
+            'webhook_url' => $default,
+            'route' => 'default',
+            'reason' => empty($default) ? 'default_webhook_not_configured' : 'fallback_to_default',
+        ];
+    }
+
     /**
      * 发送钉钉消息
      */
-    protected function sendMessage(string $message, string $title = '订单通知'): bool
+    protected function sendMessage(string $webhookUrl, string $message, string $title = '订单通知', array $context = []): bool
     {
         // 脱敏处理Webhook URL（只显示前30个字符）
-        $maskedUrl = $this->maskWebhookUrl($this->webhookUrl);
+        $maskedUrl = $this->maskWebhookUrl($webhookUrl);
 
         try {
             Log::debug('DingTalkNotificationService: 准备发送钉钉消息', [
                 'webhook_url_masked' => $maskedUrl,
                 'message_length' => strlen($message),
+                'context' => $context,
             ]);
 
-            $response = Http::timeout(10)->post($this->webhookUrl, [
+            $response = Http::timeout(10)->post($webhookUrl, [
                 'msgtype' => 'markdown',
                 'markdown' => [
                     'title' => $title,
@@ -550,6 +631,7 @@ class DingTalkNotificationService
                     Log::info('钉钉通知发送成功', [
                         'webhook_url_masked' => $maskedUrl,
                         'message_length' => strlen($message),
+                        'context' => $context,
                     ]);
                     return true;
                 } else {
@@ -559,6 +641,7 @@ class DingTalkNotificationService
                         'error_msg' => $result['errmsg'] ?? 'unknown',
                         'full_response' => $result,
                         'message_length' => strlen($message),
+                        'context' => $context,
                     ]);
                     return false;
                 }
@@ -569,6 +652,7 @@ class DingTalkNotificationService
                     'http_status' => $response->status(),
                     'response_body' => $responseBody,
                     'message_length' => strlen($message),
+                    'context' => $context,
                 ]);
                 return false;
             }
@@ -578,6 +662,7 @@ class DingTalkNotificationService
                 'error' => $e->getMessage(),
                 'error_class' => get_class($e),
                 'message_length' => strlen($message),
+                'context' => $context,
             ]);
             return false;
         } catch (\Exception $e) {
@@ -587,6 +672,7 @@ class DingTalkNotificationService
                 'error_class' => get_class($e),
                 'trace' => $e->getTraceAsString(),
                 'message_length' => strlen($message),
+                'context' => $context,
             ]);
             return false;
         }
