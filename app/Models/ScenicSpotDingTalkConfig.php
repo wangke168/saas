@@ -10,6 +10,8 @@ class ScenicSpotDingTalkConfig extends Model
 {
     use HasFactory;
 
+    protected $table = 'scenic_spot_dingtalk_configs';
+
     protected $fillable = [
         'scenic_spot_id',
         'webhook_url',

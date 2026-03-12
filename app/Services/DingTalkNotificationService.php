@@ -8,6 +8,7 @@ use App\Models\ScenicSpotDingTalkConfig;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class DingTalkNotificationService
 {
@@ -545,6 +546,16 @@ class DingTalkNotificationService
     {
         $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
         $default = $this->defaultWebhookUrl;
+
+        if (!Schema::hasTable('scenic_spot_dingtalk_configs')) {
+            return [
+                'should_send' => true,
+                'scenic_spot_id' => $scenicSpotId,
+                'webhook_url' => $default,
+                'route' => 'default',
+                'reason' => empty($default) ? 'default_webhook_not_configured' : 'table_not_exists_fallback_default',
+            ];
+        }
 
         if (empty($scenicSpotId)) {
             return [
