@@ -934,40 +934,60 @@ class CtripController extends Controller
                     'items' => $this->buildResponseItems($items, $order), // 必填
                 ]);
             } else {
-                // 非系统直连：创建异常订单，等待人工操作
-                Log::info('携程预下单支付：非系统直连，创建异常订单等待人工处理', [
+                // 非系统直连：若启用「库存充裕时自动接单」且满足条件，则自动接单；否则创建异常订单等待人工处理
+                $autoAcceptEnabled = filter_var(env('CTRIP_AUTO_ACCEPT_WHEN_SUFFICIENT', true), FILTER_VALIDATE_BOOLEAN);
+                $sufficient = $autoAcceptEnabled && $this->isInventorySufficientForAutoAccept($order);
+
+                Log::info('携程预下单支付：非系统直连处理分支', [
                     'order_id' => $order->id,
                     'current_status' => $order->status->value,
+                    'auto_accept_enabled' => $autoAcceptEnabled,
+                    'inventory_sufficient' => $sufficient,
                 ]);
                 
                 try {
-                    // 1. 更新订单状态为确认中
-                    $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程预下单支付成功，等待人工接单');
-                    $order->refresh();
-                    
-                    Log::info('携程预下单支付：订单状态已更新为确认中', [
-                        'order_id' => $order->id,
-                        'current_status' => $order->status->value,
-                    ]);
-                    
-                    // 2. 创建异常订单
-                    $sequenceId = $data['sequenceId'] ?? null;
-                    ExceptionOrder::create([
-                        'order_id' => $order->id,
-                        'exception_type' => ExceptionOrderType::API_ERROR,
-                        'exception_message' => '非系统直连订单，等待人工接单',
-                        'exception_data' => [
-                            'operation' => 'confirm',
-                            'sequence_id' => $sequenceId,
-                            'ctrip_order_id' => $ctripOrderId,
-                            'ctrip_item_id' => $ctripItemId,
-                        ],
-                        'status' => ExceptionOrderStatus::PENDING,
-                    ]);
-                    
-                    Log::info('携程预下单支付：已创建异常订单', [
-                        'order_id' => $order->id,
-                    ]);
+                    if ($sufficient) {
+                        // 库存充裕：自动接单，不创建异常单
+                        $this->orderService->updateOrderStatus(
+                            $order,
+                            OrderStatus::CONFIRMED,
+                            '库存充裕自动接单，待人工补录'
+                        );
+                        $order->update(['resource_order_no' => 'AUTO_MANUAL_' . $order->id]);
+                        \App\Jobs\NotifyOrderAutoConfirmedJob::dispatch($order);
+
+                        Log::info('携程预下单支付：非系统直连，库存充裕已自动接单', [
+                            'order_id' => $order->id,
+                        ]);
+                    } else {
+                        // 1. 更新订单状态为确认中（等待人工接单）
+                        $this->orderService->updateOrderStatus($order, OrderStatus::CONFIRMING, '携程预下单支付成功，等待人工接单');
+                        $order->refresh();
+
+                        Log::info('携程预下单支付：订单状态已更新为确认中', [
+                            'order_id' => $order->id,
+                            'current_status' => $order->status->value,
+                        ]);
+                        
+                        // 2. 创建异常订单
+                        $sequenceId = $data['sequenceId'] ?? null;
+                        ExceptionOrder::create([
+                            'order_id' => $order->id,
+                            'exception_type' => ExceptionOrderType::API_ERROR,
+                            'exception_message' => '非系统直连订单，等待人工接单',
+                            'exception_data' => [
+                                'operation' => 'confirm',
+                                'sequence_id' => $sequenceId,
+                                'ctrip_order_id' => $ctripOrderId,
+                                'ctrip_item_id' => $ctripItemId,
+                            ],
+                            'status' => ExceptionOrderStatus::PENDING,
+                        ]);
+                        
+                        Log::info('携程预下单支付：已创建异常订单', [
+                            'order_id' => $order->id,
+                        ]);
+                    }
                 } catch (\Exception $e) {
                     Log::error('携程预下单支付：非系统直连处理失败', [
                         'order_id' => $order->id,
@@ -996,6 +1016,36 @@ class CtripController extends Controller
 
             return $this->errorResponse('0005', '系统处理异常');
         }
+    }
+
+    /**
+     * 判断订单是否满足「库存充裕」条件，用于非直连订单是否可自动接单（方案 A）
+     * 条件：订单占用日期范围内，每天该房型可用数量 − 本单数量 ≥ 余量阈值（默认 5）
+     */
+    protected function isInventorySufficientForAutoAccept(Order $order): bool
+    {
+        $buffer = (int) env('CTRIP_AUTO_ACCEPT_STOCK_BUFFER', 5);
+        $stayDays = $order->product?->stay_days ?: 1;
+        $required = $order->room_count + $buffer;
+
+        for ($i = 0; $i < $stayDays; $i++) {
+            $date = $order->check_in_date->copy()->addDays($i);
+            $inventory = \App\Models\Inventory::where('room_type_id', $order->room_type_id)
+                ->where('date', $date->format('Y-m-d'))
+                ->first();
+
+            if (!$inventory || $inventory->is_closed || $inventory->available_quantity < $required) {
+                Log::info('携程预下单支付：库存未达充裕条件，不自动接单', [
+                    'order_id' => $order->id,
+                    'date' => $date->format('Y-m-d'),
+                    'available_quantity' => $inventory->available_quantity ?? null,
+                    'required' => $required,
+                ]);
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
