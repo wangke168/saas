@@ -18,6 +18,7 @@ use App\Models\Res\ResHotel;
 use App\Models\Res\ResRoomType;
 use App\Models\Res\ResHotelDailyStock;
 use App\Services\OTA\OtaConfigResolver;
+use App\Services\OTA\NotificationFactory;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\Resource\ResourceServiceFactory;
@@ -947,7 +948,12 @@ class CtripController extends Controller
                 
                 try {
                     if ($sufficient) {
-                        // 库存充裕：自动接单，不创建异常单
+                        // 库存充裕：先通知携程确认结果，再更新本地状态为已确认；如通知失败则降级为人工接单
+                        $notification = NotificationFactory::create($order);
+                        if ($notification) {
+                            $notification->notifyOrderConfirmed($order);
+                        }
+
                         $this->orderService->updateOrderStatus(
                             $order,
                             OrderStatus::CONFIRMED,
@@ -956,7 +962,7 @@ class CtripController extends Controller
                         $order->update(['resource_order_no' => 'AUTO_MANUAL_' . $order->id]);
                         \App\Jobs\NotifyOrderAutoConfirmedJob::dispatch($order);
 
-                        Log::info('携程预下单支付：非系统直连，库存充裕已自动接单', [
+                        Log::info('携程预下单支付：非系统直连，库存充裕已自动接单并通知携程', [
                             'order_id' => $order->id,
                         ]);
                     } else {
