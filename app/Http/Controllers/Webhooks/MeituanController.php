@@ -19,6 +19,7 @@ use App\Models\Res\ResHotelDailyStock;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\OTA\OtaConfigResolver;
+use App\Services\OTA\OtaAutoAcceptConfigService;
 use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use App\Services\Resource\ResourceServiceFactory;
@@ -39,7 +40,8 @@ class MeituanController extends Controller
         protected OrderProcessorService $orderProcessorService,
         protected InventoryService $inventoryService,
         protected OrderOperationService $orderOperationService,
-        protected OtaConfigResolver $otaConfigResolver
+        protected OtaConfigResolver $otaConfigResolver,
+        protected OtaAutoAcceptConfigService $otaAutoAcceptConfigService,
     ) {}
 
     /**
@@ -1060,8 +1062,9 @@ class MeituanController extends Controller
                 ]);
             } else {
                 // 非系统直连：若启用「库存充裕时自动接单」且满足条件，则自动接单并通知美团 200；否则等待人工接单
-                $autoAcceptEnabled = filter_var(env('MEITUAN_AUTO_ACCEPT_WHEN_SUFFICIENT', true), FILTER_VALIDATE_BOOLEAN);
-                $sufficient = $autoAcceptEnabled && $this->isInventorySufficientForAutoAccept($order);
+                $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenicSpot?->id;
+                $autoAcceptEnabled = $this->otaAutoAcceptConfigService->isAutoAcceptEnabled($scenicSpotId, OtaPlatform::MEITUAN);
+                $sufficient = $autoAcceptEnabled && $this->isInventorySufficientForAutoAccept($order, $scenicSpotId);
 
                 if ($sufficient) {
                     try {
@@ -2126,9 +2129,9 @@ class MeituanController extends Controller
      * 判断订单是否满足「库存充裕」条件，用于非直连订单是否可自动接单（方案 D）
      * 条件：订单占用日期范围内，每天该房型可用数量 − 本单数量 ≥ 余量阈值（默认 5）
      */
-    protected function isInventorySufficientForAutoAccept(Order $order): bool
+    protected function isInventorySufficientForAutoAccept(Order $order, ?int $scenicSpotId = null): bool
     {
-        $buffer = (int) env('MEITUAN_AUTO_ACCEPT_STOCK_BUFFER', 5);
+        $buffer = $this->otaAutoAcceptConfigService->getAutoAcceptBuffer($scenicSpotId, OtaPlatform::MEITUAN);
         $stayDays = $order->product?->stay_days ?: 1;
         $dates = $this->inventoryService->getDateRange(
             $order->check_in_date->format('Y-m-d'),

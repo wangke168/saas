@@ -18,6 +18,7 @@ use App\Models\Res\ResHotel;
 use App\Models\Res\ResRoomType;
 use App\Models\Res\ResHotelDailyStock;
 use App\Services\OTA\OtaConfigResolver;
+use App\Services\OTA\OtaAutoAcceptConfigService;
 use App\Services\OTA\NotificationFactory;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
@@ -35,7 +36,8 @@ class CtripController extends Controller
     public function __construct(
         protected OrderService $orderService,
         protected OrderProcessorService $orderProcessorService,
-        protected OtaConfigResolver $otaConfigResolver
+        protected OtaConfigResolver $otaConfigResolver,
+        protected OtaAutoAcceptConfigService $otaAutoAcceptConfigService,
     ) {}
 
     /**
@@ -936,8 +938,9 @@ class CtripController extends Controller
                 ]);
             } else {
                 // 非系统直连：若启用「库存充裕时自动接单」且满足条件，则自动接单；否则创建异常订单等待人工处理
-                $autoAcceptEnabled = filter_var(env('CTRIP_AUTO_ACCEPT_WHEN_SUFFICIENT', true), FILTER_VALIDATE_BOOLEAN);
-                $sufficient = $autoAcceptEnabled && $this->isInventorySufficientForAutoAccept($order);
+                $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel->scenicSpot?->id;
+                $autoAcceptEnabled = $this->otaAutoAcceptConfigService->isAutoAcceptEnabled($scenicSpotId, OtaPlatform::CTRIP);
+                $sufficient = $autoAcceptEnabled && $this->isInventorySufficientForAutoAccept($order, $scenicSpotId);
 
                 Log::info('携程预下单支付：非系统直连处理分支', [
                     'order_id' => $order->id,
@@ -1028,9 +1031,9 @@ class CtripController extends Controller
      * 判断订单是否满足「库存充裕」条件，用于非直连订单是否可自动接单（方案 A）
      * 条件：订单占用日期范围内，每天该房型可用数量 − 本单数量 ≥ 余量阈值（默认 5）
      */
-    protected function isInventorySufficientForAutoAccept(Order $order): bool
+    protected function isInventorySufficientForAutoAccept(Order $order, ?int $scenicSpotId = null): bool
     {
-        $buffer = (int) env('CTRIP_AUTO_ACCEPT_STOCK_BUFFER', 5);
+        $buffer = $this->otaAutoAcceptConfigService->getAutoAcceptBuffer($scenicSpotId, OtaPlatform::CTRIP);
         $stayDays = $order->product?->stay_days ?: 1;
         $required = $order->room_count + $buffer;
 
