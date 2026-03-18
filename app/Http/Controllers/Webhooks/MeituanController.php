@@ -2618,7 +2618,8 @@ class MeituanController extends Controller
                 return $this->errorResponse(500, '美团配置不存在', null, $encryptResponse);
             }
 
-            // 获取partnerId（用于错误响应）
+            // 获取partnerId（用于错误响应）。注意：这里的 client 是平台级配置，partnerId 可能是 .env 默认值。
+            // 多景区场景下，响应里应返回“本次请求的 PartnerId”（header/body 解析值），而不是 .env 默认值。
             $partnerId = $client->getPartnerId();
             
             // 检查请求是否加密，决定响应是否加密
@@ -2660,6 +2661,11 @@ class MeituanController extends Controller
             $authFailResponse = $this->resolveScenicSpotContext($request, $data, $encryptResponse);
             if ($authFailResponse) {
                 return $authFailResponse;
+            }
+
+            // 鉴权通过后，使用“本次请求解析出的 PartnerId”覆盖响应 partnerId，保证与美团请求一致
+            if ($this->currentRequestPartnerId !== null) {
+                $partnerId = $this->currentRequestPartnerId;
             }
 
             $body = $data['body'] ?? $data;
@@ -2827,7 +2833,8 @@ class MeituanController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            $partnerId = $this->getClient() ? $this->getClient()->getPartnerId() : null;
+            // 尽量返回本次请求的 PartnerId（若已解析），否则回退平台默认
+            $partnerId = $this->currentRequestPartnerId ?? ($this->getClient() ? $this->getClient()->getPartnerId() : null);
             // 检查请求是否加密，决定错误响应是否加密
             $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
             return $this->errorResponse(599, '系统处理异常', $partnerId, $encryptResponse);
