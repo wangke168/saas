@@ -34,6 +34,16 @@ use Illuminate\Support\Facades\Redis;
 class MeituanController extends Controller
 {
     protected ?MeituanClient $client = null;
+    /**
+     * 当前请求解析出的景区ID（由请求 PartnerId 映射得到）
+     * 说明：Controller 实例按请求创建，因此该属性可作为请求级上下文使用。
+     */
+    protected ?int $currentScenicSpotId = null;
+
+    /**
+     * 当前请求解析出的 PartnerId（优先来自请求本身，而非 .env）
+     */
+    protected ?int $currentRequestPartnerId = null;
 
     public function __construct(
         protected OrderService $orderService,
@@ -57,6 +67,69 @@ class MeituanController extends Controller
             $this->client = new MeituanClient($config);
         }
         return $this->client;
+    }
+
+    /**
+     * 从请求中解析 PartnerId，并映射到景区ID，用于鉴权与数据隔离。
+     *
+     * - PartnerId 优先取 Header；若解密后的数据存在 partnerId，则做强一致校验
+     * - PartnerId 必须存在于 scenic_spot_ota_accounts（美团平台）映射中，否则拒绝
+     *
+     * @param array|null $decryptedData 解密后的数组（可选）
+     * @param bool $encryptResponse 当前接口响应是否需要加密（用于错误响应）
+     */
+    protected function resolveScenicSpotContext(Request $request, ?array $decryptedData = null, bool $encryptResponse = false): ?Response
+    {
+        $headerPartnerId = trim((string) $request->header('PartnerId', ''));
+        $bodyPartnerId = null;
+        if (is_array($decryptedData)) {
+            $bodyPartnerIdValue = $decryptedData['partnerId'] ?? null;
+            if ($bodyPartnerIdValue === null && isset($decryptedData['body']) && is_array($decryptedData['body'])) {
+                $bodyPartnerIdValue = $decryptedData['body']['partnerId'] ?? null;
+            }
+            if ($bodyPartnerIdValue !== null && $bodyPartnerIdValue !== '') {
+                $bodyPartnerId = trim((string) $bodyPartnerIdValue);
+            }
+        }
+
+        $partnerId = $headerPartnerId !== '' ? $headerPartnerId : ($bodyPartnerId ?? '');
+        if ($partnerId === '') {
+            Log::warning('美团请求鉴权失败：PartnerId缺失', [
+                'path' => $request->path(),
+            ]);
+            return $this->errorResponse(403, 'PartnerId缺失', null, $encryptResponse);
+        }
+
+        if ($headerPartnerId !== '' && $bodyPartnerId !== null && $headerPartnerId !== $bodyPartnerId) {
+            Log::warning('美团请求鉴权失败：PartnerId不一致', [
+                'path' => $request->path(),
+                'header_partner_id' => $headerPartnerId,
+                'body_partner_id' => $bodyPartnerId,
+            ]);
+            return $this->errorResponse(403, 'PartnerId不一致', intval($headerPartnerId), $encryptResponse);
+        }
+
+        $meituanPlatformId = $this->otaConfigResolver->getMeituanPlatformId();
+        if ($meituanPlatformId === null) {
+            Log::error('美团请求鉴权失败：美团平台配置不存在', [
+                'path' => $request->path(),
+                'partner_id' => $partnerId,
+            ]);
+            return $this->errorResponse(500, 'OTA平台配置不存在', intval($partnerId), $encryptResponse);
+        }
+
+        $scenicSpotId = $this->otaConfigResolver->getScenicSpotIdByAccount($meituanPlatformId, (string) $partnerId);
+        if ($scenicSpotId === null) {
+            Log::warning('美团请求鉴权失败：PartnerId未授权', [
+                'path' => $request->path(),
+                'partner_id' => $partnerId,
+            ]);
+            return $this->errorResponse(403, 'PartnerId未授权', intval($partnerId), $encryptResponse);
+        }
+
+        $this->currentScenicSpotId = $scenicSpotId;
+        $this->currentRequestPartnerId = intval($partnerId);
+        return null;
     }
 
     /**
@@ -118,6 +191,12 @@ class MeituanController extends Controller
                     'decrypted_body' => $decryptedBody,
                 ]);
                 return $this->errorResponse(400, '请求数据格式错误', $partnerId);
+            }
+
+            // PartnerId → 景区鉴权（解密后进行强一致校验）
+            $authFailResponse = $this->resolveScenicSpotContext($request, $data, false);
+            if ($authFailResponse) {
+                return $authFailResponse;
             }
 
             // 根据请求路径判断接口类型
@@ -461,13 +540,21 @@ class MeituanController extends Controller
                     'search_code_length' => strlen($searchCode),
                 ]);
                 
-                // 先精确匹配
-                $pkgProduct = PkgProduct::where('product_code', $searchCode)->first();
+                // 先精确匹配（按景区隔离）
+                $pkgProductQuery = PkgProduct::where('product_code', $searchCode);
+                if ($this->currentScenicSpotId !== null) {
+                    $pkgProductQuery->where('scenic_spot_id', $this->currentScenicSpotId);
+                }
+                $pkgProduct = $pkgProductQuery->first();
                 
                 // 如果精确匹配失败，尝试查找相似的产品编码（用于调试）
                 if (!$pkgProduct) {
                     // 查找所有包含相似字符的打包产品（用于调试）
-                    $similarProducts = PkgProduct::where('product_code', 'like', '%' . substr($searchCode, 0, 10) . '%')
+                    $similarProductsQuery = PkgProduct::where('product_code', 'like', '%' . substr($searchCode, 0, 10) . '%');
+                    if ($this->currentScenicSpotId !== null) {
+                        $similarProductsQuery->where('scenic_spot_id', $this->currentScenicSpotId);
+                    }
+                    $similarProducts = $similarProductsQuery
                         ->limit(5)
                         ->pluck('product_code', 'id')
                         ->toArray();
@@ -573,9 +660,14 @@ class MeituanController extends Controller
                 }
 
                 // 检查是否已存在打包订单（防止重复）
-                $existingPkgOrder = PkgOrder::where('ota_order_no', (string)$orderId)
-                    ->where('ota_platform_id', $otaPlatform->id)
-                    ->first();
+                $existingPkgOrderQuery = PkgOrder::where('ota_order_no', (string)$orderId)
+                    ->where('ota_platform_id', $otaPlatform->id);
+                if ($this->currentScenicSpotId !== null) {
+                    $existingPkgOrderQuery->whereHas('product', function ($q) {
+                        $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                    });
+                }
+                $existingPkgOrder = $existingPkgOrderQuery->first();
 
                 if ($existingPkgOrder) {
                     // 已存在，返回成功（幂等性）
@@ -720,7 +812,11 @@ class MeituanController extends Controller
             } else {
                 // ========== 常规产品处理逻辑（完全保留原有逻辑） ==========
                 // 根据产品编码查找产品
-                $product = \App\Models\Product::where('code', $partnerDealId)->first();
+                $productQuery = \App\Models\Product::where('code', $partnerDealId);
+                if ($this->currentScenicSpotId !== null) {
+                    $productQuery->where('scenic_spot_id', $this->currentScenicSpotId);
+                }
+                $product = $productQuery->first();
                 if (!$product) {
                     DB::rollBack();
                     Log::error('美团订单创建V2：产品不存在', [
@@ -794,9 +890,14 @@ class MeituanController extends Controller
                 }
 
                 // 检查是否已存在订单（防止重复）
-                $existingOrder = Order::where('ota_order_no', (string)$orderId)
-                    ->where('ota_platform_id', $otaPlatform->id)
-                    ->first();
+                $existingOrderQuery = Order::where('ota_order_no', (string)$orderId)
+                    ->where('ota_platform_id', $otaPlatform->id);
+                if ($this->currentScenicSpotId !== null) {
+                    $existingOrderQuery->whereHas('product', function ($q) {
+                        $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                    });
+                }
+                $existingOrder = $existingOrderQuery->first();
 
                 if ($existingOrder) {
                     // 已存在，返回成功（幂等性）
@@ -1006,7 +1107,13 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
-            $order = Order::where('ota_order_no', (string)$orderId)->first();
+            $orderQuery = Order::where('ota_order_no', (string)$orderId);
+            if ($this->currentScenicSpotId !== null) {
+                $orderQuery->whereHas('product', function ($q) {
+                    $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                });
+            }
+            $order = $orderQuery->first();
 
             if (!$order) {
                 return $this->errorResponse(400, '订单不存在', $partnerId);
@@ -1279,9 +1386,14 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, $encryptResponse);
             }
 
-            $order = Order::where('ota_order_no', (string)$orderId)
-                ->with(['product', 'hotel', 'roomType', 'logs'])
-                ->first();
+            $orderQuery = Order::where('ota_order_no', (string)$orderId)
+                ->with(['product', 'hotel', 'roomType', 'logs']);
+            if ($this->currentScenicSpotId !== null) {
+                $orderQuery->whereHas('product', function ($q) {
+                    $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                });
+            }
+            $order = $orderQuery->first();
 
             if (!$order) {
                 Log::warning('美团订单查询：订单不存在', [
@@ -1564,7 +1676,13 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId);
             }
 
-            $order = Order::where('ota_order_no', (string)$orderId)->first();
+            $orderQuery = Order::where('ota_order_no', (string)$orderId);
+            if ($this->currentScenicSpotId !== null) {
+                $orderQuery->whereHas('product', function ($q) {
+                    $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                });
+            }
+            $order = $orderQuery->first();
 
             if (!$order) {
                 return $this->errorResponse(400, '订单不存在', $partnerId);
@@ -1755,7 +1873,13 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, $encryptResponse);
             }
 
-            $order = Order::where('ota_order_no', (string)$orderId)->first();
+            $orderQuery = Order::where('ota_order_no', (string)$orderId);
+            if ($this->currentScenicSpotId !== null) {
+                $orderQuery->whereHas('product', function ($q) {
+                    $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                });
+            }
+            $order = $orderQuery->first();
 
             if (!$order) {
                 Log::warning('美团已退款消息：订单不存在', [
@@ -1922,7 +2046,13 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '订单号(orderId)为空', $partnerId, $encryptResponse);
             }
 
-            $order = Order::where('ota_order_no', (string)$orderId)->first();
+            $orderQuery = Order::where('ota_order_no', (string)$orderId);
+            if ($this->currentScenicSpotId !== null) {
+                $orderQuery->whereHas('product', function ($q) {
+                    $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                });
+            }
+            $order = $orderQuery->first();
 
             if (!$order) {
                 return $this->errorResponse(400, '订单不存在', $partnerId, $encryptResponse);
@@ -2365,6 +2495,12 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '请求数据格式错误');
             }
 
+            // PartnerId → 景区鉴权（价格日历接口响应不加密）
+            $authFailResponse = $this->resolveScenicSpotContext($request, $data, false);
+            if ($authFailResponse) {
+                return $authFailResponse;
+            }
+
             $body = $data['body'] ?? $data;
             $partnerDealId = $body['partnerDealId'] ?? '';
             $startTime = $body['startTime'] ?? '';
@@ -2375,7 +2511,11 @@ class MeituanController extends Controller
             }
 
             // 查找产品
-            $product = \App\Models\Product::where('code', $partnerDealId)->first();
+            $productQuery = \App\Models\Product::where('code', $partnerDealId);
+            if ($this->currentScenicSpotId !== null) {
+                $productQuery->where('scenic_spot_id', $this->currentScenicSpotId);
+            }
+            $product = $productQuery->first();
             if (!$product) {
                 return $this->errorResponse(505, '产品不存在');
             }
@@ -2516,6 +2656,12 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '请求数据格式错误', $partnerId, $encryptResponse);
             }
 
+            // PartnerId → 景区鉴权（按请求加密状态返回错误响应）
+            $authFailResponse = $this->resolveScenicSpotContext($request, $data, $encryptResponse);
+            if ($authFailResponse) {
+                return $authFailResponse;
+            }
+
             $body = $data['body'] ?? $data;
             $partnerDealId = $body['partnerDealId'] ?? '';
             $startTime = $body['startTime'] ?? '';
@@ -2532,13 +2678,21 @@ class MeituanController extends Controller
             // 查找产品
             if ($isPkgProduct) {
                 // 打包产品：查找 PkgProduct
-                $pkgProduct = \App\Models\Pkg\PkgProduct::where('product_code', $partnerDealId)->first();
+                $pkgProductQuery = \App\Models\Pkg\PkgProduct::where('product_code', $partnerDealId);
+                if ($this->currentScenicSpotId !== null) {
+                    $pkgProductQuery->where('scenic_spot_id', $this->currentScenicSpotId);
+                }
+                $pkgProduct = $pkgProductQuery->first();
                 if (!$pkgProduct) {
                     return $this->errorResponse(505, '打包产品不存在', $partnerId, $encryptResponse);
                 }
             } else {
                 // 常规产品：查找 Product
-                $product = \App\Models\Product::where('code', $partnerDealId)->first();
+                $productQuery = \App\Models\Product::where('code', $partnerDealId);
+                if ($this->currentScenicSpotId !== null) {
+                    $productQuery->where('scenic_spot_id', $this->currentScenicSpotId);
+                }
+                $product = $productQuery->first();
                 if (!$product) {
                     return $this->errorResponse(505, '产品不存在', $partnerId, $encryptResponse);
                 }
