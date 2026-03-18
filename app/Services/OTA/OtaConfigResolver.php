@@ -38,11 +38,14 @@ class OtaConfigResolver
      */
     public function getPlatformConfigForMeituan(): ?OtaConfig
     {
-        if (!env('MEITUAN_PARTNER_ID') || !env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
+        // 注意：PartnerId 是景区级概念，不强依赖平台级 .env 配置；
+        // 平台级配置主要用于 Webhook 验签/加解密（密钥级别共用）。
+        if (!env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
             return null;
         }
         $config = new OtaConfig();
-        $config->account = env('MEITUAN_PARTNER_ID');
+        // 若未配置平台级 PartnerId，则置为 0；实际业务 PartnerId 以景区映射/请求为准
+        $config->account = env('MEITUAN_PARTNER_ID', 0);
         $config->secret_key = env('MEITUAN_APP_KEY');
         $config->aes_key = env('MEITUAN_APP_SECRET');
         $config->aes_iv = env('MEITUAN_AES_KEY', '');
