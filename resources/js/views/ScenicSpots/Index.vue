@@ -41,11 +41,12 @@
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="360" fixed="right">
+                <el-table-column label="操作" width="420" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" @click="handleEdit(row)">编辑</el-button>
                         <el-button size="small" type="info" @click="handleConfigResource(row)">配置资源方</el-button>
                         <el-button size="small" type="warning" @click="handleConfigOtaAccount(row)">OTA账号</el-button>
+                        <el-button size="small" type="success" @click="handleConfigAutoAccept(row)">自动接单</el-button>
                         <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
                     </template>
                 </el-table-column>
@@ -474,6 +475,102 @@
                 <el-form-item>
                     <el-button size="small" @click="cancelOtaAccountForm">取消</el-button>
                     <el-button size="small" type="primary" @click="submitOtaAccountForm" :loading="otaAccountSubmitting">保存</el-button>
+                </el-form-item>
+            </el-form>
+        </el-dialog>
+
+        <!-- 自动接单配置对话框 -->
+        <el-dialog
+            v-model="autoAcceptDialogVisible"
+            :title="`自动接单配置 - ${currentAutoAcceptScenicSpot?.name || ''}`"
+            width="600px"
+            @close="closeAutoAcceptDialog"
+        >
+            <el-alert
+                title="说明"
+                type="info"
+                :closable="false"
+                style="margin-bottom: 16px;"
+            >
+                配置该景区在携程/美团等平台的自动接单策略。当库存充裕（当前库存 >= 订单数量 + 缓冲值）时，系统将自动接单。
+            </el-alert>
+            <el-table :data="autoAcceptList" v-loading="autoAcceptLoading" border size="small">
+                <el-table-column prop="ota_platform" label="平台" width="100">
+                    <template #default="{ row }">
+                        {{ row.ota_platform?.name || row.ota_platform?.code || '-' }}
+                    </template>
+                </el-table-column>
+                <el-table-column prop="auto_accept_when_sufficient" label="是否启用" width="100">
+                    <template #default="{ row }">
+                        <el-tag :type="row.auto_accept_when_sufficient ? 'success' : 'info'">
+                            {{ row.auto_accept_when_sufficient ? '启用' : '禁用' }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="auto_accept_stock_buffer" label="库存缓冲值" width="100">
+                    <template #default="{ row }">
+                        {{ row.auto_accept_stock_buffer ?? 5 }}
+                    </template>
+                </el-table-column>
+                <el-table-column prop="is_active" label="状态" width="80">
+                    <template #default="{ row }">
+                        <el-tag :type="row.is_active ? 'success' : 'danger'">
+                            {{ row.is_active ? '激活' : '未激活' }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="120" fixed="right">
+                    <template #default="{ row }">
+                        <el-button size="small" link type="primary" @click="handleEditAutoAccept(row)">编辑</el-button>
+                        <el-button size="small" link type="danger" @click="handleDeleteAutoAccept(row)">删除</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <div style="margin-top: 12px;">
+                <el-button size="small" type="primary" @click="showAddAutoAcceptForm">添加配置</el-button>
+            </div>
+            <!-- 添加/编辑 自动接单配置表单 -->
+            <el-form
+                v-if="autoAcceptFormVisible"
+                ref="autoAcceptFormRef"
+                :model="autoAcceptForm"
+                :rules="autoAcceptFormRules"
+                label-width="100px"
+                style="margin-top: 16px; padding: 12px; background: var(--el-fill-color-light); border-radius: 4px;"
+            >
+                <el-form-item label="平台" prop="ota_platform_id">
+                    <el-select
+                        v-model="autoAcceptForm.ota_platform_id"
+                        placeholder="请选择平台"
+                        style="width: 100%"
+                        :disabled="!!autoAcceptEditingId"
+                    >
+                        <el-option
+                            v-for="p in otaPlatformsForAutoAccept"
+                            :key="p.id"
+                            :label="p.name"
+                            :value="p.id"
+                        />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="是否启用" prop="auto_accept_when_sufficient">
+                    <el-switch v-model="autoAcceptForm.auto_accept_when_sufficient" />
+                </el-form-item>
+                <el-form-item label="库存缓冲值" prop="auto_accept_stock_buffer">
+                    <el-input-number
+                        v-model="autoAcceptForm.auto_accept_stock_buffer"
+                        :min="0"
+                        :max="9999"
+                        placeholder="库存充裕的判定缓冲值"
+                    />
+                    <span style="margin-left: 8px; color: #909399; font-size: 12px;">当前库存 >= 订单数量 + 此值时自动接单</span>
+                </el-form-item>
+                <el-form-item label="是否激活" prop="is_active">
+                    <el-switch v-model="autoAcceptForm.is_active" />
+                </el-form-item>
+                <el-form-item>
+                    <el-button size="small" @click="cancelAutoAcceptForm">取消</el-button>
+                    <el-button size="small" type="primary" @click="submitAutoAcceptForm" :loading="autoAcceptSubmitting">保存</el-button>
                 </el-form-item>
             </el-form>
         </el-dialog>
@@ -1189,6 +1286,130 @@ const closeOtaAccountDialog = () => {
     otaAccountList.value = [];
     otaAccountFormVisible.value = false;
     otaAccountFormRef.value?.resetFields();
+};
+
+// ---------- 自动接单配置 ----------
+const autoAcceptDialogVisible = ref(false);
+const currentAutoAcceptScenicSpot = ref(null);
+const autoAcceptList = ref([]);
+const autoAcceptLoading = ref(false);
+const autoAcceptFormVisible = ref(false);
+const autoAcceptFormRef = ref(null);
+const autoAcceptSubmitting = ref(false);
+const autoAcceptEditingId = ref(null);
+const autoAcceptForm = ref({
+    ota_platform_id: null,
+    auto_accept_when_sufficient: true,
+    auto_accept_stock_buffer: 5,
+    is_active: true,
+});
+const autoAcceptFormRules = {
+    ota_platform_id: [{ required: true, message: '请选择平台', trigger: 'change' }],
+    auto_accept_stock_buffer: [{ required: true, message: '请输入缓冲值', trigger: 'blur' }],
+};
+
+// 可用于添加自动接单配置的平台（排除已配置的）
+const otaPlatformsForAutoAccept = computed(() => {
+    const configuredIds = autoAcceptList.value.map((item) => item.ota_platform_id);
+    return (otaPlatforms.value || []).filter((p) => !configuredIds.includes(p.id));
+});
+
+const handleConfigAutoAccept = async (row) => {
+    currentAutoAcceptScenicSpot.value = row;
+    autoAcceptDialogVisible.value = true;
+    autoAcceptFormVisible.value = false;
+    autoAcceptEditingId.value = null;
+    await fetchAutoAcceptList();
+};
+
+const fetchAutoAcceptList = async () => {
+    if (!currentAutoAcceptScenicSpot.value?.id) return;
+    autoAcceptLoading.value = true;
+    try {
+        const res = await axios.get('/admin/scenic-spot-ota-auto-accept', {
+            params: { scenic_spot_id: currentAutoAcceptScenicSpot.value.id },
+        });
+        autoAcceptList.value = res.data.data || [];
+    } catch (e) {
+        ElMessage.error('获取自动接单配置列表失败');
+        console.error(e);
+    } finally {
+        autoAcceptLoading.value = false;
+    }
+};
+
+const showAddAutoAcceptForm = () => {
+    autoAcceptEditingId.value = null;
+    autoAcceptForm.value = {
+        ota_platform_id: null,
+        auto_accept_when_sufficient: true,
+        auto_accept_stock_buffer: 5,
+        is_active: true,
+    };
+    autoAcceptFormVisible.value = true;
+};
+
+const handleEditAutoAccept = (row) => {
+    autoAcceptEditingId.value = row.id;
+    autoAcceptForm.value = {
+        ota_platform_id: row.ota_platform_id,
+        auto_accept_when_sufficient: row.auto_accept_when_sufficient,
+        auto_accept_stock_buffer: row.auto_accept_stock_buffer ?? 5,
+        is_active: row.is_active,
+    };
+    autoAcceptFormVisible.value = true;
+};
+
+const cancelAutoAcceptForm = () => {
+    autoAcceptFormVisible.value = false;
+    autoAcceptFormRef.value?.resetFields();
+};
+
+const submitAutoAcceptForm = async () => {
+    if (!autoAcceptFormRef.value) return;
+    await autoAcceptFormRef.value.validate(async (valid) => {
+        if (!valid) return;
+        autoAcceptSubmitting.value = true;
+        try {
+            await axios.post('/admin/scenic-spot-ota-auto-accept', {
+                scenic_spot_id: currentAutoAcceptScenicSpot.value.id,
+                ota_platform_id: autoAcceptForm.value.ota_platform_id,
+                auto_accept_when_sufficient: autoAcceptForm.value.auto_accept_when_sufficient,
+                auto_accept_stock_buffer: autoAcceptForm.value.auto_accept_stock_buffer,
+                is_active: autoAcceptForm.value.is_active,
+            });
+            ElMessage.success(autoAcceptEditingId.value ? '更新成功' : '添加成功');
+            autoAcceptFormVisible.value = false;
+            await fetchAutoAcceptList();
+        } catch (e) {
+            const msg = e.response?.data?.message || '操作失败';
+            ElMessage.error(msg);
+        } finally {
+            autoAcceptSubmitting.value = false;
+        }
+    });
+};
+
+const handleDeleteAutoAccept = async (row) => {
+    try {
+        await ElMessageBox.confirm(`确定删除该景区在「${row.ota_platform?.name || row.ota_platform?.code}」的自动接单配置？`, '提示', {
+            type: 'warning',
+        });
+        await axios.delete(`/admin/scenic-spot-ota-auto-accept/${row.id}`);
+        ElMessage.success('已删除');
+        await fetchAutoAcceptList();
+    } catch (e) {
+        if (e !== 'cancel') {
+            ElMessage.error(e.response?.data?.message || '删除失败');
+        }
+    }
+};
+
+const closeAutoAcceptDialog = () => {
+    currentAutoAcceptScenicSpot.value = null;
+    autoAcceptList.value = [];
+    autoAcceptFormVisible.value = false;
+    autoAcceptFormRef.value?.resetFields();
 };
 
 onMounted(() => {

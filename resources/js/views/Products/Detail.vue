@@ -1447,11 +1447,19 @@ const handleSubmitPriceRule = async () => {
                 if (priceRuleForm.value.dateRange && priceRuleForm.value.dateRange.length === 2) {
                     data.start_date = priceRuleForm.value.dateRange[0];
                     data.end_date = priceRuleForm.value.dateRange[1];
+                } else {
+                    // 显式清空：避免编辑时后端不更新旧的日期范围
+                    data.start_date = null;
+                    data.end_date = null;
                 }
 
                 // 周几（可选）
-                if (priceRuleForm.value.weekdays && priceRuleForm.value.weekdays.length > 0) {
-                    data.weekdays = priceRuleForm.value.weekdays.join(',');
+                const weekdays = priceRuleForm.value.weekdays || [];
+                if (weekdays.length > 0) {
+                    data.weekdays = weekdays.join(',');
+                } else {
+                    // 显式清空：避免编辑时后端不更新旧的周几选择
+                    data.weekdays = null;
                 }
 
                 if (editingPriceRuleId.value) {

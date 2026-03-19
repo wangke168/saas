@@ -357,4 +357,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/{scenicSpotOtaAccount}', [\App\Http\Controllers\Admin\ScenicSpotOtaAccountController::class, 'update']);
         Route::delete('/{scenicSpotOtaAccount}', [\App\Http\Controllers\Admin\ScenicSpotOtaAccountController::class, 'destroy']);
     });
+
+    // 景区-OTA-自动接单配置（仅超级管理员）
+    Route::prefix('admin/scenic-spot-ota-auto-accept')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\ScenicSpotOtaAutoAcceptConfigController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\ScenicSpotOtaAutoAcceptConfigController::class, 'save']);
+        Route::delete('/{config}', [\App\Http\Controllers\Admin\ScenicSpotOtaAutoAcceptConfigController::class, 'destroy']);
+    });
 });

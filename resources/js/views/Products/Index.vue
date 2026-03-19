@@ -550,7 +550,8 @@ const handleEdit = async (row) => {
         order_mode: row.order_mode || null, // 订单处理方式
         order_provider_id: row.order_provider_id || null, // 订单下发服务商ID
         is_active: row.is_active,
-        is_realname: row.is_realname === true,
+        // 兼容后端 boolean/tinyint 返回的 1/0、'1'/'0'
+        is_realname: Number(row.is_realname) === 1,
         is_realname_touched: false,
         _is_realname_original_null: row.is_realname === null || row.is_realname === undefined,
     };

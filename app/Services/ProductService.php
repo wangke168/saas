@@ -66,9 +66,16 @@ class ProductService
             ];
         }
 
-        $marketPrice = $basePrice->market_price;
-        $settlementPrice = $basePrice->settlement_price;
-        $salePrice = $basePrice->sale_price;
+        // 基础价格来自价格日历（同一天同房型的基础市场/结算/销售价）
+        $baseMarketPrice = (float) $basePrice->market_price;
+        $baseSettlementPrice = (float) $basePrice->settlement_price;
+        $baseSalePrice = (float) $basePrice->sale_price;
+
+        // 口径A：同一天命中多条规则时，不叠加，只选 sale_price 调整后最高的那条规则
+        $bestMarketPrice = $baseMarketPrice;
+        $bestSettlementPrice = $baseSettlementPrice;
+        $bestSalePrice = $baseSalePrice;
+        $bestRuleId = null;
 
         // 应用加价规则
         $rules = PriceRule::where('product_id', $product->id)
@@ -117,16 +124,34 @@ class ProductService
             }
 
             if ($shouldApply) {
-                $marketPrice += $rule->market_price_adjustment;
-                $settlementPrice += $rule->settlement_price_adjustment;
-                $salePrice += $rule->sale_price_adjustment;
+                $candidateMarketPrice = $baseMarketPrice + (float) $rule->market_price_adjustment;
+                $candidateSettlementPrice = $baseSettlementPrice + (float) $rule->settlement_price_adjustment;
+                $candidateSalePrice = $baseSalePrice + (float) $rule->sale_price_adjustment;
+
+                // 用 2 位小数做比较，避免 decimal/float 精度导致的偶发抖动
+                $candidateSalePriceR = round($candidateSalePrice, 2);
+                $bestSalePriceR = round($bestSalePrice, 2);
+                $candidateMarketPriceR = round($candidateMarketPrice, 2);
+                $bestMarketPriceR = round($bestMarketPrice, 2);
+
+                $isBetter =
+                    $candidateSalePriceR > $bestSalePriceR
+                    || ($candidateSalePriceR === $bestSalePriceR && $candidateMarketPriceR > $bestMarketPriceR)
+                    || ($candidateSalePriceR === $bestSalePriceR && $candidateMarketPriceR === $bestMarketPriceR && ($bestRuleId === null || ($rule->id !== null && $rule->id > $bestRuleId)));
+
+                if ($isBetter) {
+                    $bestMarketPrice = $candidateMarketPrice;
+                    $bestSettlementPrice = $candidateSettlementPrice;
+                    $bestSalePrice = $candidateSalePrice;
+                    $bestRuleId = $rule->id;
+                }
             }
         }
 
         return [
-            'market_price' => max(0, $marketPrice),
-            'settlement_price' => max(0, $settlementPrice),
-            'sale_price' => max(0, $salePrice),
+            'market_price' => max(0, $bestMarketPrice),
+            'settlement_price' => max(0, $bestSettlementPrice),
+            'sale_price' => max(0, $bestSalePrice),
         ];
     }
 }

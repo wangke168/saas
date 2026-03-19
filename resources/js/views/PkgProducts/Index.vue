@@ -564,7 +564,8 @@ const handleEdit = async (row) => {
             stay_days: product.stay_days || 1,
             description: product.description || '',
             status: product.status,
-            is_realname: product.is_realname === true,
+            // 兼容后端 boolean/tinyint 返回的 1/0、'1'/'0'
+            is_realname: Number(product.is_realname) === 1,
             is_realname_touched: false,
             _is_realname_original_null: product.is_realname === null || product.is_realname === undefined,
             sale_start_date: formatDateForPicker(product.sale_start_date),
