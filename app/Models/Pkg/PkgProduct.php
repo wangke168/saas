@@ -25,6 +25,7 @@ class PkgProduct extends Model
         'status',
         'sale_start_date',
         'sale_end_date',
+        'is_realname',
     ];
 
     protected function casts(): array
@@ -32,6 +33,7 @@ class PkgProduct extends Model
         return [
             'stay_days' => 'integer',
             'status' => 'integer',
+            'is_realname' => 'integer',
             'sale_start_date' => 'date',
             'sale_end_date' => 'date',
         ];

@@ -171,6 +171,17 @@
                         <el-radio :label="0">禁用</el-radio>
                     </el-radio-group>
                 </el-form-item>
+                <el-form-item label="是否实名制" prop="is_realname">
+                    <el-switch
+                        v-model="form.is_realname"
+                        :active-value="true"
+                        :inactive-value="false"
+                        @change="form.is_realname_touched = true"
+                    />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        开启后，美团相关打包订单将按实名制返回/回传证件与凭证信息
+                    </span>
+                </el-form-item>
                 <el-form-item label="销售开始日期" prop="sale_start_date">
                     <el-date-picker
                         v-model="form.sale_start_date"
@@ -344,6 +355,10 @@ const form = ref({
     stay_days: 1,
     description: '',
     status: 1,
+    // 是否实名制：默认非实名；若编辑时原值为 null 且用户未触碰，则提交 null 保持兼容
+    is_realname: false,
+    is_realname_touched: false,
+    _is_realname_original_null: false,
     sale_start_date: null,
     sale_end_date: null,
     bundle_items: [],
@@ -549,6 +564,9 @@ const handleEdit = async (row) => {
             stay_days: product.stay_days || 1,
             description: product.description || '',
             status: product.status,
+            is_realname: product.is_realname === true,
+            is_realname_touched: false,
+            _is_realname_original_null: product.is_realname === null || product.is_realname === undefined,
             sale_start_date: formatDateForPicker(product.sale_start_date),
             sale_end_date: formatDateForPicker(product.sale_end_date),
             bundle_items: (product.bundle_items || []).map(item => ({
@@ -730,6 +748,7 @@ const handleSubmit = async () => {
             stay_days: form.value.stay_days,
             description: form.value.description || '',
             status: form.value.status,
+            is_realname: (form.value._is_realname_original_null && !form.value.is_realname_touched) ? null : form.value.is_realname,
             sale_start_date: form.value.sale_start_date || null,
             sale_end_date: form.value.sale_end_date || null,
             bundle_items: form.value.bundle_items.map(item => ({
@@ -771,6 +790,9 @@ const resetForm = () => {
         stay_days: 1,
         description: '',
         status: 1,
+        is_realname: false,
+        is_realname_touched: false,
+        _is_realname_original_null: false,
         sale_start_date: null,
         sale_end_date: null,
         bundle_items: [],

@@ -266,6 +266,17 @@
                 <el-form-item label="状态" prop="is_active">
                     <el-switch v-model="form.is_active" />
                 </el-form-item>
+                <el-form-item label="是否实名制" prop="is_realname">
+                    <el-switch
+                        v-model="form.is_realname"
+                        :active-value="true"
+                        :inactive-value="false"
+                        @change="form.is_realname_touched = true"
+                    />
+                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                        开启后，美团相关订单将按实名制返回/回传证件与凭证信息
+                    </span>
+                </el-form-item>
             </el-form>
             <template #footer>
                 <el-button @click="dialogVisible = false">取消</el-button>
@@ -318,6 +329,10 @@ const form = ref({
     order_mode: null, // 订单处理方式：null=使用景区配置, auto=系统直连, manual=手工接单, other=其他系统
     order_provider_id: null, // 订单下发服务商ID（当order_mode为other时使用）
     is_active: true,
+    // 是否实名制：默认非实名；若编辑时原值为 null 且用户未触碰，则提交 null 保持兼容
+    is_realname: false,
+    is_realname_touched: false,
+    _is_realname_original_null: false,
 });
 
 const validateSaleEndDate = (rule, value, callback) => {
@@ -535,6 +550,9 @@ const handleEdit = async (row) => {
         order_mode: row.order_mode || null, // 订单处理方式
         order_provider_id: row.order_provider_id || null, // 订单下发服务商ID
         is_active: row.is_active,
+        is_realname: row.is_realname === true,
+        is_realname_touched: false,
+        _is_realname_original_null: row.is_realname === null || row.is_realname === undefined,
     };
     
     // 加载该景区的服务商列表（编辑模式下保留当前的服务商ID）
@@ -559,6 +577,15 @@ const handleSubmit = async () => {
                     sale_start_date: form.value.sale_start_date || null,
                     sale_end_date: form.value.sale_end_date || null,
                 };
+                
+                // 如果编辑时原值为 null 且用户没动开关，则保持提交 null
+                if (form.value._is_realname_original_null && !form.value.is_realname_touched) {
+                    submitData.is_realname = null;
+                }
+
+                // 清理仅用于前端状态的字段，避免污染后端入参
+                delete submitData.is_realname_touched;
+                delete submitData._is_realname_original_null;
                 
                 // code 由系统自动生成，创建和更新时都不需要发送
                 delete submitData.code;
@@ -645,6 +672,9 @@ const resetForm = () => {
         order_mode: null, // 订单处理方式，null 表示使用景区配置
         order_provider_id: null, // 订单下发服务商ID
         is_active: true,
+        is_realname: false,
+        is_realname_touched: false,
+        _is_realname_original_null: false,
     };
     availableSoftwareProviders.value = [];
     if (formRef.value) {

@@ -86,6 +86,7 @@ class PkgProductController extends Controller
             'stay_days' => 'nullable|integer|min:1|max:30',
             'description' => 'nullable|string',
             'status' => 'nullable|integer|in:0,1',
+            'is_realname' => 'sometimes|nullable|boolean',
             'sale_start_date' => 'nullable|date',
             'sale_end_date' => 'nullable|date|after_or_equal:sale_start_date',
             'bundle_items' => 'required|array|min:1',
@@ -114,6 +115,7 @@ class PkgProductController extends Controller
                 'stay_days' => $validated['stay_days'] ?? 1,
                 'description' => $validated['description'] ?? null,
                 'status' => $validated['status'] ?? 1,
+                'is_realname' => $validated['is_realname'] ?? null,
             ]);
 
             // 创建门票关联
@@ -165,6 +167,7 @@ class PkgProductController extends Controller
             'stay_days' => 'nullable|integer|min:1|max:30',
             'description' => 'nullable|string',
             'status' => 'nullable|integer|in:0,1',
+            'is_realname' => 'sometimes|nullable|boolean',
             'sale_start_date' => 'nullable|date',
             'sale_end_date' => 'nullable|date|after_or_equal:sale_start_date',
             'bundle_items' => 'sometimes|array|min:1',

@@ -48,11 +48,7 @@ class MeituanNotificationService implements OtaNotificationInterface
             // {issueType, describe, partnerId, body: {...}}
             // 注意：body 中不应该包含 code 和 describe（这些是响应字段）
             // 使用客户端方法获取 partnerId，确保使用正确的配置
-            // 确定realNameType：如果订单有credential_list，强制设置为1
             $realNameType = $order->real_name_type ?? 0;
-            if (!empty($order->credential_list)) {
-                $realNameType = 1; // 有证件信息，强制设置为实名制
-            }
             
             $requestData = [
                 'partnerId' => $client->getPartnerId(),

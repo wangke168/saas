@@ -691,9 +691,21 @@ class MeituanController extends Controller
                 $contactPhone = $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '';
                 $contactEmail = $contactInfo['email'] ?? '';
 
-                // 处理实名制订单
-                if (!empty($credentialList)) {
-                    $realNameType = 1; // 有证件信息，强制设置为实名制
+                // 处理实名制订单：优先使用打包产品配置决定 realNameType
+                // - pkgProduct is_realname 未配置（null）：回退旧逻辑（有 credentialList 则推断为实名）
+                // - pkgProduct is_realname 配置为 1/0：强制覆盖
+                $pkgProductRealName = $pkgProduct->is_realname ?? null;
+                if ($pkgProductRealName !== null) {
+                    $realNameType = (int) ($pkgProductRealName ? 1 : 0);
+                } elseif (!empty($credentialList)) {
+                    // 回退：有证件信息则推断实名
+                    $realNameType = 1;
+                }
+
+                // A1：如最终要求实名制（realNameType=1），但无法拿到证件列表，则直接失败
+                if ($realNameType === 1 && empty($credentialList)) {
+                    DB::rollBack();
+                    return $this->errorResponse(400, '实名制订单缺少 credentialList', $partnerId, true);
                 }
                 
                 $credentialListData = null;
@@ -926,10 +938,21 @@ class MeituanController extends Controller
                 $contactPhone = $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '';
                 $contactEmail = $contactInfo['email'] ?? '';
 
-                // 处理实名制订单
-                // 如果请求中有credentialList，自动将realNameType设置为1（即使请求中realNameType=0）
-                if (!empty($credentialList)) {
-                    $realNameType = 1; // 有证件信息，强制设置为实名制
+                // 处理实名制订单：优先使用产品配置决定 realNameType
+                // - 产品 is_realname 未配置（null）：回退旧逻辑（有 credentialList 则推断为实名）
+                // - 产品 is_realname 配置为 1/0：强制覆盖
+                $productRealName = $product->is_realname ?? null;
+                if ($productRealName !== null) {
+                    $realNameType = (int) ($productRealName ? 1 : 0);
+                } elseif (!empty($credentialList)) {
+                    // 回退：有证件信息则推断实名
+                    $realNameType = 1;
+                }
+
+                // A1：如最终要求实名制（realNameType=1），但无法拿到证件列表，则直接失败
+                if ($realNameType === 1 && empty($credentialList)) {
+                    DB::rollBack();
+                    return $this->errorResponse(400, '实名制订单缺少 credentialList', $partnerId, true);
                 }
                 
                 $credentialListData = null;
@@ -1258,11 +1281,7 @@ class MeituanController extends Controller
      */
     protected function buildOrderPaySuccessResponse(Order $order, string $orderId, ?int $partnerId = null): Response
     {
-        // 确定realNameType：如果订单有credential_list，强制设置为1
         $realNameType = $order->real_name_type ?? 0;
-        if (!empty($order->credential_list)) {
-            $realNameType = 1; // 有证件信息，强制设置为实名制
-        }
         
         // 构建响应数据（根据美团文档，出票成功时body中不包含code和describe）
         $responseBody = [

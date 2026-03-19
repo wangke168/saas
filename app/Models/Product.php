@@ -68,6 +68,7 @@ class Product extends Model
         'sale_end_date',
         'order_mode',
         'order_provider_id',
+        'is_realname',
     ];
 
     protected function casts(): array
@@ -75,6 +76,7 @@ class Product extends Model
         return [
             'price_source' => PriceSource::class,
             'is_active' => 'boolean',
+            'is_realname' => 'integer',
             'sale_start_date' => 'date',
             'sale_end_date' => 'date',
         ];

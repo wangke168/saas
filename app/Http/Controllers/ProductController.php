@@ -161,6 +161,7 @@ class ProductController extends Controller
                 },
             ],
             'is_active' => 'boolean',
+            'is_realname' => 'sometimes|nullable|boolean',
         ]);
 
         // 权限控制：使用 Policy 检查创建权限（传入景区ID）
@@ -242,6 +243,7 @@ class ProductController extends Controller
                 },
             ],
             'is_active' => 'sometimes|boolean',
+            'is_realname' => 'sometimes|nullable|boolean',
         ]);
 
         // 权限控制：使用 Policy 检查更新权限（包括景区变更的权限）
