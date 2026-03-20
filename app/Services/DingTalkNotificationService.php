@@ -370,7 +370,9 @@ class DingTalkNotificationService
         $scenicSpotName = $order->product->scenicSpot->name ?? '未知景区';
         $productName = $order->product->name ?? '未知产品';
         $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
-        
+        $hotelName = $order->hotel->name ?? '未知酒店';
+        $roomTypeName = $order->roomType->name ?? '未知房型';
+
         // 价格单位：数据库存储已经是元，直接使用
         $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
         $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
@@ -380,7 +382,9 @@ class DingTalkNotificationService
         $message .= "**OTA平台：** {$otaPlatformName}\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
         $message .= "**景区：** {$scenicSpotName}\n";
-        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**产品：** {$productName}\n";
+        $message .= "**酒店：** {$hotelName}\n";
+        $message .= "**房型：** {$roomTypeName}\n\n";
         $message .= "**入住信息：**\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
@@ -408,6 +412,8 @@ class DingTalkNotificationService
         $scenicSpotName = $order->product->scenicSpot->name ?? '未知景区';
         $productName = $order->product->name ?? '未知产品';
         $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
+        $hotelName = $order->hotel->name ?? '未知酒店';
+        $roomTypeName = $order->roomType->name ?? '未知房型';
         $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
         $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
 
@@ -416,7 +422,9 @@ class DingTalkNotificationService
         $message .= "**OTA平台：** {$otaPlatformName}\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
         $message .= "**景区：** {$scenicSpotName}\n";
-        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**产品：** {$productName}\n";
+        $message .= "**酒店：** {$hotelName}\n";
+        $message .= "**房型：** {$roomTypeName}\n\n";
         $message .= "**入住信息：**\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
