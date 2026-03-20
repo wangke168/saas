@@ -379,17 +379,17 @@ class DingTalkNotificationService
 
         $message = "# 📦 新订单通知\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
-        $message .= "**OTA平台：** {$otaPlatformName}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
-        $message .= "**景区：** {$scenicSpotName}\n";
-        $message .= "**产品：** {$productName}\n";
-        $message .= "**酒店：** {$hotelName}\n";
+        $message .= "**景区：** {$scenicSpotName}\n\n";
+        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**酒店：** {$hotelName}\n\n";
         $message .= "**房型：** {$roomTypeName}\n\n";
         $message .= "**入住信息：**\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
         $message .= "- 房间数：{$order->room_count}\n";
-        $message .= "- 客人数量：{$order->guest_count}\n\n";
+    //    $message .= "- 客人数量：{$order->guest_count}\n\n";
         $message .= "**联系信息：**\n";
         $message .= "- 联系人：{$order->contact_name}\n";
         $message .= "- 联系电话：{$order->contact_phone}\n\n";
@@ -419,17 +419,17 @@ class DingTalkNotificationService
 
         $message = "# 📦 新订单通知（自动接单）\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
-        $message .= "**OTA平台：** {$otaPlatformName}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
-        $message .= "**景区：** {$scenicSpotName}\n";
-        $message .= "**产品：** {$productName}\n";
-        $message .= "**酒店：** {$hotelName}\n";
+        $message .= "**景区：** {$scenicSpotName}\n\n";
+        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**酒店：** {$hotelName}\n\n";
         $message .= "**房型：** {$roomTypeName}\n\n";
         $message .= "**入住信息：**\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
         $message .= "- 房间数：{$order->room_count}\n";
-        $message .= "- 客人数量：{$order->guest_count}\n\n";
+    //    $message .= "- 客人数量：{$order->guest_count}\n\n";
         $message .= "**联系信息：**\n";
         $message .= "- 联系人：{$order->contact_name}\n";
         $message .= "- 联系电话：{$order->contact_phone}\n\n";
