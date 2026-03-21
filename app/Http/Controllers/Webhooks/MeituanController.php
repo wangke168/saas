@@ -491,16 +491,25 @@ class MeituanController extends Controller
                 $contactInfo = !empty($contacts) ? $contacts[0] : [];
             }
             
-            // 处理游客信息中的证件信息（美团可能使用 credentials 字段）
-            if (empty($credentialList) && !empty($contactInfo['credentials'])) {
-                $credentials = $contactInfo['credentials'];
-                // 将 credentials 转换为 credentialList 格式
+            // 处理游客信息中的证件信息（美团可能使用 visitors[].credentials 字段）
+            // 注意：不能只取第一个游客，否则多人订单会只落1条证件信息
+            if (empty($credentialList) && !empty($contacts) && is_array($contacts)) {
                 $credentialList = [];
-                foreach ($credentials as $key => $credentialNo) {
-                    $credentialList[] = [
-                        'credentialType' => 0, // 默认身份证
-                        'credentialNo' => $credentialNo,
-                    ];
+                foreach ($contacts as $contact) {
+                    if (empty($contact['credentials']) || !is_array($contact['credentials'])) {
+                        continue;
+                    }
+
+                    foreach ($contact['credentials'] as $credentialType => $credentialNo) {
+                        if (empty($credentialNo)) {
+                            continue;
+                        }
+
+                        $credentialList[] = [
+                            'credentialType' => intval($credentialType),
+                            'credentialNo' => $credentialNo,
+                        ];
+                    }
                 }
             }
 
