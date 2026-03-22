@@ -388,7 +388,7 @@ class DingTalkNotificationService
         $message .= "**入住信息：**\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
-        $message .= "- 房间数：{$order->room_count}\n";
+        $message .= "- 房间数：{$order->room_count}\n\n";
     //    $message .= "- 客人数量：{$order->guest_count}\n\n";
         $message .= "**联系信息：**\n";
         $message .= "- 联系人：{$order->contact_name}\n";
@@ -428,7 +428,7 @@ class DingTalkNotificationService
         $message .= "**入住信息：**\n";
         $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
         $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
-        $message .= "- 房间数：{$order->room_count}\n";
+        $message .= "- 房间数：{$order->room_count}\n\n";
     //    $message .= "- 客人数量：{$order->guest_count}\n\n";
         $message .= "**联系信息：**\n";
         $message .= "- 联系人：{$order->contact_name}\n";
