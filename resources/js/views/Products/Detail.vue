@@ -324,6 +324,20 @@
                                     </div>
                                 </template>
                             </el-table-column>
+                            <el-table-column label="适用房型" min-width="260">
+                                <template #default="{ row }">
+                                    <div v-if="row.items && row.items.length > 0">
+                                        <div
+                                            v-for="item in row.items"
+                                            :key="`${row.id}-${item.hotel_id}-${item.room_type_id}`"
+                                            style="line-height: 1.8;"
+                                        >
+                                            {{ item.hotel?.name || '未知酒店' }} - {{ item.room_type?.name || '未知房型' }}
+                                        </div>
+                                    </div>
+                                    <span v-else style="color: #909399;">-</span>
+                                </template>
+                            </el-table-column>
                             <el-table-column prop="is_active" label="状态" width="100">
                                 <template #default="{ row }">
                                     <el-tag :type="row.is_active ? 'success' : 'danger'">
