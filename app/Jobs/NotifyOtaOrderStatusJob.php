@@ -3,8 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\OtaPlatform;
+use App\Enums\OrderStatus;
 use App\Models\Order;
+use App\Models\OrderLog;
 use App\Services\OTA\NotificationFactory;
+use App\Services\OTA\Notifications\MeituanNotificationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -70,6 +73,26 @@ class NotifyOtaOrderStatusJob implements ShouldQueue
         try {
             if ($this->order->status->value === 'confirmed') {
                 $notification->notifyOrderConfirmed($this->order);
+            } elseif ($this->order->status->value === OrderStatus::REJECTED->value) {
+                // 拒单通知：用于系统直连等异步场景兜底
+                // 原因信息不在订单字段中，尝试从订单日志 remark 中提取
+                if ($notification instanceof MeituanNotificationService) {
+                    $orderLog = OrderLog::query()
+                        ->where('order_id', $this->order->id)
+                        ->where('to_status', OrderStatus::REJECTED->value)
+                        ->latest('id')
+                        ->first();
+
+                    $reason = $orderLog?->remark ?? 'order rejected';
+                    $reason = str_replace(['人工操作：拒单 - ', '系统直连：资源方拒单 - '], '', $reason);
+
+                    $notification->notifyOrderRejected($this->order, $reason);
+                } else {
+                    Log::info('NotifyOtaOrderStatusJob: rejected 状态无需通知（非美团或未实现）', [
+                        'order_id' => $this->order->id,
+                        'platform' => $this->order->otaPlatform?->code?->value,
+                    ]);
+                }
             } elseif ($this->order->status->value === 'cancel_approved') {
                 $notification->notifyOrderRefunded($this->order);
             } elseif ($this->order->status->value === 'verified') {

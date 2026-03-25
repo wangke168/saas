@@ -356,6 +356,80 @@ class MeituanNotificationService implements OtaNotificationInterface
     }
 
     /**
+     * 通知订单拒单（预订失败）
+     * 使用美团订单出票通知接口：issueType=2 表示出票失败/拒单
+     */
+    public function notifyOrderRejected(Order $order, string $reason): void
+    {
+        Log::info('MeituanNotificationService: 准备通知美团订单拒单', [
+            'order_id' => $order->id,
+            'ota_order_no' => $order->ota_order_no,
+            'order_no' => $order->order_no,
+            'reason' => $reason,
+        ]);
+
+        try {
+            $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+            $client = $this->getClient($scenicSpotId);
+
+            $describe = trim($reason);
+            if ($describe === '') {
+                // 文档要求必须回传真实失败原因；这里兜底避免空字符串
+                $describe = 'order rejected';
+            }
+
+            $requestData = [
+                'partnerId' => $client->getPartnerId(),
+                'issueType' => 2, // 2=出票失败/拒单
+                'describe' => $describe,
+                'body' => [
+                    'orderId' => intval($order->ota_order_no),
+                    'partnerOrderId' => $order->order_no,
+                ],
+            ];
+
+            $result = $client->notifyOrderPay($requestData);
+
+            // 美团返回：200成功，300失败/处理中（沿用现有 pay notice 的兼容逻辑）
+            $code = isset($result['code']) ? (int)$result['code'] : null;
+            if ($code === 200) {
+                Log::info('MeituanNotificationService: 美团订单拒单通知成功', [
+                    'order_id' => $order->id,
+                    'result' => $result,
+                ]);
+            } elseif ($code === 300) {
+                Log::info('MeituanNotificationService: 美团订单拒单通知已接收（code=300），视为成功', [
+                    'order_id' => $order->id,
+                    'describe' => $result['describe'] ?? '',
+                ]);
+            } else {
+                $errorMessage = '美团订单拒单通知失败';
+                if (isset($result['describe'])) {
+                    $errorMessage .= '：' . $result['describe'];
+                } elseif (isset($result['message'])) {
+                    $errorMessage .= '：' . $result['message'];
+                } else {
+                    $errorMessage .= '：未知错误';
+                }
+
+                Log::error('MeituanNotificationService: 美团订单拒单通知失败', [
+                    'order_id' => $order->id,
+                    'reason' => $reason,
+                    'result' => $result,
+                ]);
+                throw new \Exception($errorMessage);
+            }
+        } catch (\Exception $e) {
+            Log::error('MeituanNotificationService: 美团订单拒单通知异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
      * 通知订单核销（已使用）
      * 注意：美团可能不支持订单核销通知，这里先留空
      */

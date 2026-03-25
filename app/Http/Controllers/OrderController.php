@@ -360,4 +360,19 @@ class OrderController extends Controller
             'message' => $result['message'],
         ], 400);
     }
+
+    /**
+     * 删除订单（软删除）
+     */
+    public function destroy(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('delete', $order);
+
+        $order->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => '订单删除成功',
+        ]);
+    }
 }

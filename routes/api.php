@@ -215,6 +215,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);
         Route::post('/{order}/approve-cancel', [\App\Http\Controllers\OrderController::class, 'approveCancel']);
         Route::post('/{order}/reject-cancel', [\App\Http\Controllers\OrderController::class, 'rejectCancel']);
+        // 删除订单（软删除）
+        Route::delete('/{order}', [\App\Http\Controllers\OrderController::class, 'destroy']);
     });
 
     // 打包订单管理

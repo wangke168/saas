@@ -517,11 +517,15 @@ class OrderOperationService
                 
                 $notification = NotificationFactory::create($order);
                 if ($notification) {
-                    // 美团可能没有专门的拒绝接口，这里先记录日志
-                    Log::warning('OrderOperationService::rejectOrderManually: 美团订单拒绝，暂不支持通知接口', [
-                        'order_id' => $order->id,
-                    ]);
-                    // TODO: 如果美团支持拒绝订单接口，在这里调用
+                    /** @var \App\Services\OTA\Notifications\MeituanNotificationService|null $notification */
+                    if ($notification instanceof \App\Services\OTA\Notifications\MeituanNotificationService) {
+                        $notification->notifyOrderRejected($order, $reason);
+                    } else {
+                        Log::warning('OrderOperationService::rejectOrderManually: 美团通知服务类型不匹配，跳过', [
+                            'order_id' => $order->id,
+                            'notification_class' => $notification::class,
+                        ]);
+                    }
                 } else {
                     Log::warning('OrderOperationService::rejectOrderManually: 无法创建美团通知服务', [
                         'order_id' => $order->id,

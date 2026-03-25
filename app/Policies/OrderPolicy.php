@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\User;
 
@@ -61,11 +62,20 @@ class OrderPolicy
                 $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
                     $query->whereIn('resource_providers.id', $resourceProviderIds);
                 })->pluck('id');
-                
+
                 return $scenicSpotIds->contains($order->product->scenic_spot_id);
             }
         }
 
         return false;
+    }
+
+    /**
+     * 确定用户是否可以删除订单
+     */
+    public function delete(User $user, Order $order): bool
+    {
+        // 只有超级管理员可以删除“取消通过”的订单
+        return $user->isAdmin() && $order->status === OrderStatus::CANCEL_APPROVED;
     }
 }

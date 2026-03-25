@@ -208,6 +208,18 @@
                                 详情
                             </el-button>
 
+                            <!-- 删除按钮 -->
+                            <el-button
+                                size="small"
+                                type="danger"
+                                @click="handleDeleteOrder(order)"
+                                :loading="operating[order.id] === 'delete'"
+                                class="action-btn-primary"
+                                v-if="isAdmin && (order.status === 'cancel_approved' || order.status?.value === 'cancel_approved')"
+                            >
+                                删除
+                            </el-button>
+
                         <!-- 接单按钮（待确认或确认中状态） -->
                         <el-button
                                 v-if="['paid_pending', 'confirming'].includes(order.status)"
@@ -286,12 +298,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
+const authStore = useAuthStore();
+
+const isAdmin = computed(() => {
+    const role = authStore.user?.role;
+    // 兼容不同的 role 格式：可能是字符串 'admin'，也可能是对象 { value: 'admin' }
+    return role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
+});
 
 const orders = ref([]);
 const loading = ref(false);
@@ -736,6 +756,37 @@ const handleRejectCancel = async (row) => {
     } catch (error) {
         if (error !== 'cancel') {
             const message = error.response?.data?.message || '拒绝取消失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleDeleteOrder = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            '确定要删除该订单吗？删除后可在数据库中恢复。',
+            '删除确认',
+            {
+                type: 'warning',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'delete';
+        const response = await axios.delete(`/orders/${row.id}`);
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '删除成功');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '删除失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message || '删除失败';
             ElMessage.error(message);
         }
     } finally {
