@@ -439,11 +439,14 @@ class FliggyOrderDataBuilder
     {
         $travellerInfos = [];
 
+        // 入住人手机号统一使用订单联系人手机号（按业务要求不从 guest_info 读取手机号）
+        $contactPhone = $order->contact_phone ?? '';
+
         // 从 guest_info 构建
         if (!empty($order->guest_info) && is_array($order->guest_info)) {
             foreach ($order->guest_info as $guest) {
                 $name = $guest['name'] ?? $guest['Name'] ?? '';
-                $mobile = $guest['mobile'] ?? $guest['Mobile'] ?? $guest['phone'] ?? $guest['Phone'] ?? '';
+                $mobile = $contactPhone;
                 $certificatesType = $this->mapCertificatesType($guest['credentialType'] ?? $guest['credential_type'] ?? $order->real_name_type ?? 0);
                 $certificates = $guest['idCode'] ?? $guest['id_code'] ?? $guest['cardNo'] ?? $guest['card_no'] ?? '';
                 $travellerType = $guest['travellerType'] ?? $guest['traveller_type'] ?? 1; // 默认成人
@@ -464,7 +467,7 @@ class FliggyOrderDataBuilder
         if (empty($travellerInfos) && !empty($order->credential_list) && is_array($order->credential_list)) {
             foreach ($order->credential_list as $credential) {
                 $name = $order->contact_name ?? '';
-                $mobile = $order->contact_phone ?? '';
+                $mobile = $contactPhone;
                 $certificatesType = $this->mapCertificatesType($credential['credentialType'] ?? $credential['credential_type'] ?? $order->real_name_type ?? 0);
                 $certificates = $credential['credentialNo'] ?? $credential['credential_no'] ?? '';
 
@@ -484,7 +487,7 @@ class FliggyOrderDataBuilder
         if (empty($travellerInfos)) {
             $travellerInfos[] = [
                 'name' => $order->contact_name ?? '',
-                'mobile' => $order->contact_phone ?? '',
+                'mobile' => $contactPhone,
                 'certificatesType' => $this->mapCertificatesType($order->real_name_type ?? 0),
                 'certificates' => $this->getContactCertificates($order),
                 'travellerType' => 1, // 默认成人
