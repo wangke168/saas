@@ -551,10 +551,9 @@ class FliggyDistributionService implements ResourceServiceInterface
             
             $fliggyStatus = $statusResult['data']['fliggy_status'] ?? null;
             
-            // 根据飞猪状态判断是否可以取消
-            // 1001(已创建)、1002(已支付) 可以取消
-            // 1003(出票成功)、1004(出票失败)、1005(交易完成)、1010(订单关闭) 不可取消
-            $canCancel = in_array($fliggyStatus, [1001, 1002]);
+            // 根据业务规则判断是否可以取消：
+            // 仅 1005(交易完成/核销完成) 做前置拦截，其他状态放行到取消/退款流程
+            $canCancel = (int)$fliggyStatus !== 1005;
             
             return [
                 'can_cancel' => $canCancel,
