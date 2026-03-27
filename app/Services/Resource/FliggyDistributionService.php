@@ -345,28 +345,74 @@ class FliggyDistributionService implements ResourceServiceInterface
                 $reason
             );
             
-            if ($result['success'] ?? false) {
-                Log::info('FliggyDistributionService::cancelOrder: 订单取消成功', [
+            if (!($result['success'] ?? false)) {
+                Log::warning('FliggyDistributionService::cancelOrder: 订单取消失败', [
                     'order_id' => $order->id,
-                    'fliggy_order_id' => $order->resource_order_no,
+                    'error' => $result['message'] ?? '未知错误',
                 ]);
                 
                 return [
-                    'success' => true,
-                    'message' => '订单取消成功',
+                    'success' => false,
+                    'message' => $result['message'] ?? '订单取消失败',
                     'data' => $result['data'],
                 ];
             }
-            
-            Log::warning('FliggyDistributionService::cancelOrder: 订单取消失败', [
+
+            Log::info('FliggyDistributionService::cancelOrder: 订单取消成功，开始申请退款', [
                 'order_id' => $order->id,
-                'error' => $result['message'] ?? '未知错误',
+                'fliggy_order_id' => $order->resource_order_no,
+            ]);
+
+            $refundResult = $this->getClient()->refundOrder(
+                $order->resource_order_no,
+                $reason,
+                '系统取消订单触发退款'
+            );
+
+            if (!($refundResult['success'] ?? false)) {
+                Log::warning('FliggyDistributionService::cancelOrder: 退款申请失败', [
+                    'order_id' => $order->id,
+                    'fliggy_order_id' => $order->resource_order_no,
+                    'message' => $refundResult['message'] ?? '未知错误',
+                    'code' => $refundResult['code'] ?? '',
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => '订单取消成功，但退款申请失败：' . ($refundResult['message'] ?? '未知错误'),
+                    'data' => [
+                        'cancel_result' => $result['data'] ?? null,
+                        'refund_result' => $refundResult['data'] ?? null,
+                    ],
+                ];
+            }
+
+            $refundConfirmResult = $this->confirmRefundSuccess($order->resource_order_no, $order->id);
+            if (!($refundConfirmResult['success'] ?? false)) {
+                return [
+                    'success' => false,
+                    'message' => $refundConfirmResult['message'] ?? '退款状态确认失败',
+                    'data' => [
+                        'cancel_result' => $result['data'] ?? null,
+                        'refund_apply_result' => $refundResult['data'] ?? null,
+                        'refund_confirm_result' => $refundConfirmResult['data'] ?? null,
+                    ],
+                ];
+            }
+
+            Log::info('FliggyDistributionService::cancelOrder: 退款确认成功，返回取消成功', [
+                'order_id' => $order->id,
+                'fliggy_order_id' => $order->resource_order_no,
             ]);
             
             return [
-                'success' => false,
-                'message' => $result['message'] ?? '订单取消失败',
-                'data' => $result['data'],
+                'success' => true,
+                'message' => '订单取消并退款成功',
+                'data' => [
+                    'cancel_result' => $result['data'] ?? null,
+                    'refund_apply_result' => $refundResult['data'] ?? null,
+                    'refund_confirm_result' => $refundConfirmResult['data'] ?? null,
+                ],
             ];
             
         } catch (\Exception $e) {
@@ -381,6 +427,78 @@ class FliggyDistributionService implements ResourceServiceInterface
                 'data' => null,
             ];
         }
+    }
+
+    /**
+     * 轮询退款单，确认飞猪侧退款是否成功
+     *
+     * 文档约定：refundStatus
+     * - 2001: 退款申请中
+     * - 2002: 退款成功
+     * - 2003: 退款失败
+     */
+    protected function confirmRefundSuccess(string $fliggyOrderId, int $orderId): array
+    {
+        $maxAttempts = 3;
+        $sleepSeconds = 2;
+        $lastStatus = null;
+        $lastResult = null;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $searchResult = $this->getClient()->searchRefundOrder($fliggyOrderId);
+            $lastResult = $searchResult;
+            $refundStatus = (int)($searchResult['data']['refundStatus'] ?? 0);
+            $lastStatus = $refundStatus;
+
+            Log::info('FliggyDistributionService::confirmRefundSuccess: 查询退款单结果', [
+                'order_id' => $orderId,
+                'fliggy_order_id' => $fliggyOrderId,
+                'attempt' => $attempt,
+                'max_attempts' => $maxAttempts,
+                'success' => $searchResult['success'] ?? false,
+                'code' => $searchResult['code'] ?? '',
+                'refund_status' => $refundStatus,
+            ]);
+
+            if (!($searchResult['success'] ?? false)) {
+                if ($attempt < $maxAttempts) {
+                    sleep($sleepSeconds);
+                    continue;
+                }
+
+                return [
+                    'success' => false,
+                    'message' => '退款单查询失败：' . ($searchResult['message'] ?? '未知错误'),
+                    'data' => $searchResult['data'] ?? null,
+                ];
+            }
+
+            if ($refundStatus === 2002) {
+                return [
+                    'success' => true,
+                    'message' => '飞猪退款成功',
+                    'data' => $searchResult['data'] ?? null,
+                ];
+            }
+
+            if ($refundStatus === 2003) {
+                return [
+                    'success' => false,
+                    'message' => '飞猪退款失败：' . (($searchResult['data']['failReason'] ?? '') ?: '未返回失败原因'),
+                    'data' => $searchResult['data'] ?? null,
+                ];
+            }
+
+            if ($attempt < $maxAttempts) {
+                sleep($sleepSeconds);
+            }
+        }
+
+        return [
+            'success' => false,
+            'message' => '退款状态确认超时，当前状态：' . ($lastStatus ?? 0),
+            'data' => $lastResult['data'] ?? null,
+        ];
     }
 
     /**
