@@ -70,6 +70,9 @@ class FliggyDistributionService implements ResourceServiceInterface
             'order_id' => $order->id,
             'resource_order_no' => $order->resource_order_no,
         ]);
+
+        // 标记本次流程是否已创建异常单，避免重复创建
+        $exceptionCreated = false;
         
         try {
             // 如果订单已经有资源方订单号，说明已经接单，直接返回成功
@@ -157,6 +160,7 @@ class FliggyDistributionService implements ResourceServiceInterface
                         'price_diff' => $priceDiff,
                         'validate_result' => $validateResult,
                     ]);
+                    $exceptionCreated = true;
                 }
                 
                 throw new \Exception('订单校验失败：' . $errorMsg);
@@ -223,8 +227,10 @@ class FliggyDistributionService implements ResourceServiceInterface
                 'trace' => $e->getTraceAsString(),
             ]);
             
-            // 创建异常订单
-            $this->createExceptionOrder($order, $e->getMessage());
+            // 避免同一次失败流程重复创建异常订单
+            if (!$exceptionCreated) {
+                $this->createExceptionOrder($order, $e->getMessage());
+            }
             
             return [
                 'success' => false,

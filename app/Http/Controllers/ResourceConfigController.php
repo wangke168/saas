@@ -225,11 +225,6 @@ class ResourceConfigController extends Controller
                                 $fail("参数 \"{$paramName}\" 的值必须是字符串");
                                 return;
                             }
-                            // 参数值长度限制
-                            if (strlen($paramValue) > 500) {
-                                $fail("参数 \"{$paramName}\" 的值不能超过500个字符");
-                                return;
-                            }
                         }
                     }
                 },

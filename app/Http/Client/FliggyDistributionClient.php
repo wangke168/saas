@@ -24,10 +24,16 @@ class FliggyDistributionClient
         // 从配置中获取基础URL（正式环境或测试环境）
         $this->baseUrl = $config->api_url ?? 'https://api.alitrip.alibaba.com';
         
-        // 从 extra_config 中获取 distributorId 和 privateKey
+        // 从 extra_config 中获取 distributorId 和 privateKey（兼容 auth.params 配置）
         $extraConfig = $config->extra_config ?? [];
-        $this->distributorId = $extraConfig['distributor_id'] ?? '';
-        $this->privateKey = $extraConfig['private_key'] ?? '';
+        $this->distributorId = $this->resolveConfigValue($extraConfig, [
+            'distributor_id',
+            'FLIGGY_DISTRIBUTION_ID',
+        ]);
+        $this->privateKey = $this->resolveConfigValue($extraConfig, [
+            'private_key',
+            'FLIGGY_DISTRIBUTION_PRIVATE_KEY',
+        ]);
         
         if (empty($this->distributorId) || empty($this->privateKey)) {
             throw new \Exception('飞猪分销系统配置不完整：缺少 distributorId 或 privateKey');
@@ -38,6 +44,57 @@ class FliggyDistributionClient
             'distributor_id' => $this->distributorId,
             'has_private_key' => !empty($this->privateKey),
         ]);
+    }
+
+    /**
+     * 解析配置值：优先读取 extra_config 顶层，其次读取 auth.params（兼容自定义参数）
+     *
+     * @param array<string, mixed> $extraConfig
+     * @param array<int, string> $candidateKeys
+     */
+    protected function resolveConfigValue(array $extraConfig, array $candidateKeys): string
+    {
+        foreach ($candidateKeys as $key) {
+            $value = $extraConfig[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                return $this->decodeEncryptedValue($value);
+            }
+        }
+
+        $authParams = $extraConfig['auth']['params'] ?? [];
+        if (!is_array($authParams)) {
+            return '';
+        }
+
+        foreach ($candidateKeys as $key) {
+            $value = $authParams[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                return $this->decodeEncryptedValue($value);
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * 兼容 decryptCustomParams 存储格式：encrypted:{ciphertext}
+     */
+    protected function decodeEncryptedValue(string $value): string
+    {
+        if (!str_starts_with($value, 'encrypted:')) {
+            return $value;
+        }
+
+        try {
+            $encryptedValue = substr($value, 10);
+            $decryptedValue = decrypt($encryptedValue);
+            return is_string($decryptedValue) ? $decryptedValue : $value;
+        } catch (\Exception $e) {
+            Log::warning('飞猪配置参数解密失败，回退原值', [
+                'error' => $e->getMessage(),
+            ]);
+            return $value;
+        }
     }
 
     /**
