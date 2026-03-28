@@ -35,6 +35,16 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
+     * 供 Artisan 调试命令获取客户端（会重置缓存实例，避免沿用错误的 OTA 凭据）。
+     */
+    public function resolveClient(?Order $order = null): HengdianClient
+    {
+        $this->client = null;
+
+        return $this->getClient($order);
+    }
+
+    /**
      * 根据订单获取对应的客户端
      * 优先使用 setConfig() 设置的配置，如果没有则使用旧的逻辑（向后兼容）
      */

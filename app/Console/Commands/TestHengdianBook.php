@@ -169,7 +169,7 @@ class TestHengdianBook extends Command
             // 尝试从数据库获取一个订单来获取配置
             $sampleOrder = Order::with(['hotel.scenicSpot', 'otaPlatform'])->first();
             
-            $client = $this->hengdianService->getClient($sampleOrder);
+            $client = $this->hengdianService->resolveClient($sampleOrder);
             
             $this->line("  ✓ 配置获取成功");
             $this->newLine();
