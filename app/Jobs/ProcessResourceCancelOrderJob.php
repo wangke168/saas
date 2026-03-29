@@ -95,15 +95,15 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
                     'message' => $canCancelResult['message'] ?? '未知原因',
                 ]);
 
+                // 先落状态便于钉钉与后台展示一致，再建异常单
+                $this->order->update(['status' => OrderStatus::CANCEL_REQUESTED]);
+
                 $this->createExceptionOrder([
                     'success' => false,
                     'message' => $canCancelResult['message'] ?? '景区方返回：不可以取消',
                     'can_cancel' => false,
                     'query_result' => $canCancelResult,
                 ]);
-
-                // 更新订单状态为取消申请中
-                $this->order->update(['status' => OrderStatus::CANCEL_REQUESTED]);
 
                 return;
             }
@@ -280,7 +280,7 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
             $exceptionMessage = '景区方返回：不可以取消 - ' . ($result['message'] ?? '未知原因');
         }
 
-        ExceptionOrder::create([
+        $exception = ExceptionOrder::create([
             'order_id' => $this->order->id,
             'exception_type' => ($result['timeout'] ?? false) ? ExceptionOrderType::TIMEOUT : ExceptionOrderType::API_ERROR,
             'exception_message' => $exceptionMessage,
@@ -293,6 +293,9 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
             ],
             'status' => ExceptionOrderStatus::PENDING,
         ]);
+
+        $this->order->refresh();
+        NotifyResourceChannelExceptionJob::dispatch($this->order->id, $exception->id);
     }
 
     /**

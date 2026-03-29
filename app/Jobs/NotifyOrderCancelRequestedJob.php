@@ -11,6 +11,12 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * 发送「OTA 申请取消」钉钉通知。
+ *
+ * 派发前须已把订单更新为 cancel_requested，否则会因状态校验跳过通知；
+ * 若在状态更新之前入队，队列较快消费时会出现竞态，导致通知静默丢失。
+ */
 class NotifyOrderCancelRequestedJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;

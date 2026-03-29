@@ -2022,25 +2022,10 @@ class CtripController extends Controller
                 'hotel.scenicSpot.softwareProvider'
             ]);
 
-            // 在接收到OTA取消请求时立即发送钉钉通知（在状态更新之前）
-            try {
-                $cancelData = [
-                    'quantity' => $totalCancelQuantity,
-                    'cancel_type_label' => $totalCancelQuantity >= $order->room_count ? '全部取消' : '部分取消',
-                ];
-                \App\Jobs\NotifyOrderCancelRequestedJob::dispatch($order, $cancelData);
-                
-                Log::info('携程取消订单：已触发钉钉通知', [
-                    'order_id' => $order->id,
-                    'cancel_quantity' => $totalCancelQuantity,
-                ]);
-            } catch (\Exception $e) {
-                Log::warning('携程取消订单：触发钉钉通知失败', [
-                    'order_id' => $order->id,
-                    'error' => $e->getMessage(),
-                ]);
-                // 通知失败不影响取消流程，继续处理
-            }
+            $cancelData = [
+                'quantity' => $totalCancelQuantity,
+                'cancel_type_label' => $totalCancelQuantity >= $order->room_count ? '全部取消' : '部分取消',
+            ];
 
             // 检查是否系统直连
             $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
@@ -2193,6 +2178,21 @@ class CtripController extends Controller
                         '携程申请取消订单，等待人工处理，数量：' . $totalCancelQuantity
                     );
                     $order->refresh();
+
+                    // 非直连：必须在状态为 cancel_requested 之后再派发 Job，避免 NotifyOrderCancelRequestedJob
+                    // 先执行导致因状态校验跳过、钉钉静默丢失（队列竞态）。
+                    try {
+                        \App\Jobs\NotifyOrderCancelRequestedJob::dispatch($order, $cancelData);
+                        Log::info('携程取消订单：非系统直连，已触发取消申请钉钉通知', [
+                            'order_id' => $order->id,
+                            'cancel_quantity' => $totalCancelQuantity,
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::warning('携程取消订单：非系统直连触发钉钉通知失败', [
+                            'order_id' => $order->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
                     
                     Log::info('携程取消订单：订单状态已更新为取消申请中', [
                         'order_id' => $order->id,

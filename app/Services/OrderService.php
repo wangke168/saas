@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -74,14 +75,22 @@ class OrderService
     protected function triggerStatusChangeNotifications(Order $order, OrderStatus $oldStatus, OrderStatus $newStatus, ?string $remark = null): void
     {
         try {
-            // 1. 订单进入确认中状态时通知
+            // 1. 订单进入确认中状态时通知（仅非直连：直连由 ProcessResourceOrderJob 末端发「直连确认成功」）
             if ($newStatus === OrderStatus::CONFIRMING && $oldStatus !== OrderStatus::CONFIRMING) {
-                Log::info('OrderService: 触发订单确认中状态通知', [
-                    'order_id' => $order->id,
-                    'old_status' => $oldStatus->value,
-                    'new_status' => $newStatus->value,
-                ]);
-                \App\Jobs\NotifyOrderConfirmingJob::dispatch($order);
+                if (ResourceServiceFactory::isSystemConnected($order, 'order')) {
+                    Log::info('OrderService: 系统直连订单进入确认中，跳过「待人工接单」钉钉', [
+                        'order_id' => $order->id,
+                        'old_status' => $oldStatus->value,
+                        'new_status' => $newStatus->value,
+                    ]);
+                } else {
+                    Log::info('OrderService: 触发订单确认中状态通知', [
+                        'order_id' => $order->id,
+                        'old_status' => $oldStatus->value,
+                        'new_status' => $newStatus->value,
+                    ]);
+                    \App\Jobs\NotifyOrderConfirmingJob::dispatch($order);
+                }
             }
 
             // 2. 订单取消申请时通知 - 已移至OTA请求接收处触发，此处不再触发避免重复

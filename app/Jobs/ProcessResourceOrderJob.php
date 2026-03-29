@@ -277,11 +277,14 @@ class ProcessResourceOrderJob implements ShouldQueue
             }
             
             $this->order->update($updateData);
+            $this->order->refresh();
 
             Log::info('ProcessResourceOrderJob: 订单状态已更新为已确认', [
                 'order_id' => $this->order->id,
                 'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
             ]);
+
+            NotifyOrderDirectConfirmedJob::dispatch($this->order);
         } else {
             // 检查是否需要转人工操作（自我游接单失败时，直接转人工，不重试）
             $needManual = $result['need_manual'] ?? false;
@@ -412,7 +415,7 @@ class ProcessResourceOrderJob implements ShouldQueue
                 : '景区方取消超时（10秒）';
         }
 
-        ExceptionOrder::create([
+        $exception = ExceptionOrder::create([
             'order_id' => $this->order->id,
             'exception_type' => ExceptionOrderType::API_ERROR,
             'exception_message' => $exceptionMessage,
@@ -429,6 +432,9 @@ class ProcessResourceOrderJob implements ShouldQueue
         if ($this->operation === 'confirm') {
             $this->order->update(['status' => OrderStatus::CONFIRMING]);
         }
+
+        $this->order->refresh();
+        NotifyResourceChannelExceptionJob::dispatch($this->order->id, $exception->id);
     }
 
     /**

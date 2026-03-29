@@ -1744,25 +1744,10 @@ class MeituanController extends Controller
                 'roomType'
             ]);
 
-            // 在接收到OTA退款请求时立即发送钉钉通知（在状态更新之前）
-            try {
-                $cancelData = [
-                    'quantity' => $refundQuantity,
-                    'cancel_type_label' => $refundQuantity >= $order->room_count ? '全部取消' : '部分取消',
-                ];
-                \App\Jobs\NotifyOrderCancelRequestedJob::dispatch($order, $cancelData);
-                
-                Log::info('美团订单退款：已触发钉钉通知', [
-                    'order_id' => $order->id,
-                    'refund_quantity' => $refundQuantity,
-                ]);
-            } catch (\Exception $e) {
-                Log::warning('美团订单退款：触发钉钉通知失败', [
-                    'order_id' => $order->id,
-                    'error' => $e->getMessage(),
-                ]);
-                // 通知失败不影响退款流程，继续处理
-            }
+            $cancelData = [
+                'quantity' => $refundQuantity,
+                'cancel_type_label' => $refundQuantity >= $order->room_count ? '全部取消' : '部分取消',
+            ];
 
             // 保存退款流水号到订单（根据美团文档，商家必须存储美团refundId）
             // 注意：这里先保存，即使后续资源方取消失败，退款流水号也需要保存，因为美团会用同一流水号查询退款进度
@@ -1822,7 +1807,22 @@ class MeituanController extends Controller
                     OrderStatus::CANCEL_REQUESTED,
                     '美团申请退款，数量：' . $refundQuantity
                 );
-                
+                $order->refresh();
+
+                // 必须在状态为 cancel_requested 之后再派发 Job，避免队列竞态导致钉钉被静默跳过。
+                try {
+                    \App\Jobs\NotifyOrderCancelRequestedJob::dispatch($order, $cancelData);
+                    Log::info('美团订单退款：非系统直连，已触发取消申请钉钉通知', [
+                        'order_id' => $order->id,
+                        'refund_quantity' => $refundQuantity,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::warning('美团订单退款：非系统直连触发钉钉通知失败', [
+                        'order_id' => $order->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
                 Log::info('美团订单退款：非系统直连，等待人工处理', [
                     'order_id' => $order->id,
                 ]);

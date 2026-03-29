@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\UserRole;
+use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Models\ScenicSpotDingTalkConfig;
 use App\Models\User;
@@ -136,6 +137,69 @@ class DingTalkNotificationService
 
         $message = $this->buildOrderAutoConfirmedMessage($order);
         return $this->sendMessageForOrder($order, $message, '📦 新订单通知（自动接单）');
+    }
+
+    /**
+     * 发送系统直连接单成功通知（资源接单 + OTA 确认通知成功后，与本地已确认状态一致）
+     */
+    public function sendOrderDirectConfirmedNotification(Order $order): bool
+    {
+        Log::info('DingTalkNotificationService: 开始发送直连接单成功通知', [
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+        ]);
+
+        if (!$this->isEnabled()) {
+            return false;
+        }
+
+        $order->load([
+            'otaPlatform',
+            'product.scenicSpot',
+            'hotel',
+            'roomType',
+        ]);
+
+        $users = $this->getUsersToNotify($order);
+        if ($users->isEmpty()) {
+            Log::warning('钉钉通知：没有找到需要通知的用户', [
+                'order_id' => $order->id,
+            ]);
+            return false;
+        }
+
+        $message = $this->buildOrderDirectConfirmedMessage($order);
+        return $this->sendMessageForOrder($order, $message, '✅ 新订单通知（直连确认成功）');
+    }
+
+    /**
+     * 系统直连链路异常（需人工处理）
+     */
+    public function sendResourceChannelExceptionNotification(Order $order, ExceptionOrder $exception): bool
+    {
+        Log::info('DingTalkNotificationService: 开始发送直连异常通知', [
+            'order_id' => $order->id,
+            'exception_order_id' => $exception->id,
+        ]);
+
+        if (!$this->isEnabled()) {
+            return false;
+        }
+
+        $order->load([
+            'otaPlatform',
+            'product.scenicSpot',
+            'hotel',
+            'roomType',
+        ]);
+
+        $users = $this->getUsersToNotify($order);
+        if ($users->isEmpty()) {
+            return false;
+        }
+
+        $message = $this->buildResourceChannelExceptionMessage($order, $exception);
+        return $this->sendMessageForOrder($order, $message, '🚨 直连异常·需处理');
     }
 
     /**
@@ -377,7 +441,8 @@ class DingTalkNotificationService
         $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
         $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
 
-        $message = "# 📦 新订单通知\n\n";
+        $message = "[人工·需跟进]\n\n";
+        $message .= "# 📦 新订单通知\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
         $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
@@ -417,7 +482,8 @@ class DingTalkNotificationService
         $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
         $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
 
-        $message = "# 📦 新订单通知（自动接单）\n\n";
+        $message = "[知会·非直连库存自动接单]\n\n";
+        $message .= "# 📦 新订单通知（自动接单）\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
         $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
@@ -444,6 +510,71 @@ class DingTalkNotificationService
         return $message;
     }
 
+    protected function buildOrderDirectConfirmedMessage(Order $order): string
+    {
+        $scenicSpotName = $order->product->scenicSpot->name ?? '未知景区';
+        $productName = $order->product->name ?? '未知产品';
+        $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
+        $hotelName = $order->hotel->name ?? '未知酒店';
+        $roomTypeName = $order->roomType->name ?? '未知房型';
+        $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
+        $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
+        $resourceNo = $order->resource_order_no ?? '-';
+
+        $message = "[直连·已成功]\n\n";
+        $message .= "# ✅ 新订单（直连确认成功）\n\n";
+        $message .= "**订单号：** {$order->order_no}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n\n";
+        $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
+        $message .= "**景区：** {$scenicSpotName}\n\n";
+        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**酒店：** {$hotelName}\n\n";
+        $message .= "**房型：** {$roomTypeName}\n\n";
+        $message .= "**入住信息：**\n";
+        $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
+        $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
+        $message .= "- 房间数：{$order->room_count}\n\n";
+        $message .= "**联系信息：**\n";
+        $message .= "- 联系人：{$order->contact_name}\n";
+        $message .= "- 联系电话：{$order->contact_phone}\n\n";
+        $message .= "**订单金额：**\n";
+        $message .= "- 总金额：¥{$totalAmount}元\n";
+        $message .= "- 结算金额：¥{$settlementAmount}元\n\n";
+        $message .= "**资源方订单号：** {$resourceNo}\n\n";
+        $message .= "**订单状态：** 已确认（资源与 OTA 已闭环）\n\n";
+        $message .= "---\n";
+        $message .= "⏰ 创建时间：{$order->created_at}\n";
+        $message .= "💡 提示：系统直连接单成功，无需人工点接单";
+
+        return $message;
+    }
+
+    protected function buildResourceChannelExceptionMessage(Order $order, ExceptionOrder $exception): string
+    {
+        $scenicSpotName = $order->product->scenicSpot->name ?? '未知景区';
+        $productName = $order->product->name ?? '未知产品';
+        $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
+        $op = $exception->exception_data['operation'] ?? 'unknown';
+        $opLabel = $op === 'cancel' ? '取消' : ($op === 'confirm' ? '接单' : (string) $op);
+
+        $message = "[直连·异常]\n\n";
+        $message .= "# 🚨 直连异常\n\n";
+        $message .= "**异常单ID：** {$exception->id}\n";
+        $message .= "**环节：** {$opLabel}\n\n";
+        $message .= "**订单号：** {$order->order_no}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n\n";
+        $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
+        $message .= "**景区：** {$scenicSpotName}\n\n";
+        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**当前订单状态：** {$order->status->label()}\n\n";
+        $message .= "**异常摘要：** {$exception->exception_message}\n\n";
+        $message .= "---\n";
+        $message .= "⏰ 时间：" . now()->format('Y-m-d H:i:s') . "\n";
+        $message .= "💡 请尽快登录后台处理「异常订单」";
+
+        return $message;
+    }
+
     /**
      * 构建订单取消申请的消息
      */
@@ -458,7 +589,8 @@ class DingTalkNotificationService
         $cancelQuantity = $cancelData['quantity'] ?? $order->room_count;
         $cancelTypeLabel = $cancelData['cancel_type_label'] ?? '全部取消';
 
-        $message = "# ⚠️ 订单取消申请\n\n";
+        $message = "[非直连·需跟进]\n\n";
+        $message .= "# ⚠️ 订单取消申请\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
         $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
@@ -499,7 +631,8 @@ class DingTalkNotificationService
         $statusLabel = $isApproved ? '取消通过' : '取消拒绝';
         $cancelledAt = $order->cancelled_at ?? $order->updated_at;
 
-        $message = "# " . ($isApproved ? "✅" : "❌") . " 订单取消{$resultLabel}\n\n";
+        $message = "[知会]\n\n";
+        $message .= "# " . ($isApproved ? "✅" : "❌") . " 订单取消{$resultLabel}\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
         $message .= "**OTA平台：** {$otaPlatformName}\n\n";
         $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
