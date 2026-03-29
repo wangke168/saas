@@ -54,10 +54,12 @@ class ZiwoyouOrderTest extends TestCase
             'api_url' => 'https://test-ziwoyou.com',
         ]);
         
-        // 创建产品（关联横店服务商，用于库存推送）
+        // 创建产品（关联横店服务商，用于库存推送；订单走「其他系统」+ 自我游下发，与 ResourceServiceFactory 行为一致）
         $this->product = Product::factory()->create([
             'scenic_spot_id' => $this->scenicSpot->id,
             'software_provider_id' => $this->hengdianProvider->id,
+            'order_mode' => 'other',
+            'order_provider_id' => $this->ziwoyouProvider->id,
         ]);
         
         // 创建资源配置

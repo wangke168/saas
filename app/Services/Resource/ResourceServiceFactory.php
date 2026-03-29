@@ -120,26 +120,6 @@ class ResourceServiceFactory
                 ]);
             }
             
-            // 订单下发服务商分离：优先使用产品级别的 order_provider_id，如果没有则使用景区配置
-            // 注意：order_provider 存储的是服务商ID，需要通过ID查找服务商
-            $orderProviderId = $product->order_provider_id ?? $config->extra_config['order_provider'] ?? null;
-            
-            if ($product->order_provider_id) {
-                Log::info('ResourceServiceFactory: 使用产品级别的订单下发服务商配置', [
-                    'order_id' => $order->id,
-                    'product_id' => $product->id,
-                    'product_order_provider_id' => $product->order_provider_id,
-                    'scenic_spot_id' => $scenicSpot->id,
-                ]);
-            } elseif ($config->extra_config['order_provider'] ?? null) {
-                Log::info('ResourceServiceFactory: 产品未配置订单下发服务商，使用景区配置', [
-                    'order_id' => $order->id,
-                    'product_id' => $product->id,
-                    'scenic_spot_order_provider_id' => $config->extra_config['order_provider'],
-                    'scenic_spot_id' => $scenicSpot->id,
-                ]);
-            }
-            
             // 如果订单处理方式是 manual，直接返回 null（走手工流程）
             if ($orderMode === 'manual') {
                 Log::info('ResourceServiceFactory: 订单处理方式是手工操作', [
@@ -149,11 +129,35 @@ class ResourceServiceFactory
                 ]);
                 return null; // 手工操作，返回null
             }
-            
-            // 如果订单处理方式是 other（其他系统），需要检查是否配置了订单下发服务商
-            if ($orderMode === 'other') {
+
+            if ($orderMode === 'auto') {
+                Log::info('ResourceServiceFactory: 系统直连，使用产品绑定资源方下单（忽略景区 order_provider）', [
+                    'order_id' => $order->id,
+                    'product_id' => $product->id,
+                    'inventory_provider' => $softwareProvider->api_type,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+            } elseif ($orderMode === 'other') {
+                // 订单下发服务商分离：仅「其他系统」模式使用；order_provider 存的是服务商 ID
+                $orderProviderId = $product->order_provider_id ?? $config->extra_config['order_provider'] ?? null;
+
+                if ($product->order_provider_id) {
+                    Log::info('ResourceServiceFactory: 使用产品级别的订单下发服务商配置', [
+                        'order_id' => $order->id,
+                        'product_id' => $product->id,
+                        'product_order_provider_id' => $product->order_provider_id,
+                        'scenic_spot_id' => $scenicSpot->id,
+                    ]);
+                } elseif ($config->extra_config['order_provider'] ?? null) {
+                    Log::info('ResourceServiceFactory: 产品未配置订单下发服务商，使用景区配置', [
+                        'order_id' => $order->id,
+                        'product_id' => $product->id,
+                        'scenic_spot_order_provider_id' => $config->extra_config['order_provider'],
+                        'scenic_spot_id' => $scenicSpot->id,
+                    ]);
+                }
+
                 if (!$orderProviderId) {
-                    // 没有配置订单下发服务商，返回 null（走其他系统的手工流程）
                     Log::info('ResourceServiceFactory: 订单处理方式是其他系统，但未配置订单下发服务商', [
                         'order_id' => $order->id,
                         'order_mode' => $orderMode,
@@ -161,15 +165,14 @@ class ResourceServiceFactory
                     ]);
                     return null;
                 }
-                // 如果配置了订单下发服务商，继续执行订单下发服务商分离逻辑
+
                 Log::info('ResourceServiceFactory: 订单处理方式是其他系统，已配置订单下发服务商', [
                     'order_id' => $order->id,
                     'order_mode' => $orderMode,
                     'order_provider_id' => $orderProviderId,
                     'scenic_spot_id' => $scenicSpot->id,
                 ]);
-            }
-            if ($orderProviderId) {
+
                 // 通过ID查找订单下发服务商
                 $orderSoftwareProvider = SoftwareProvider::find($orderProviderId);
                 if (!$orderSoftwareProvider) {
@@ -185,13 +188,13 @@ class ResourceServiceFactory
                         'order_provider' => $orderSoftwareProvider->api_type,
                         'order_provider_id' => $orderProviderId,
                     ]);
-                    
+
                     // 查找订单下发服务商的配置
                     $orderConfig = ResourceConfig::with('softwareProvider')
                         ->where('scenic_spot_id', $scenicSpot->id)
                         ->where('software_provider_id', $orderSoftwareProvider->id)
                         ->first();
-                    
+
                     if ($orderConfig && !empty($orderConfig->api_url)) {
                         Log::info('ResourceServiceFactory: 使用订单下发服务商配置', [
                             'order_id' => $order->id,
@@ -199,7 +202,7 @@ class ResourceServiceFactory
                             'order_provider_id' => $orderProviderId,
                             'order_config_id' => $orderConfig->id,
                         ]);
-                        
+
                         $softwareProvider = $orderSoftwareProvider;
                         $config = $orderConfig;
                     } else {
@@ -212,7 +215,7 @@ class ResourceServiceFactory
                         ]);
                     }
                 }
-                
+
                 // 产品级别控制：如果订单下发服务商是自我游，检查产品是否有映射关系
                 if ($softwareProvider->api_type === 'ziwoyou') {
                     Log::info('ResourceServiceFactory: 订单下发服务商是自我游，开始验证产品映射关系', [
@@ -222,14 +225,14 @@ class ResourceServiceFactory
                         'room_type_id' => $order->room_type_id,
                         'scenic_spot_id' => $scenicSpot->id,
                     ]);
-                    
+
                     $mappingService = app(ZiwoyouProductMappingService::class);
                     $hasMapping = $mappingService->hasMapping(
                         $order->product_id,
                         $order->hotel_id,
                         $order->room_type_id
                     );
-                    
+
                     if (!$hasMapping) {
                         Log::info('ResourceServiceFactory: 产品没有自我游映射关系，走手工流程', [
                             'order_id' => $order->id,
@@ -240,7 +243,7 @@ class ResourceServiceFactory
                         ]);
                         return null; // 没有映射关系，返回null，走手工流程
                     }
-                    
+
                     Log::info('ResourceServiceFactory: 产品有自我游映射关系，使用自我游服务', [
                         'order_id' => $order->id,
                         'product_id' => $order->product_id,
@@ -248,7 +251,7 @@ class ResourceServiceFactory
                         'room_type_id' => $order->room_type_id,
                     ]);
                 }
-                
+
                 // 产品级别控制：如果订单下发服务商是飞猪，检查产品是否有映射关系
                 if ($softwareProvider->api_type === 'fliggy_distribution') {
                     Log::info('ResourceServiceFactory: 订单下发服务商是飞猪，开始验证产品映射关系', [
@@ -258,14 +261,14 @@ class ResourceServiceFactory
                         'room_type_id' => $order->room_type_id,
                         'scenic_spot_id' => $scenicSpot->id,
                     ]);
-                    
+
                     $mappingService = app(FliggyMappingService::class);
                     $hasMapping = $mappingService->hasMapping(
                         $order->product_id,
                         $order->hotel_id,
                         $order->room_type_id
                     );
-                    
+
                     if (!$hasMapping) {
                         Log::info('ResourceServiceFactory: 产品没有飞猪映射关系，走手工流程', [
                             'order_id' => $order->id,
@@ -276,7 +279,7 @@ class ResourceServiceFactory
                         ]);
                         return null; // 没有映射关系，返回null，走手工流程
                     }
-                    
+
                     Log::info('ResourceServiceFactory: 产品有飞猪映射关系，使用飞猪服务', [
                         'order_id' => $order->id,
                         'product_id' => $order->product_id,
@@ -284,8 +287,14 @@ class ResourceServiceFactory
                         'room_type_id' => $order->room_type_id,
                     ]);
                 }
+            } else {
+                Log::warning('ResourceServiceFactory: 未知的订单处理方式', [
+                    'order_id' => $order->id,
+                    'order_mode' => $orderMode,
+                    'scenic_spot_id' => $scenicSpot->id,
+                ]);
+                return null;
             }
-            // $orderMode === 'auto' 时，继续执行，返回资源方服务
         } elseif ($operation === 'inventory') {
             // 库存操作：检查 inventory 配置
             $inventoryMode = $syncMode['inventory'] ?? 'manual';
