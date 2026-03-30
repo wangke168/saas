@@ -430,9 +430,9 @@ class FliggyDistributionService implements ResourceServiceInterface
     }
 
     /**
-     * 轮询退款单，确认飞猪侧退款是否成功
+     * 轮询订单查询（searchOrder），根据返回的 refundStatus 确认飞猪侧退款是否成功
      *
-     * 文档约定：refundStatus
+     * 文档约定：refundStatus（与订单详情字段一致）
      * - 2001: 退款申请中
      * - 2002: 退款成功
      * - 2003: 退款失败
@@ -444,15 +444,19 @@ class FliggyDistributionService implements ResourceServiceInterface
         $lastStatus = null;
         $lastResult = null;
 
+        $outOrderId = Order::query()->find($orderId)?->order_no;
+
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-            $searchResult = $this->getClient()->searchRefundOrder($fliggyOrderId);
+            $searchResult = $this->getClient()->searchOrder($fliggyOrderId, $outOrderId ?: null);
             $lastResult = $searchResult;
-            $refundStatus = (int)($searchResult['data']['refundStatus'] ?? 0);
+            $orderPayload = is_array($searchResult['data'] ?? null) ? $searchResult['data'] : [];
+            $refundStatus = (int)($orderPayload['refundStatus'] ?? 0);
             $lastStatus = $refundStatus;
 
-            Log::info('FliggyDistributionService::confirmRefundSuccess: 查询退款单结果', [
+            Log::info('FliggyDistributionService::confirmRefundSuccess: 订单查询(refundStatus)', [
                 'order_id' => $orderId,
                 'fliggy_order_id' => $fliggyOrderId,
+                'out_order_id' => $outOrderId,
                 'attempt' => $attempt,
                 'max_attempts' => $maxAttempts,
                 'success' => $searchResult['success'] ?? false,
@@ -468,7 +472,7 @@ class FliggyDistributionService implements ResourceServiceInterface
 
                 return [
                     'success' => false,
-                    'message' => '退款单查询失败：' . ($searchResult['message'] ?? '未知错误'),
+                    'message' => '订单查询失败（确认退款）：' . ($searchResult['message'] ?? '未知错误'),
                     'data' => $searchResult['data'] ?? null,
                 ];
             }
@@ -484,7 +488,7 @@ class FliggyDistributionService implements ResourceServiceInterface
             if ($refundStatus === 2003) {
                 return [
                     'success' => false,
-                    'message' => '飞猪退款失败：' . (($searchResult['data']['failReason'] ?? '') ?: '未返回失败原因'),
+                    'message' => '飞猪退款失败：' . (($orderPayload['failReason'] ?? '') ?: '未返回失败原因'),
                     'data' => $searchResult['data'] ?? null,
                 ];
             }
