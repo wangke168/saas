@@ -20,6 +20,7 @@ use Illuminate\Console\Command;
  * php artisan test:fliggy-order --cancel --fliggy-order-id=FLIGGY123
  * php artisan test:fliggy-order --query --fliggy-order-id=FLIGGY123
  * php artisan test:fliggy-order --refund --fliggy-order-id=FLIGGY123
+ * php artisan test:fliggy-order --search-refund --fliggy-order-id=FLIGGY123
  * php artisan test:fliggy-order --all --order-id=123
  */
 class TestFliggyDistributionOrder extends Command
@@ -32,6 +33,7 @@ class TestFliggyDistributionOrder extends Command
                             {--cancel : 测试订单取消}
                             {--query : 测试订单查询}
                             {--refund : 测试订单退款}
+                            {--search-refund : 测试退款单查询 searchRefundOrder}
                             {--all : 测试所有接口}';
 
     protected $description = '测试飞猪分销系统的订单接口';
@@ -123,6 +125,16 @@ class TestFliggyDistributionOrder extends Command
                 $refundReason = $this->ask('请输入退款原因', '测试退款');
                 $remark = $this->ask('请输入备注（可选，按回车跳过）');
                 $this->testRefundOrder($client, $fliggyOrderId, $refundReason, $remark ?: '');
+            }
+        }
+
+        // 测试6：退款单查询（需飞猪订单号，通常用于退款申请后轮询状态）
+        if ($this->option('search-refund')) {
+            if (!$fliggyOrderId) {
+                $fliggyOrderId = $this->ask('请输入飞猪订单号');
+            }
+            if ($fliggyOrderId) {
+                $this->testSearchRefundOrder($client, $fliggyOrderId);
             }
         }
 
@@ -374,11 +386,42 @@ class TestFliggyDistributionOrder extends Command
             $this->displayResult($result);
 
             if ($result['success'] ?? false) {
-                $this->info("\n提示：可以调用 searchRefundOrder() 查询退款状态");
+                $this->info("\n提示：可执行 php artisan test:fliggy-order --search-refund --fliggy-order-id={$fliggyOrderId}");
             }
 
         } catch (\Exception $e) {
             $this->error('❌ 订单退款异常: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 测试6：退款单查询
+     */
+    protected function testSearchRefundOrder(FliggyDistributionClient $client, string $fliggyOrderId): void
+    {
+        $this->info("\n=== 测试6：退款单查询 searchRefundOrder ===");
+        $this->line("飞猪订单号: {$fliggyOrderId}");
+        $this->line('退款状态参考：2001=申请中，2002=成功，2003=失败');
+
+        try {
+            $this->line('调用 searchRefundOrder()...');
+            $result = $client->searchRefundOrder($fliggyOrderId);
+
+            $this->displayResult($result);
+
+            if ($result['success'] ?? false) {
+                $data = $result['data'] ?? [];
+                if (!empty($data)) {
+                    $status = (int)($data['refundStatus'] ?? 0);
+                    $this->info("\n退款单摘要：");
+                    $this->line('  refundStatus: ' . $status);
+                    if (isset($data['failReason']) && $data['failReason'] !== '') {
+                        $this->line('  failReason: ' . $data['failReason']);
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            $this->error('❌ 退款单查询异常: ' . $e->getMessage());
         }
     }
 
