@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
-use App\Models\Product;
 use App\Models\Price;
 use App\Models\PriceRule;
+use App\Models\Product;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -17,7 +17,7 @@ class ProductService
     {
         return DB::transaction(function () use ($data) {
             $product = Product::create($data);
-            
+
             // 如果有初始价格，创建价格记录
             if (isset($data['prices'])) {
                 foreach ($data['prices'] as $priceData) {
@@ -26,7 +26,7 @@ class ProductService
                     ]));
                 }
             }
-            
+
             return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules']);
         });
     }
@@ -38,12 +38,21 @@ class ProductService
     {
         return DB::transaction(function () use ($product, $data) {
             $product->update($data);
-            
-            // 未来可以在这里添加其他逻辑，比如：
-            // - 清除相关缓存
-            // - 更新关联数据
-            // - 发送通知等
-            
+
+            // 方案 A：销售有效期变更后，软删除落在新区间外的日历价，与产品可售区间对齐
+            $saleStart = $product->sale_start_date;
+            $saleEnd = $product->sale_end_date;
+            if ($saleStart !== null && $saleEnd !== null) {
+                $startStr = Carbon::parse($saleStart)->toDateString();
+                $endStr = Carbon::parse($saleEnd)->toDateString();
+                Price::where('product_id', $product->id)
+                    ->where(function ($q) use ($startStr, $endStr) {
+                        $q->where('date', '<', $startStr)
+                            ->orWhere('date', '>', $endStr);
+                    })
+                    ->delete();
+            }
+
             return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules']);
         });
     }
@@ -58,7 +67,7 @@ class ProductService
             ->where('date', $date)
             ->first();
 
-        if (!$basePrice) {
+        if (! $basePrice) {
             return [
                 'market_price' => 0,
                 'settlement_price' => 0,
@@ -155,4 +164,3 @@ class ProductService
         ];
     }
 }
-
