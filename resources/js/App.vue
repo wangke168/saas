@@ -37,8 +37,7 @@
                 <el-menu
                     :default-active="activeMenu"
                     router
-                    mode="vertical"
-                >
+                    mode="vertical">
                     <el-menu-item index="/operation-report">
                         <el-icon><DataBoard /></el-icon>
                         <span>运营快报</span>
