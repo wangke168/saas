@@ -9,8 +9,26 @@
                     <h1 class="brand-title">酒速通</h1>
                 </div>
                 <div class="user-info">
-                    <span class="user-name">{{ user?.display_name || user?.name }}</span>
-                    <el-button text @click="handleLogout">退出</el-button>
+                    <el-dropdown
+                        trigger="hover"
+                        :show-timeout="80"
+                        :hide-timeout="200"
+                        popper-class="app-header-user-dropdown"
+                        @command="onUserMenuCommand"
+                    >
+                        <span
+                            class="user-summary-trigger"
+                            tabindex="0"
+                            :title="headerUserSummary"
+                        >
+                            {{ headerUserSummary }}
+                        </span>
+                        <template #dropdown>
+                            <el-dropdown-menu>
+                                <el-dropdown-item command="logout">退出</el-dropdown-item>
+                            </el-dropdown-menu>
+                        </template>
+                    </el-dropdown>
                 </div>
             </div>
         </el-header>
@@ -115,14 +133,20 @@ import { Document, Warning, Box, House, Location, User, Setting, Connection, Dat
 const router = useRouter();
 const authStore = useAuthStore();
 
-// 登录后自动获取用户信息
+// 登录后拉取用户信息；无 user 或缺少 resource_providers（旧会话）时补全
 onMounted(async () => {
-    if (authStore.isAuthenticated && !authStore.user) {
-        try {
-            await authStore.fetchUser();
-        } catch (error) {
-            console.error('Failed to fetch user info:', error);
-        }
+    if (!authStore.isAuthenticated) {
+        return;
+    }
+    const u = authStore.user;
+    const needFetch = !u || u.resource_providers === undefined;
+    if (!needFetch) {
+        return;
+    }
+    try {
+        await authStore.fetchUser();
+    } catch (error) {
+        console.error('Failed to fetch user info:', error);
     }
 });
 
@@ -134,11 +158,36 @@ const isAdmin = computed(() => {
     const result = role === 'admin' || role?.value === 'admin' || role === 'ADMIN';
     return result;
 });
+
+/** 顶栏：账号姓名 | 绑定资源方（与用户管理列表语义一致） */
+const headerUserSummary = computed(() => {
+    const u = user.value;
+    if (!u) {
+        return '';
+    }
+    const accountName = u.name || '—';
+    let resourcePart = '';
+    if (isAdmin.value) {
+        resourcePart = '全部资源方';
+    } else {
+        const rps = u.resource_providers || [];
+        resourcePart =
+            rps.length > 0 ? rps.map((rp) => rp.name).filter(Boolean).join('、') : '未绑定资源方';
+    }
+    return `${accountName} | ${resourcePart}`;
+});
+
 const activeMenu = computed(() => router.currentRoute.value.path);
 
 const handleLogout = async () => {
     await authStore.logout();
     router.push('/login');
+};
+
+const onUserMenuCommand = (command) => {
+    if (command === 'logout') {
+        handleLogout();
+    }
 };
 </script>
 
@@ -150,15 +199,6 @@ const handleLogout = async () => {
     color: #e8edf4;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-}
-
-.app-header :deep(.el-button.is-text) {
-    color: #c5d0e0;
-}
-
-.app-header :deep(.el-button.is-text:hover) {
-    color: #fff;
-    background-color: rgba(255, 255, 255, 0.1);
 }
 
 .header-content {
@@ -210,17 +250,40 @@ const handleLogout = async () => {
 .user-info {
     display: flex;
     align-items: center;
-    gap: 12px;
     min-width: 0;
 }
 
-.user-name {
+.app-header :deep(.user-info .el-dropdown) {
+    vertical-align: middle;
+}
+
+.user-summary-trigger {
+    display: inline-block;
+    max-width: min(520px, 56vw);
+    padding: 6px 10px;
+    margin: -6px -10px;
+    border-radius: 6px;
     color: #d1dae8;
     font-size: 14px;
-    max-width: min(420px, 50vw);
+    line-height: 1.4;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
+    outline: none;
+}
+
+.user-summary-trigger:hover,
+.user-summary-trigger:focus-visible {
+    color: #f4f7fb;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+</style>
+
+<style>
+/* 下拉层挂到 body，需非 scoped */
+.app-header-user-dropdown.el-popper {
+    margin-top: 4px !important;
 }
 </style>
 
