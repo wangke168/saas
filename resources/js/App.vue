@@ -1,10 +1,15 @@
 <template>
     <el-container>
-        <el-header v-if="isAuthenticated">
+        <el-header v-if="isAuthenticated" class="app-header">
             <div class="header-content">
-                <h1>酒速通</h1>
+                <div class="brand">
+                    <div class="brand-logo-ring" aria-hidden="true">
+                        <img src="/logo.png" alt="" class="brand-logo-img" />
+                    </div>
+                    <h1 class="brand-title">酒速通</h1>
+                </div>
                 <div class="user-info">
-                    <span>{{ user?.display_name || user?.name }}</span>
+                    <span class="user-name">{{ user?.display_name || user?.name }}</span>
                     <el-button text @click="handleLogout">退出</el-button>
                 </div>
             </div>
@@ -138,6 +143,24 @@ const handleLogout = async () => {
 </script>
 
 <style scoped>
+.app-header {
+    --app-header-bg-top: #2c3f5c;
+    --app-header-bg-bottom: #1a2332;
+    background: linear-gradient(180deg, var(--app-header-bg-top) 0%, var(--app-header-bg-bottom) 100%);
+    color: #e8edf4;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.app-header :deep(.el-button.is-text) {
+    color: #c5d0e0;
+}
+
+.app-header :deep(.el-button.is-text:hover) {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
 .header-content {
     display: flex;
     justify-content: space-between;
@@ -145,10 +168,59 @@ const handleLogout = async () => {
     height: 100%;
 }
 
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+/* 圆形浅色底，衬托深色 logo */
+.brand-logo-ring {
+    flex-shrink: 0;
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 30% 25%, #ffffff 0%, #e8eef5 55%, #d8e0ea 100%);
+    box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    overflow: hidden;
+}
+
+.brand-logo-img {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    display: block;
+}
+
+.brand-title {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #f4f7fb;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+}
+
 .user-info {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    min-width: 0;
+}
+
+.user-name {
+    color: #d1dae8;
+    font-size: 14px;
+    max-width: min(420px, 50vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 </style>
 

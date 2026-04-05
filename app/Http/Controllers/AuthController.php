@@ -75,17 +75,11 @@ class AuthController extends Controller
 
         // 重新加载用户数据（避免缓存问题）
         $user->refresh();
+        $user->load(['resourceProviders.scenicSpots']);
 
         return response()->json([
             'token' => $token,
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role?->value ?? 'admin',
-                'role_label' => $user->role?->label() ?? '超级管理员',
-                'is_active' => $user->is_active,
-            ],
+            'user' => $this->serializeAuthenticatedUser($user),
         ]);
     }
 
@@ -122,44 +116,53 @@ class AuthController extends Controller
     public function user(Request $request)
     {
         $user = $request->user();
-        $user->load(['resourceProviders.scenicSpots']); // 加载资源方及其景区
-        
-        // 构建显示名称
+        $user->load(['resourceProviders.scenicSpots']);
+
+        return response()->json([
+            'user' => $this->serializeAuthenticatedUser($user),
+        ]);
+    }
+
+    /**
+     * 与登录、/me 共用的当前用户 JSON 结构（含资源方、景区等）
+     *
+     * @return array<string, mixed>
+     */
+    private function serializeAuthenticatedUser(User $user): array
+    {
+        $user->loadMissing(['resourceProviders.scenicSpots']);
+
         $displayName = $user->name;
         if ($user->isOperator() && $user->resourceProviders->isNotEmpty()) {
             $resourceProviderNames = $user->resourceProviders->pluck('name')->join('、');
             $displayName = "{$resourceProviderNames}-{$user->name}";
         }
-        
-        return response()->json([
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'display_name' => $displayName, // 新增显示名称
-                'email' => $user->email,
-                'role' => $user->role?->value ?? 'admin',
-                'role_label' => $user->role?->label() ?? '超级管理员',
-                'is_active' => $user->is_active,
-                'resource_providers' => $user->resourceProviders->map(fn($rp) => [
-                    'id' => $rp->id,
-                    'name' => $rp->name,
-                    'code' => $rp->code,
-                    'scenic_spots' => $rp->scenicSpots->map(fn($spot) => [
-                        'id' => $spot->id,
-                        'name' => $spot->name,
-                        'code' => $spot->code,
-                    ]),
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'display_name' => $displayName,
+            'email' => $user->email,
+            'role' => $user->role?->value ?? 'admin',
+            'role_label' => $user->role?->label() ?? '超级管理员',
+            'is_active' => $user->is_active,
+            'resource_providers' => $user->resourceProviders->map(fn ($rp) => [
+                'id' => $rp->id,
+                'name' => $rp->name,
+                'code' => $rp->code,
+                'scenic_spots' => $rp->scenicSpots->map(fn ($spot) => [
+                    'id' => $spot->id,
+                    'name' => $spot->name,
+                    'code' => $spot->code,
                 ]),
-                // 保留scenic_spots用于兼容（但不再使用）
-                // 通过 resourceProviders 获取景区
-                'scenic_spots' => $user->resourceProviders->flatMap(function($rp) {
-                    return $rp->scenicSpots->map(fn($spot) => [
-                        'id' => $spot->id,
-                        'name' => $spot->name,
-                        'code' => $spot->code,
-                    ]);
-                })->unique('id')->values(),
-            ],
-        ]);
+            ]),
+            'scenic_spots' => $user->resourceProviders->flatMap(function ($rp) {
+                return $rp->scenicSpots->map(fn ($spot) => [
+                    'id' => $spot->id,
+                    'name' => $spot->name,
+                    'code' => $spot->code,
+                ]);
+            })->unique('id')->values(),
+        ];
     }
 }
