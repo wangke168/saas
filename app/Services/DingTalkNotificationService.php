@@ -482,7 +482,7 @@ class DingTalkNotificationService
         $totalAmount = $order->total_amount ? number_format($order->total_amount, 2) : '0.00';
         $settlementAmount = $order->settlement_amount ? number_format($order->settlement_amount, 2) : '0.00';
 
-        $message = "[知会·非直连库存自动接单]\n\n";
+        $message = "[人工·非直连库存自动接单]\n\n";
         $message .= "# 📦 新订单通知（自动接单）\n\n";
         $message .= "**订单号：** {$order->order_no}\n";
         $message .= "**OTA平台：** {$otaPlatformName}\n\n";
@@ -505,7 +505,7 @@ class DingTalkNotificationService
         $message .= "**订单状态：** 已自动接单\n\n";
         $message .= "---\n";
         $message .= "⏰ 创建时间：{$order->created_at}\n";
-        $message .= "💡 提示：系统已自动接单，无需处理";
+        $message .= "💡 提示：系统已自动接单，请及时处理";
 
         return $message;
     }
