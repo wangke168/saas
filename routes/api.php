@@ -165,6 +165,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::put('/{productExternalCodeMapping}', [\App\Http\Controllers\ProductExternalCodeMappingController::class, 'update']);
             Route::delete('/{productExternalCodeMapping}', [\App\Http\Controllers\ProductExternalCodeMappingController::class, 'destroy']);
         });
+        // 价格分组分页（用于价格管理提速）
+        Route::get('/{product}/price-groups', [\App\Http\Controllers\ProductController::class, 'priceGroups']);
         // 通用路由放在最后
         Route::get('/{product}', [\App\Http\Controllers\ProductController::class, 'show']);
         Route::put('/{product}', [\App\Http\Controllers\ProductController::class, 'update']);

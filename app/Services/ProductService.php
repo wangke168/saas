@@ -11,6 +11,96 @@ use Illuminate\Support\Facades\DB;
 class ProductService
 {
     /**
+     * 获取产品价格分组分页数据（按房型分组）
+     */
+    public function getPriceGroups(Product $product, array $filters): array
+    {
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = max(1, min(100, (int) ($filters['per_page'] ?? 10)));
+
+        $baseQuery = Price::query()->where('product_id', $product->id);
+
+        if (! empty($filters['room_type_id'])) {
+            $baseQuery->where('room_type_id', (int) $filters['room_type_id']);
+        }
+
+        if (! empty($filters['start_date'])) {
+            $baseQuery->where('date', '>=', $filters['start_date']);
+        }
+
+        if (! empty($filters['end_date'])) {
+            $baseQuery->where('date', '<=', $filters['end_date']);
+        }
+
+        $total = (clone $baseQuery)->distinct('room_type_id')->count('room_type_id');
+
+        $roomTypeIds = (clone $baseQuery)
+            ->select('room_type_id')
+            ->distinct()
+            ->orderBy('room_type_id')
+            ->forPage($page, $perPage)
+            ->pluck('room_type_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $pricesByRoomType = [];
+        if (! empty($roomTypeIds)) {
+            $pricesByRoomType = (clone $baseQuery)
+                ->whereIn('room_type_id', $roomTypeIds)
+                ->with(['roomType.hotel'])
+                ->orderBy('room_type_id')
+                ->orderBy('date')
+                ->get()
+                ->groupBy('room_type_id')
+                ->toArray();
+        }
+
+        $groups = collect($roomTypeIds)->map(function (int $roomTypeId) use ($pricesByRoomType): array {
+            $groupPrices = $pricesByRoomType[$roomTypeId] ?? [];
+            $firstPrice = $groupPrices[0] ?? null;
+            $roomType = $firstPrice['room_type'] ?? null;
+            $hotel = $roomType['hotel'] ?? null;
+
+            return [
+                'room_type_id' => $roomTypeId,
+                'hotel_id' => $roomType['hotel_id'] ?? null,
+                'hotel_name' => $hotel['name'] ?? '未知酒店',
+                'room_type_name' => $roomType['name'] ?? '未知房型',
+                'prices' => collect($groupPrices)->map(function (array $price): array {
+                    return [
+                        'id' => $price['id'],
+                        'date' => $price['date'],
+                        'market_price' => $price['market_price'],
+                        'settlement_price' => $price['settlement_price'],
+                        'sale_price' => $price['sale_price'],
+                        'source' => $price['source'],
+                        'room_type_id' => $price['room_type_id'],
+                    ];
+                })->all(),
+            ];
+        })->all();
+
+        $allPriceRoomTypeIds = Price::query()
+            ->where('product_id', $product->id)
+            ->select('room_type_id')
+            ->distinct()
+            ->pluck('room_type_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        return [
+            'groups' => $groups,
+            'available_room_type_ids' => $allPriceRoomTypeIds,
+            'meta' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $total,
+                'last_page' => (int) ceil($total / $perPage),
+            ],
+        ];
+    }
+
+    /**
      * 创建产品
      */
     public function createProduct(array $data): Product

@@ -182,6 +182,20 @@
                                     </el-collapse>
                                 </el-collapse-item>
                             </el-collapse>
+                            <div
+                                v-if="priceGroupPagination.total > 0"
+                                style="margin-top: 16px; display: flex; justify-content: flex-end;"
+                            >
+                                <el-pagination
+                                    v-model:current-page="priceGroupPagination.current_page"
+                                    v-model:page-size="priceGroupPagination.per_page"
+                                    :total="priceGroupPagination.total"
+                                    :page-sizes="[10, 20, 50]"
+                                    layout="total, sizes, prev, pager, next"
+                                    @current-change="handlePriceGroupPageChange"
+                                    @size-change="handlePriceGroupSizeChange"
+                                />
+                            </div>
                             <el-empty v-else description="暂无价格数据" />
                         </div>
 
@@ -442,18 +456,30 @@
                                         </el-table-column>
                                         <el-table-column label="房型" width="200">
                                             <template #default="{ row, $index }">
-                                                <el-select
-                                                    v-model="row.room_type_id"
-                                                    placeholder="请选择房型"
-                                                    style="width: 100%"
-                                                >
-                                                    <el-option
-                                                        v-for="roomType in getAvailableRoomTypesForPriceRule(row.hotel_id)"
-                                                        :key="roomType.id"
-                                                        :label="roomType.name"
-                                                        :value="roomType.id"
-                                                    />
-                                                </el-select>
+                                                <div>
+                                                    <el-select
+                                                        v-model="row.room_type_id"
+                                                        placeholder="请选择房型"
+                                                        style="width: 100%"
+                                                    >
+                                                        <el-option
+                                                            v-for="roomType in getAvailableRoomTypesForPriceRule(row.hotel_id)"
+                                                            :key="roomType.id"
+                                                            :label="roomType.name"
+                                                            :value="roomType.id"
+                                                        />
+                                                    </el-select>
+                                                    <el-button
+                                                        type="primary"
+                                                        text
+                                                        size="small"
+                                                        style="padding: 0; margin-top: 6px;"
+                                                        :disabled="!row.hotel_id"
+                                                        @click="selectAllRoomTypesForHotel($index)"
+                                                    >
+                                                        选择该酒店全部房型
+                                                    </el-button>
+                                                </div>
                                             </template>
                                         </el-table-column>
                                         <el-table-column label="操作" width="100">
@@ -705,7 +731,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -719,7 +745,7 @@ const priceRulesLoading = ref(false);
 const otaProductsLoading = ref(false);
 const externalCodeMappingsLoading = ref(false);
 const product = ref(null);
-const prices = ref([]);
+const groupedPrices = ref([]);
 const priceRules = ref([]);
 const otaProducts = ref([]);
 const externalCodeMappings = ref([]);
@@ -739,6 +765,13 @@ const editingPriceId = ref(null);
 const priceFilterRoomTypeId = ref(null);
 const priceFilterDateRange = ref(null);
 const expandedRoomTypes = ref([]); // 展开的房型ID列表
+const priceGroupPagination = ref({
+    current_page: 1,
+    per_page: 10,
+    total: 0,
+    last_page: 0,
+});
+const priceRoomTypeIds = ref([]);
 
 // 加价规则管理相关
 const priceRuleDialogVisible = ref(false);
@@ -887,16 +920,13 @@ const priceRuleDialogTitle = computed(() => editingPriceRuleId.value ? '编辑�
 
 // 获取已添加价格的酒店和房型列表（用于加价规则）
 const availableHotelsForPriceRule = computed(() => {
-    if (!prices.value || prices.value.length === 0) {
+    if (!priceRoomTypeIds.value.length) {
         return [];
     }
 
-    // 获取所有已添加价格的房型ID
-    const roomTypeIds = [...new Set(prices.value.map(p => p.room_type_id))];
-
     // 获取这些房型对应的酒店
     const hotelIds = new Set();
-    roomTypeIds.forEach(roomTypeId => {
+    priceRoomTypeIds.value.forEach(roomTypeId => {
         const roomType = allRoomTypes.value.find(rt => rt.id === roomTypeId);
         if (roomType && roomType.hotel_id) {
             hotelIds.add(roomType.hotel_id);
@@ -912,7 +942,7 @@ const getAvailableRoomTypesForPriceRule = (hotelId) => {
     if (!hotelId) return [];
 
     // 获取所有已添加价格的房型ID
-    const roomTypeIdsWithPrice = new Set(prices.value.map(p => p.room_type_id));
+    const roomTypeIdsWithPrice = new Set(priceRoomTypeIds.value);
 
     // 返回该酒店下已添加价格的房型
     return allRoomTypes.value.filter(rt =>
@@ -920,57 +950,21 @@ const getAvailableRoomTypesForPriceRule = (hotelId) => {
     );
 };
 
-// 价格筛选和分组
-const filteredPrices = computed(() => {
-    let result = prices.value || [];
+const processPriceGroups = (groups = []) => {
+    return groups.map(group => {
+        const normalizedGroup = {
+            roomTypeId: group.room_type_id,
+            hotelId: group.hotel_id,
+            hotelName: group.hotel_name || '未知酒店',
+            roomTypeName: group.room_type_name || '未知房型',
+            prices: group.prices || [],
+            dateRanges: [],
+            dateRange: '-',
+        };
 
-    // 按房型筛选
-    if (priceFilterRoomTypeId.value) {
-        result = result.filter(p => p.room_type_id === priceFilterRoomTypeId.value);
-    }
-
-    // 按日期范围筛选
-    if (priceFilterDateRange.value && priceFilterDateRange.value.length === 2) {
-        const [startDate, endDate] = priceFilterDateRange.value;
-        result = result.filter(p => {
-            const priceDate = p.date;
-            return priceDate >= startDate && priceDate <= endDate;
-        });
-    }
-
-    return result;
-});
-
-// 按房型分组价格，并合并连续日期
-const groupedPrices = computed(() => {
-    const groups = {};
-
-    filteredPrices.value.forEach(price => {
-        const roomTypeId = price.room_type_id;
-        if (!groups[roomTypeId]) {
-            // 查找房型和酒店信息
-            const roomType = allRoomTypes.value.find(rt => rt.id === roomTypeId);
-            const hotel = hotels.value.find(h => h.id === roomType?.hotel_id);
-
-            groups[roomTypeId] = {
-                roomTypeId,
-                hotelId: roomType?.hotel_id,
-                hotelName: hotel?.name || '未知酒店',
-                roomTypeName: roomType?.name || '未知房型',
-                prices: [],
-                dateRanges: [], // 合并后的日期范围
-            };
-        }
-        groups[roomTypeId].prices.push(price);
-    });
-
-    // 对每个分组的价格按日期排序，并合并连续日期
-    Object.values(groups).forEach(group => {
-        group.prices.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-        // 按价格值分组（相同价格的连续日期合并为一个范围）
+        normalizedGroup.prices.sort((a, b) => new Date(a.date) - new Date(b.date));
         const priceGroups = {};
-        group.prices.forEach(price => {
+        normalizedGroup.prices.forEach(price => {
             const key = `${price.market_price}_${price.settlement_price}_${price.sale_price}_${price.source}`;
             if (!priceGroups[key]) {
                 priceGroups[key] = {
@@ -984,8 +978,7 @@ const groupedPrices = computed(() => {
             priceGroups[key].dates.push(price.date);
         });
 
-        // 将日期数组转换为日期范围
-        group.dateRanges = Object.values(priceGroups).map(pg => {
+        normalizedGroup.dateRanges = Object.values(priceGroups).map(pg => {
             const sortedDates = pg.dates.sort();
             let ranges = [];
             let start = sortedDates[0];
@@ -997,33 +990,29 @@ const groupedPrices = computed(() => {
                 const diffDays = (current - prev) / (1000 * 60 * 60 * 24);
 
                 if (diffDays === 1) {
-                    // 连续日期，扩展范围
                     end = sortedDates[i];
                 } else {
-                    // 不连续，保存当前范围，开始新范围
                     ranges.push({ start, end, ...pg });
                     start = sortedDates[i];
                     end = sortedDates[i];
                 }
             }
-            ranges.push({ start, end, ...pg });
+
+            if (start) {
+                ranges.push({ start, end, ...pg });
+            }
 
             return ranges;
         }).flat();
-    });
 
-    // 计算每个分组的日期范围显示
-    Object.values(groups).forEach(group => {
-        if (group.prices.length > 0) {
-            const dates = group.prices.map(p => p.date).sort();
-            group.dateRange = `${formatDateOnly(dates[0])} 至 ${formatDateOnly(dates[dates.length - 1])}`;
-        } else {
-            group.dateRange = '-';
+        if (normalizedGroup.prices.length > 0) {
+            const dates = normalizedGroup.prices.map(p => p.date).sort();
+            normalizedGroup.dateRange = `${formatDateOnly(dates[0])} 至 ${formatDateOnly(dates[dates.length - 1])}`;
         }
-    });
 
-    return Object.values(groups);
-});
+        return normalizedGroup;
+    });
+};
 
 const goBack = () => {
     router.push('/products');
@@ -1032,7 +1021,11 @@ const goBack = () => {
 const fetchProduct = async () => {
     loading.value = true;
     try {
-        const response = await axios.get(`/products/${route.params.id}`);
+        const response = await axios.get(`/products/${route.params.id}`, {
+            params: {
+                include_prices: false,
+            },
+        });
 
         // 检查响应数据格式
         if (!response.data || !response.data.data) {
@@ -1040,7 +1033,6 @@ const fetchProduct = async () => {
         }
 
         product.value = response.data.data;
-        prices.value = product.value.prices || [];
         priceRules.value = product.value.price_rules || [];
         otaProducts.value = product.value.ota_products || [];
         
@@ -1052,6 +1044,7 @@ const fetchProduct = async () => {
             await fetchHotels();
             await fetchRoomTypes();
         }
+        await fetchPriceGroups();
     } catch (error) {
         const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || '获取产品详情失败';
         ElMessage.error(errorMessage);
@@ -1069,6 +1062,37 @@ const fetchProduct = async () => {
         }
     } finally {
         loading.value = false;
+    }
+};
+
+const fetchPriceGroups = async () => {
+    pricesLoading.value = true;
+    try {
+        const params = {
+            page: priceGroupPagination.value.current_page,
+            per_page: priceGroupPagination.value.per_page,
+        };
+
+        if (priceFilterRoomTypeId.value) {
+            params.room_type_id = priceFilterRoomTypeId.value;
+        }
+
+        if (priceFilterDateRange.value && priceFilterDateRange.value.length === 2) {
+            params.start_date = priceFilterDateRange.value[0];
+            params.end_date = priceFilterDateRange.value[1];
+        }
+
+        const response = await axios.get(`/products/${route.params.id}/price-groups`, { params });
+        groupedPrices.value = processPriceGroups(response.data?.data || []);
+        priceRoomTypeIds.value = response.data?.available_room_type_ids || [];
+        priceGroupPagination.value = {
+            ...priceGroupPagination.value,
+            ...(response.data?.meta || {}),
+        };
+    } catch (error) {
+        ElMessage.error(error.response?.data?.message || '获取价格数据失败');
+    } finally {
+        pricesLoading.value = false;
     }
 };
 
@@ -1262,17 +1286,31 @@ const handleRoomTypeChange = () => {
 
 // 价格筛选处理
 const handlePriceFilter = () => {
-    // 筛选逻辑已在 computed 中实现，这里可以添加其他逻辑
-    // 比如自动展开匹配的房型
-    if (priceFilterRoomTypeId.value && !expandedRoomTypes.value.includes(priceFilterRoomTypeId.value)) {
-        expandedRoomTypes.value.push(priceFilterRoomTypeId.value);
-    }
+    priceGroupPagination.value.current_page = 1;
+    expandedRoomTypes.value = [];
+    fetchPriceGroups();
 };
 
 // 重置价格筛选
 const resetPriceFilter = () => {
     priceFilterRoomTypeId.value = null;
     priceFilterDateRange.value = null;
+    priceGroupPagination.value.current_page = 1;
+    expandedRoomTypes.value = [];
+    fetchPriceGroups();
+};
+
+const handlePriceGroupPageChange = (page) => {
+    priceGroupPagination.value.current_page = page;
+    expandedRoomTypes.value = [];
+    fetchPriceGroups();
+};
+
+const handlePriceGroupSizeChange = (size) => {
+    priceGroupPagination.value.per_page = size;
+    priceGroupPagination.value.current_page = 1;
+    expandedRoomTypes.value = [];
+    fetchPriceGroups();
 };
 
 const handleSubmitPrice = async () => {
@@ -1427,6 +1465,54 @@ const addPriceRuleItem = () => {
 
 const removePriceRuleItem = (index) => {
     priceRuleForm.value.items.splice(index, 1);
+};
+
+const hasPriceRuleItem = (hotelId, roomTypeId) => {
+    return priceRuleForm.value.items.some(
+        (item) => item.hotel_id === hotelId && item.room_type_id === roomTypeId
+    );
+};
+
+const selectAllRoomTypesForHotel = (index) => {
+    const currentItem = priceRuleForm.value.items[index];
+    if (!currentItem?.hotel_id) {
+        ElMessage.warning('请先选择酒店');
+        return;
+    }
+
+    const roomTypesForHotel = getAvailableRoomTypesForPriceRule(currentItem.hotel_id);
+    if (!roomTypesForHotel.length) {
+        ElMessage.warning('该酒店暂无可选房型');
+        return;
+    }
+
+    const itemsToAppend = roomTypesForHotel
+        .map((roomType) => ({
+            hotel_id: currentItem.hotel_id,
+            room_type_id: roomType.id,
+        }))
+        .filter((item) => !hasPriceRuleItem(item.hotel_id, item.room_type_id));
+
+    if (!itemsToAppend.length) {
+        ElMessage.info('该酒店房型已全部添加');
+        return;
+    }
+
+    if (!currentItem.room_type_id) {
+        const [firstItem, ...restItems] = itemsToAppend;
+        currentItem.room_type_id = firstItem.room_type_id;
+        priceRuleForm.value.items.push(...restItems);
+    } else {
+        priceRuleForm.value.items.push(...itemsToAppend);
+    }
+
+    const duplicateCount = roomTypesForHotel.length - itemsToAppend.length;
+    if (duplicateCount > 0) {
+        ElMessage.success(`已新增 ${itemsToAppend.length} 个房型，跳过 ${duplicateCount} 个重复项`);
+        return;
+    }
+
+    ElMessage.success(`已新增 ${itemsToAppend.length} 个房型`);
 };
 
 const handlePriceRuleHotelChange = (index) => {
@@ -1736,9 +1822,11 @@ const clearAllPolling = () => {
 onMounted(async () => {
     await fetchProduct();
     await fetchOtaPlatforms();
-    if (product.value) {
-        await fetchHotels();
-        await fetchRoomTypes();
+});
+
+watch(activeTab, (tabName) => {
+    if (tabName === 'prices') {
+        fetchPriceGroups();
     }
 });
 

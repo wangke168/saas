@@ -64,21 +64,24 @@ class ProductController extends Controller
     /**
      * 产品详情
      */
-    public function show(Product $product): JsonResponse
+    public function show(Request $request, Product $product): JsonResponse
     {
         $this->authorize('view', $product);
+        $includePrices = $request->boolean('include_prices', true);
 
         // 加载关联数据，使用 try-catch 处理可能的关联缺失问题
         try {
             // 先加载基本关联
             $product->load(['scenicSpot', 'softwareProvider']);
             
-            // 加载价格及其关联（如果存在）
-            $product->load(['prices' => function ($query) {
-                $query->with(['roomType' => function ($q) {
-                    $q->with('hotel');
+            if ($includePrices) {
+                // 加载价格及其关联（如果存在）
+                $product->load(['prices' => function ($query) {
+                    $query->with(['roomType' => function ($q) {
+                        $q->with('hotel');
+                    }]);
                 }]);
-            }]);
+            }
             
             // 加载加价规则及其关联（如果存在）
             $product->load(['priceRules' => function ($query) {
@@ -99,11 +102,39 @@ class ProductController extends Controller
             ]);
             
             // 尝试只加载基本关联
-            $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules', 'otaProducts']);
+            $relations = ['scenicSpot', 'softwareProvider', 'priceRules', 'otaProducts'];
+            if ($includePrices) {
+                $relations[] = 'prices';
+            }
+            $product->load($relations);
         }
         
         return response()->json([
             'data' => $product,
+        ]);
+    }
+
+    /**
+     * 产品价格分组分页（按酒店-房型）
+     */
+    public function priceGroups(Request $request, Product $product): JsonResponse
+    {
+        $this->authorize('view', $product);
+
+        $validated = $request->validate([
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'room_type_id' => 'nullable|integer|exists:room_types,id',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
+        ]);
+
+        $result = $this->productService->getPriceGroups($product, $validated);
+
+        return response()->json([
+            'data' => $result['groups'],
+            'available_room_type_ids' => $result['available_room_type_ids'],
+            'meta' => $result['meta'],
         ]);
     }
 
