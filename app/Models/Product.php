@@ -153,4 +153,12 @@ class Product extends Model
     {
         return $this->hasMany(ProductExternalCodeMapping::class);
     }
+
+    /**
+     * 不可订时段（房晚日期闭区间，与库存日历 date 含义一致）
+     */
+    public function unavailablePeriods(): HasMany
+    {
+        return $this->hasMany(ProductUnavailablePeriod::class)->orderBy('start_date');
+    }
 }

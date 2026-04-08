@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Client\MeituanClient;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Models\Pkg\PkgProduct;
 use App\Models\Pkg\PkgOrder;
@@ -25,6 +26,7 @@ use App\Services\InventoryService;
 use App\Services\Resource\ResourceServiceFactory;
 use App\Services\OTA\MeituanService;
 use App\Services\OTA\NotificationFactory;
+use App\Services\ProductUnavailableNightService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -904,7 +906,7 @@ class MeituanController extends Controller
                 $checkInDate = \Carbon\Carbon::parse($useDate);
                 
                 // 检查连续入住天数的库存是否足够
-                $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
+                $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity, $product);
                 if (!$inventoryCheck['success']) {
                     DB::rollBack();
                     return $this->errorResponse(503, $inventoryCheck['message'], $partnerId);
@@ -2263,8 +2265,15 @@ class MeituanController extends Controller
     /**
      * 检查连续入住天数的库存
      */
-    protected function checkInventoryForStayDays(int $roomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity): array
+    protected function checkInventoryForStayDays(int $roomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity, ?Product $product = null): array
     {
+        if ($product !== null && ProductUnavailableNightService::checkInTouchesUnavailable($product, $checkInDate->format('Y-m-d'))) {
+            return [
+                'success' => false,
+                'message' => '该入住日期与产品不可订时段冲突，无法预订',
+            ];
+        }
+
         $dates = $this->inventoryService->getDateRange($checkInDate->format('Y-m-d'), $stayDays);
 
         foreach ($dates as $date) {

@@ -32,6 +32,19 @@
                     <el-descriptions-item label="销售结束日期">
                         {{ product.sale_end_date ? formatDateOnly(product.sale_end_date) : '不限制' }}
                     </el-descriptions-item>
+                    <el-descriptions-item label="不可订时段" :span="2">
+                        <template v-if="product.unavailable_periods && product.unavailable_periods.length">
+                            <div
+                                v-for="(p, i) in product.unavailable_periods"
+                                :key="i"
+                                style="margin-bottom: 4px;"
+                            >
+                                {{ formatDateOnly(p.start_date) }} 至 {{ formatDateOnly(p.end_date) }}
+                                <span v-if="p.note" style="color: #909399; margin-left: 8px;">（{{ p.note }}）</span>
+                            </div>
+                        </template>
+                        <span v-else style="color: #909399;">未设置</span>
+                    </el-descriptions-item>
                     <el-descriptions-item label="外部产品编码（默认）" :span="2">
                         {{ product.external_code || '未设置' }}
                         <span style="margin-left: 10px; color: #909399; font-size: 12px;">

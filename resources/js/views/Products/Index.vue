@@ -99,7 +99,7 @@
         <el-dialog
             v-model="dialogVisible"
             :title="dialogTitle"
-            width="600px"
+            width="680px"
             @close="resetForm"
         >
             <el-form
@@ -224,6 +224,45 @@
                         产品结束销售的日期（必填），不能早于开始日期
                     </span>
                 </el-form-item>
+                <el-form-item label="不可订时段">
+                    <div style="width: 100%;">
+                        <div
+                            v-for="(row, idx) in form.unavailable_periods"
+                            :key="idx"
+                            style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;"
+                        >
+                            <el-date-picker
+                                v-model="row.start_date"
+                                type="date"
+                                placeholder="开始"
+                                format="YYYY-MM-DD"
+                                value-format="YYYY-MM-DD"
+                                style="width: 140px;"
+                            />
+                            <span style="color: #909399;">至</span>
+                            <el-date-picker
+                                v-model="row.end_date"
+                                type="date"
+                                placeholder="结束"
+                                format="YYYY-MM-DD"
+                                value-format="YYYY-MM-DD"
+                                style="width: 140px;"
+                            />
+                            <el-input
+                                v-model="row.note"
+                                placeholder="备注（可选）"
+                                style="width: 160px;"
+                                maxlength="500"
+                                show-word-limit
+                            />
+                            <el-button type="danger" link @click="removeUnavailablePeriod(idx)">删除</el-button>
+                        </div>
+                        <el-button type="primary" link @click="addUnavailablePeriod">+ 添加不可订时段</el-button>
+                        <div style="font-size: 12px; color: #909399; margin-top: 6px;">
+                            与库存日历「房晚」日期一致（含首尾）。多晚产品若任一晚落在不可订区间内，则该入住日不向 OTA 推库存/价。
+                        </div>
+                    </div>
+                </el-form-item>
                 <el-form-item label="订单处理方式" prop="order_mode">
                     <el-select
                         v-model="form.order_mode"
@@ -333,6 +372,7 @@ const form = ref({
     is_realname: false,
     is_realname_touched: false,
     _is_realname_original_null: false,
+    unavailable_periods: [],
 });
 
 const validateSaleEndDate = (rule, value, callback) => {
@@ -534,8 +574,28 @@ const formatDateForPicker = (dateString) => {
     return dateString;
 };
 
+const mapUnavailablePeriodsFromApi = (list) => {
+    if (!Array.isArray(list) || list.length === 0) {
+        return [];
+    }
+    return list.map((p) => ({
+        start_date: formatDateForPicker(p.start_date),
+        end_date: formatDateForPicker(p.end_date),
+        note: p.note || '',
+    }));
+};
+
 const handleEdit = async (row) => {
     editingId.value = row.id;
+
+    let unavailablePeriods = [];
+    try {
+        const res = await axios.get(`/products/${row.id}`, { params: { include_prices: false } });
+        unavailablePeriods = mapUnavailablePeriodsFromApi(res.data?.data?.unavailable_periods);
+    } catch (e) {
+        console.error(e);
+    }
+
     form.value = {
         scenic_spot_id: row.scenic_spot_id,
         software_provider_id: row.software_provider_id || null,
@@ -554,6 +614,7 @@ const handleEdit = async (row) => {
         is_realname: Number(row.is_realname) === 1,
         is_realname_touched: false,
         _is_realname_original_null: row.is_realname === null || row.is_realname === undefined,
+        unavailable_periods: unavailablePeriods,
     };
     
     // 加载该景区的服务商列表（编辑模式下保留当前的服务商ID）
@@ -562,6 +623,18 @@ const handleEdit = async (row) => {
     }
     
     dialogVisible.value = true;
+};
+
+const addUnavailablePeriod = () => {
+    form.value.unavailable_periods.push({
+        start_date: null,
+        end_date: null,
+        note: '',
+    });
+};
+
+const removeUnavailablePeriod = (idx) => {
+    form.value.unavailable_periods.splice(idx, 1);
 };
 
 const handleSubmit = async () => {
@@ -610,6 +683,14 @@ const handleSubmit = async () => {
                 if (submitData.order_mode !== 'other') {
                     submitData.order_provider_id = null;
                 }
+
+                submitData.unavailable_periods = (form.value.unavailable_periods || [])
+                    .filter((p) => p.start_date && p.end_date)
+                    .map((p) => ({
+                        start_date: p.start_date,
+                        end_date: p.end_date,
+                        note: p.note && String(p.note).trim() !== '' ? String(p.note).trim() : null,
+                    }));
                 
                 if (isEdit.value) {
                     await axios.put(`/products/${editingId.value}`, submitData);
@@ -676,6 +757,7 @@ const resetForm = () => {
         is_realname: false,
         is_realname_touched: false,
         _is_realname_original_null: false,
+        unavailable_periods: [],
     };
     availableSoftwareProviders.value = [];
     if (formRef.value) {

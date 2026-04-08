@@ -72,7 +72,7 @@ class ProductController extends Controller
         // 加载关联数据，使用 try-catch 处理可能的关联缺失问题
         try {
             // 先加载基本关联
-            $product->load(['scenicSpot', 'softwareProvider']);
+            $product->load(['scenicSpot', 'softwareProvider', 'unavailablePeriods']);
             
             if ($includePrices) {
                 // 加载价格及其关联（如果存在）
@@ -193,6 +193,11 @@ class ProductController extends Controller
             ],
             'is_active' => 'boolean',
             'is_realname' => 'sometimes|nullable|boolean',
+            'unavailable_periods' => 'nullable|array',
+            'unavailable_periods.*' => 'array',
+            'unavailable_periods.*.start_date' => 'required|date',
+            'unavailable_periods.*.end_date' => 'required|date',
+            'unavailable_periods.*.note' => 'nullable|string|max:500',
         ]);
 
         // 权限控制：使用 Policy 检查创建权限（传入景区ID）
@@ -275,6 +280,11 @@ class ProductController extends Controller
             ],
             'is_active' => 'sometimes|boolean',
             'is_realname' => 'sometimes|nullable|boolean',
+            'unavailable_periods' => 'sometimes|nullable|array',
+            'unavailable_periods.*' => 'array',
+            'unavailable_periods.*.start_date' => 'required|date',
+            'unavailable_periods.*.end_date' => 'required|date',
+            'unavailable_periods.*.note' => 'nullable|string|max:500',
         ]);
 
         // 权限控制：使用 Policy 检查更新权限（包括景区变更的权限）

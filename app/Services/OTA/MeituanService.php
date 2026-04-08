@@ -6,6 +6,7 @@ use App\Enums\OtaPlatform;
 use App\Http\Client\MeituanClient;
 use App\Services\OTA\OtaInventoryHelper;
 use App\Services\ProductService;
+use App\Services\ProductUnavailableNightService;
 use Illuminate\Support\Facades\Log;
 
 class MeituanService
@@ -122,6 +123,15 @@ class MeituanService
             ];
         }
 
+        foreach ($dates as $date) {
+            if (ProductUnavailableNightService::isNightUnavailable($product, $date)) {
+                $inventoryByDate[$date] = [
+                    'quantity' => 0,
+                    'is_closed' => true,
+                ];
+            }
+        }
+
         // 如果产品设置了入住天数（stay_days > 1），需要检查连续入住天数的库存
         $stayDays = $product->stay_days;
         if ($stayDays && $stayDays > 1) {
@@ -174,11 +184,13 @@ class MeituanService
         // 构建body数据
         $body = [];
         foreach ($dates as $date) {
-            // 计算价格
-            $priceData = $this->productService->calculatePrice($product, $roomType->id, $date);
+            $blocked = ProductUnavailableNightService::checkInTouchesUnavailable($product, $date);
+            $priceData = $blocked
+                ? ['market_price' => 0.0, 'sale_price' => 0.0, 'settlement_price' => 0.0]
+                : $this->productService->calculatePrice($product, $roomType->id, $date);
             
             // 获取调整后的库存
-            $stock = isset($inventoryByDate[$date]) ? $inventoryByDate[$date] : 0;
+            $stock = $blocked ? 0 : (isset($inventoryByDate[$date]) ? $inventoryByDate[$date] : 0);
 
             // 生成partnerPrimaryKey
             $partnerPrimaryKey = $this->generatePartnerPrimaryKey($hotel->id, $roomType->id, $date);
@@ -268,6 +280,15 @@ class MeituanService
             ];
         }
 
+        foreach ($dates as $date) {
+            if (ProductUnavailableNightService::isNightUnavailable($product, $date)) {
+                $inventoryByDate[$date] = [
+                    'quantity' => 0,
+                    'is_closed' => true,
+                ];
+            }
+        }
+
         // 如果产品设置了入住天数（stay_days > 1），需要检查连续入住天数的库存
         $stayDays = $product->stay_days;
         if ($stayDays && $stayDays > 1) {
@@ -320,11 +341,13 @@ class MeituanService
         // 构建body数据
         $body = [];
         foreach ($dates as $date) {
-            // 计算价格
-            $priceData = $this->productService->calculatePrice($product, $roomType->id, $date);
+            $blocked = ProductUnavailableNightService::checkInTouchesUnavailable($product, $date);
+            $priceData = $blocked
+                ? ['market_price' => 0.0, 'sale_price' => 0.0, 'settlement_price' => 0.0]
+                : $this->productService->calculatePrice($product, $roomType->id, $date);
             
             // 获取调整后的库存
-            $stock = isset($inventoryByDate[$date]) ? $inventoryByDate[$date] : 0;
+            $stock = $blocked ? 0 : (isset($inventoryByDate[$date]) ? $inventoryByDate[$date] : 0);
 
             // 生成partnerPrimaryKey
             $partnerPrimaryKey = $this->generatePartnerPrimaryKey($hotel->id, $roomType->id, $date);

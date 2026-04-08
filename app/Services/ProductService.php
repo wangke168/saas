@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Jobs\PushProductToOtaJob;
 use App\Models\Price;
 use App\Models\PriceRule;
 use App\Models\Product;
+use App\Models\ProductUnavailablePeriod;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class ProductService
 {
@@ -106,7 +109,14 @@ class ProductService
     public function createProduct(array $data): Product
     {
         return DB::transaction(function () use ($data) {
+            $periods = $data['unavailable_periods'] ?? null;
+            unset($data['unavailable_periods']);
+
             $product = Product::create($data);
+
+            if (is_array($periods)) {
+                $this->replaceUnavailablePeriods($product, $periods);
+            }
 
             // 如果有初始价格，创建价格记录
             if (isset($data['prices'])) {
@@ -117,7 +127,7 @@ class ProductService
                 }
             }
 
-            return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules']);
+            return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules', 'unavailablePeriods']);
         });
     }
 
@@ -127,6 +137,12 @@ class ProductService
     public function updateProduct(Product $product, array $data): Product
     {
         return DB::transaction(function () use ($product, $data) {
+            $periods = null;
+            if (array_key_exists('unavailable_periods', $data)) {
+                $periods = $data['unavailable_periods'];
+                unset($data['unavailable_periods']);
+            }
+
             $product->update($data);
 
             // 方案 A：销售有效期变更后，软删除落在新区间外的日历价，与产品可售区间对齐
@@ -143,8 +159,59 @@ class ProductService
                     ->delete();
             }
 
-            return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules']);
+            if (is_array($periods)) {
+                $this->replaceUnavailablePeriods($product, $periods);
+                $this->scheduleOtaResyncForProduct($product->fresh());
+            }
+
+            return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules', 'unavailablePeriods']);
         });
+    }
+
+    /**
+     * @param list<array{start_date?: mixed, end_date?: mixed, note?: mixed}> $periods
+     */
+    private function replaceUnavailablePeriods(Product $product, array $periods): void
+    {
+        foreach ($periods as $index => $row) {
+            if (! is_array($row)) {
+                throw ValidationException::withMessages([
+                    'unavailable_periods.'.$index => ['每段不可订时间格式无效'],
+                ]);
+            }
+            $start = $row['start_date'] ?? null;
+            $end = $row['end_date'] ?? null;
+            if ($start === null || $start === '' || $end === null || $end === '') {
+                throw ValidationException::withMessages([
+                    'unavailable_periods.'.$index => ['每段不可订时间需填写开始、结束日期'],
+                ]);
+            }
+            if (Carbon::parse($end)->lt(Carbon::parse($start))) {
+                throw ValidationException::withMessages([
+                    'unavailable_periods.'.$index => ['结束日期不能早于开始日期'],
+                ]);
+            }
+        }
+
+        ProductUnavailablePeriod::where('product_id', $product->id)->delete();
+        foreach ($periods as $row) {
+            ProductUnavailablePeriod::create([
+                'product_id' => $product->id,
+                'start_date' => Carbon::parse($row['start_date'])->toDateString(),
+                'end_date' => Carbon::parse($row['end_date'])->toDateString(),
+                'note' => isset($row['note']) && $row['note'] !== '' ? (string) $row['note'] : null,
+            ]);
+        }
+    }
+
+    private function scheduleOtaResyncForProduct(Product $product): void
+    {
+        $product->load(['otaProducts' => function ($q): void {
+            $q->where('is_active', true)->whereNotNull('pushed_at');
+        }]);
+        foreach ($product->otaProducts as $otaProduct) {
+            PushProductToOtaJob::dispatch($otaProduct->id)->onQueue('ota-push');
+        }
     }
 
     /**

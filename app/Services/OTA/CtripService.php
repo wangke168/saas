@@ -8,6 +8,7 @@ use App\Models\OtaConfig;
 use App\Services\OTA\OtaInventoryHelper;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\ProductService;
+use App\Services\ProductUnavailableNightService;
 use Illuminate\Support\Facades\Log;
 
 class CtripService
@@ -120,6 +121,14 @@ class CtripService
             
             // 按日期汇总价格（同一日期多个房型时，取平均值）
             foreach ($pricesByDate as $date => $prices) {
+                if (ProductUnavailableNightService::checkInTouchesUnavailable($product, $date)) {
+                    $bodyData['prices'][] = [
+                        'salePrice' => 0.0,
+                        'costPrice' => 0.0,
+                        'date' => $date,
+                    ];
+                    continue;
+                }
                 // 计算该日期所有房型价格的平均值
                 $avgSalePrice = array_sum(array_column($prices, 'sale_price')) / count($prices);
                 $avgSettlementPrice = array_sum(array_column($prices, 'settlement_price')) / count($prices);
@@ -226,6 +235,19 @@ class CtripService
                 // 不在销售日期范围内，库存设为0
                 $inventoryByDate[$date]['quantity'] = 0;
                 $inventoryByDate[$date]['is_closed'] = true; // 标记为关闭状态
+                continue;
+            }
+
+            // 产品不可订房晚（与库存日历 date 一致）
+            if (ProductUnavailableNightService::isNightUnavailable($product, $date)) {
+                if (!isset($inventoryByDate[$date])) {
+                    $inventoryByDate[$date] = [
+                        'quantity' => 0,
+                        'is_closed' => false,
+                    ];
+                }
+                $inventoryByDate[$date]['quantity'] = 0;
+                $inventoryByDate[$date]['is_closed'] = true;
                 continue;
             }
             
@@ -584,6 +606,15 @@ class CtripService
             // 指定日期模式：每个日期一个价格项
             foreach ($priceList as $price) {
                 $date = $price->date->format('Y-m-d');
+
+                if (ProductUnavailableNightService::checkInTouchesUnavailable($product, $date)) {
+                    $bodyData['prices'][] = [
+                        'salePrice' => 0.0,
+                        'costPrice' => 0.0,
+                        'date' => $date,
+                    ];
+                    continue;
+                }
                 
                 // 应用加价规则计算价格
                 $calculatedPrice = $this->productService->calculatePrice(
@@ -694,6 +725,18 @@ class CtripService
                 $inventoryByDate[$date]['is_closed'] = true; // 标记为关闭状态
                 continue;
             }
+
+            if (ProductUnavailableNightService::isNightUnavailable($product, $date)) {
+                if (!isset($inventoryByDate[$date])) {
+                    $inventoryByDate[$date] = [
+                        'quantity' => 0,
+                        'is_closed' => false,
+                    ];
+                }
+                $inventoryByDate[$date]['quantity'] = 0;
+                $inventoryByDate[$date]['is_closed'] = true;
+                continue;
+            }
             
             if (!isset($inventoryByDate[$date])) {
                 $inventoryByDate[$date] = [
@@ -763,6 +806,16 @@ class CtripService
                             if ($saleEndDate && $checkDate > $saleEndDate) {
                                 $isInSalePeriod = false;
                             }
+                        }
+
+                        if (ProductUnavailableNightService::isNightUnavailable($product, $checkDate)) {
+                            $canAccommodate = false;
+                            $checkDetails[] = [
+                                'check_date' => $checkDate,
+                                'status' => 'not_available',
+                                'reason' => '产品不可订时段',
+                            ];
+                            break;
                         }
                         
                         // 如果不在销售日期范围内、关闭或库存为0，无法满足连续入住

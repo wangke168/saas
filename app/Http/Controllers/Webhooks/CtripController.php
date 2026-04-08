@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Client\CtripClient;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Models\Pkg\PkgProduct;
 use App\Models\Pkg\PkgOrder;
@@ -23,6 +24,7 @@ use App\Services\OTA\NotificationFactory;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\Resource\ResourceServiceFactory;
+use App\Services\ProductUnavailableNightService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -588,7 +590,7 @@ class CtripController extends Controller
             $checkInDate = \Carbon\Carbon::parse($useStartDate);
             
             // 检查连续入住天数的库存是否足够
-            $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
+            $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity, $product);
             if (!$inventoryCheck['success']) {
                 DB::rollBack();
                 Log::warning('携程预下单：库存检查失败', [
@@ -1689,7 +1691,7 @@ class CtripController extends Controller
                 $stayDays = $product->stay_days ?: 1;
                 $checkInDate = \Carbon\Carbon::parse($useStartDate);
                 
-                $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity);
+                $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity, $product);
                 $hasInventoryIssue = !$inventoryCheck['success'];
                 
                 if ($hasInventoryIssue) {
@@ -2576,8 +2578,15 @@ class CtripController extends Controller
      * @param int $quantity 房间数量
      * @return array ['success' => bool, 'message' => string]
      */
-    protected function checkInventoryForStayDays(int $roomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity): array
+    protected function checkInventoryForStayDays(int $roomTypeId, \Carbon\Carbon $checkInDate, int $stayDays, int $quantity, ?Product $product = null): array
     {
+        if ($product !== null && ProductUnavailableNightService::checkInTouchesUnavailable($product, $checkInDate->format('Y-m-d'))) {
+            return [
+                'success' => false,
+                'message' => '该入住日期与产品不可订时段冲突，无法预订',
+            ];
+        }
+
         // 检查连续入住天数的库存
         for ($i = 0; $i < $stayDays; $i++) {
             $date = $checkInDate->copy()->addDays($i);
@@ -2661,7 +2670,7 @@ class CtripController extends Controller
 
             try {
                 // 再次检查库存（在锁内检查，确保准确性）
-                $checkResult = $this->checkInventoryForStayDays($roomTypeId, $checkInDate, $stayDays, $quantity);
+                $checkResult = $this->checkInventoryForStayDays($roomTypeId, $checkInDate, $stayDays, $quantity, $order->product);
                 if (!$checkResult['success']) {
                     return $checkResult;
                 }
