@@ -77,6 +77,8 @@ class MeituanService
         string $startDate,
         string $endDate
     ): array {
+        $forceZeroStock = !$hotel->is_active || !$roomType->is_active;
+
         // 生成日期范围
         $start = \Carbon\Carbon::parse($startDate);
         $end = \Carbon\Carbon::parse($endDate);
@@ -125,6 +127,16 @@ class MeituanService
 
         foreach ($dates as $date) {
             if (ProductUnavailableNightService::isNightUnavailable($product, $date)) {
+                $inventoryByDate[$date] = [
+                    'quantity' => 0,
+                    'is_closed' => true,
+                ];
+            }
+        }
+
+        // 酒店或房型被禁用时，产品有效期内库存统一按0推送
+        if ($forceZeroStock) {
+            foreach ($dates as $date) {
                 $inventoryByDate[$date] = [
                     'quantity' => 0,
                     'is_closed' => true,
@@ -239,6 +251,8 @@ class MeituanService
         \App\Models\RoomType $roomType,
         array $dates
     ): array {
+        $forceZeroStock = !$hotel->is_active || !$roomType->is_active;
+
         // 去重并排序日期
         $dates = array_unique($dates);
         sort($dates);
@@ -282,6 +296,16 @@ class MeituanService
 
         foreach ($dates as $date) {
             if (ProductUnavailableNightService::isNightUnavailable($product, $date)) {
+                $inventoryByDate[$date] = [
+                    'quantity' => 0,
+                    'is_closed' => true,
+                ];
+            }
+        }
+
+        // 酒店或房型被禁用时，产品有效期内库存统一按0推送
+        if ($forceZeroStock) {
+            foreach ($dates as $date) {
                 $inventoryByDate[$date] = [
                     'quantity' => 0,
                     'is_closed' => true,

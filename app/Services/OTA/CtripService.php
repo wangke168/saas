@@ -902,6 +902,21 @@ class CtripService
             $inventoryByDate = $adjustedInventoryByDate;
         }
 
+        // 酒店或房型被禁用时，产品有效期内库存统一按0推送
+        if (!$hotel->is_active || !$roomType->is_active) {
+            foreach ($inventoryByDate as $date => $_quantity) {
+                $inventoryByDate[$date] = 0;
+            }
+
+            Log::info('携程库存推送：酒店或房型已禁用，库存强制置0', [
+                'product_id' => $product->id,
+                'hotel_id' => $hotel->id,
+                'room_type_id' => $roomType->id,
+                'hotel_is_active' => $hotel->is_active,
+                'room_type_is_active' => $roomType->is_active,
+            ]);
+        }
+
         // 构建请求体
         $bodyData = array_merge([
             'sequenceId' => date('Ymd') . str_replace('-', '', \Illuminate\Support\Str::uuid()->toString()),
