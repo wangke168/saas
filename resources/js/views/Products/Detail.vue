@@ -379,6 +379,20 @@
                                 </template>
                             </el-table-column>
                         </el-table>
+                        <div
+                            v-if="priceRulePagination.total > 0"
+                            style="margin-top: 16px; display: flex; justify-content: flex-end;"
+                        >
+                            <el-pagination
+                                v-model:current-page="priceRulePagination.current_page"
+                                v-model:page-size="priceRulePagination.per_page"
+                                :total="priceRulePagination.total"
+                                :page-sizes="[10, 20, 50]"
+                                layout="total, sizes, prev, pager, next"
+                                @current-change="handlePriceRulePageChange"
+                                @size-change="handlePriceRuleSizeChange"
+                            />
+                        </div>
                                             <!-- 加价规则管理对话框 -->
                         <el-dialog
                             v-model="priceRuleDialogVisible"
@@ -790,6 +804,12 @@ const priceRoomTypeIds = ref([]);
 const priceRuleDialogVisible = ref(false);
 const priceRuleSubmitting = ref(false);
 const priceRuleFormRef = ref(null);
+const priceRulePagination = ref({
+    current_page: 1,
+    per_page: 10,
+    total: 0,
+    last_page: 0,
+});
 const priceRuleForm = ref({
     name: '',
     weekdays: [],
@@ -1046,7 +1066,6 @@ const fetchProduct = async () => {
         }
 
         product.value = response.data.data;
-        priceRules.value = product.value.price_rules || [];
         otaProducts.value = product.value.ota_products || [];
         
         // 获取外部编码映射列表
@@ -1058,6 +1077,7 @@ const fetchProduct = async () => {
             await fetchRoomTypes();
         }
         await fetchPriceGroups();
+        await fetchPriceRules();
     } catch (error) {
         const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || '获取产品详情失败';
         ElMessage.error(errorMessage);
@@ -1075,6 +1095,37 @@ const fetchProduct = async () => {
         }
     } finally {
         loading.value = false;
+    }
+};
+
+const fetchPriceRules = async () => {
+    priceRulesLoading.value = true;
+    try {
+        const response = await axios.get('/price-rules', {
+            params: {
+                product_id: route.params.id,
+                page: priceRulePagination.value.current_page,
+                per_page: priceRulePagination.value.per_page,
+            },
+        });
+
+        priceRules.value = response.data?.data || [];
+        priceRulePagination.value = {
+            ...priceRulePagination.value,
+            current_page: response.data?.current_page ?? priceRulePagination.value.current_page,
+            per_page: response.data?.per_page ?? priceRulePagination.value.per_page,
+            total: response.data?.total ?? 0,
+            last_page: response.data?.last_page ?? 0,
+        };
+
+        if (priceRulePagination.value.total > 0 && priceRulePagination.value.current_page > priceRulePagination.value.last_page) {
+            priceRulePagination.value.current_page = priceRulePagination.value.last_page;
+            await fetchPriceRules();
+        }
+    } catch (error) {
+        ElMessage.error(error.response?.data?.message || '获取加价规则失败');
+    } finally {
+        priceRulesLoading.value = false;
     }
 };
 
@@ -1464,7 +1515,7 @@ const handleDeletePriceRule = async (row) => {
         });
         await axios.delete(`/price-rules/${row.id}`);
         ElMessage.success('删除成功');
-        fetchProduct();
+        await fetchPriceRules();
     } catch (error) {
         if (error !== 'cancel') {
             ElMessage.error('删除失败');
@@ -1532,6 +1583,17 @@ const handlePriceRuleHotelChange = (index) => {
     priceRuleForm.value.items[index].room_type_id = null;
 };
 
+const handlePriceRulePageChange = (page) => {
+    priceRulePagination.value.current_page = page;
+    fetchPriceRules();
+};
+
+const handlePriceRuleSizeChange = (size) => {
+    priceRulePagination.value.per_page = size;
+    priceRulePagination.value.current_page = 1;
+    fetchPriceRules();
+};
+
 const handleSubmitPriceRule = async () => {
     if (!priceRuleFormRef.value) return;
 
@@ -1581,11 +1643,12 @@ const handleSubmitPriceRule = async () => {
                 } else {
                     await axios.post('/price-rules', data);
                     ElMessage.success('加价规则创建成功');
+                    priceRulePagination.value.current_page = 1;
                 }
 
                 priceRuleDialogVisible.value = false;
                 resetPriceRuleForm();
-                fetchProduct();
+                await fetchPriceRules();
             } catch (error) {
                 const message = error.response?.data?.message || '操作失败';
                 ElMessage.error(message);
@@ -1840,6 +1903,8 @@ onMounted(async () => {
 watch(activeTab, (tabName) => {
     if (tabName === 'prices') {
         fetchPriceGroups();
+    } else if (tabName === 'priceRules') {
+        fetchPriceRules();
     }
 });
 
