@@ -4,10 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Enums\OrderStatus;
 use App\Enums\PkgOrderStatus;
+use App\Http\Requests\OperationReportRequest;
 use App\Models\Order;
 use App\Models\Pkg\PkgOrder;
+use App\Models\ScenicSpot;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class OperationReportController extends Controller
@@ -15,12 +16,15 @@ class OperationReportController extends Controller
     /**
      * 运营快报统计数据
      * 
-     * @param Request $request
+     * @param OperationReportRequest $request
      * @return JsonResponse
      */
-    public function index(Request $request): JsonResponse
+    public function index(OperationReportRequest $request): JsonResponse
     {
         $period = $request->input('period', 'day'); // realtime, day, week, month, custom
+        $dateType = $request->input('date_type', 'booking'); // booking(预定日期), arrival(预达日期)
+        $dateColumn = $dateType === 'arrival' ? 'check_in_date' : 'created_at';
+        $selectedScenicSpotId = $request->input('scenic_spot_id');
 
         // 计算时间范围
         $startDate = match($period) {
@@ -54,14 +58,31 @@ class OperationReportController extends Controller
         $scenicSpotIds = null;
         if (!$request->user()->isAdmin()) {
             $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
-            $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
+            $scenicSpotIds = ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
                 $query->whereIn('resource_providers.id', $resourceProviderIds);
             })->pluck('id');
         }
+        
+        // 景区筛选（和权限取交集）
+        if (!empty($selectedScenicSpotId)) {
+            $selectedScenicSpotId = (int)$selectedScenicSpotId;
+            if ($scenicSpotIds === null) {
+                $scenicSpotIds = collect([$selectedScenicSpotId]);
+            } else {
+                $scenicSpotIds = $scenicSpotIds->intersect([$selectedScenicSpotId])->values();
+            }
+        }
+        
+        // 当前用户可筛选的景区列表
+        $availableScenicSpotsQuery = ScenicSpot::query()->select('id', 'name');
+        if (!$request->user()->isAdmin()) {
+            $availableScenicSpotsQuery->whereIn('id', $scenicSpotIds ?? collect());
+        }
+        $availableScenicSpots = $availableScenicSpotsQuery->orderBy('name')->get();
 
         // 统计普通订单
-        $orderQuery = Order::where('created_at', '>=', $startDate)
-            ->where('created_at', '<=', $endDate);
+        $orderQuery = Order::query();
+        $this->applyDateRangeFilter($orderQuery, 'orders.' . $dateColumn, $startDate, $endDate, $dateType === 'arrival');
         if ($scenicSpotIds !== null) {
             $orderQuery->whereHas('product', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
@@ -69,8 +90,8 @@ class OperationReportController extends Controller
         }
 
         // 统计打包订单
-        $pkgOrderQuery = PkgOrder::where('created_at', '>=', $startDate)
-            ->where('created_at', '<=', $endDate);
+        $pkgOrderQuery = PkgOrder::query();
+        $this->applyDateRangeFilter($pkgOrderQuery, 'pkg_orders.' . $dateColumn, $startDate, $endDate, $dateType === 'arrival');
         if ($scenicSpotIds !== null) {
             $pkgOrderQuery->whereHas('product', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
@@ -95,21 +116,28 @@ class OperationReportController extends Controller
         $statusDistribution = $this->getStatusDistribution($orderQuery, $pkgOrderQuery);
 
         // 按OTA平台分布
-        $platformDistribution = $this->getPlatformDistribution($startDate, $scenicSpotIds, $endDate);
+        $platformDistribution = $this->getPlatformDistribution($startDate, $scenicSpotIds, $endDate, $dateColumn, $dateType === 'arrival');
 
         // 时间趋势（按天统计）
-        $timeTrend = $this->getTimeTrend($orderQuery, $pkgOrderQuery, $startDate);
+        $timeTrend = $this->getTimeTrend($orderQuery, $pkgOrderQuery, $dateColumn);
+        
+        // 销售前十产品（按销售额降序）
+        $topProducts = $this->getTopProducts($orderQuery, $pkgOrderQuery);
 
         return response()->json([
             'period' => $period,
+            'date_type' => $dateType,
+            'scenic_spot_id' => $selectedScenicSpotId,
             'start_date' => $startDate->format('Y-m-d H:i:s'),
             'end_date' => $endDate->format('Y-m-d H:i:s'),
+            'available_scenic_spots' => $availableScenicSpots,
             'stats' => $totalStats,
             'order_stats' => $orderStats,
             'pkg_order_stats' => $pkgOrderStats,
             'status_distribution' => $statusDistribution,
             'platform_distribution' => $platformDistribution,
             'time_trend' => $timeTrend,
+            'top_products' => $topProducts,
         ]);
     }
 
@@ -208,13 +236,13 @@ class OperationReportController extends Controller
     /**
      * 获取OTA平台分布
      */
-    private function getPlatformDistribution($startDate, $scenicSpotIds, $endDate = null)
+    private function getPlatformDistribution($startDate, $scenicSpotIds, $endDate = null, string $dateColumn = 'created_at', bool $useDateOnly = false)
     {
         $endDate = $endDate ?? now();
         
         // 普通订单平台分布 - 明确指定表名以避免列名不明确的问题
-        $orderPlatformsQuery = Order::where('orders.created_at', '>=', $startDate)
-            ->where('orders.created_at', '<=', $endDate);
+        $orderPlatformsQuery = Order::query();
+        $this->applyDateRangeFilter($orderPlatformsQuery, 'orders.' . $dateColumn, $startDate, $endDate, $useDateOnly);
         
         // 应用权限过滤
         if ($scenicSpotIds !== null) {
@@ -236,8 +264,8 @@ class OperationReportController extends Controller
             ->get();
 
         // 打包订单平台分布 - 明确指定表名以避免列名不明确的问题
-        $pkgOrderPlatformsQuery = PkgOrder::where('pkg_orders.created_at', '>=', $startDate)
-            ->where('pkg_orders.created_at', '<=', $endDate);
+        $pkgOrderPlatformsQuery = PkgOrder::query();
+        $this->applyDateRangeFilter($pkgOrderPlatformsQuery, 'pkg_orders.' . $dateColumn, $startDate, $endDate, $useDateOnly);
         
         // 应用权限过滤
         if ($scenicSpotIds !== null) {
@@ -306,16 +334,16 @@ class OperationReportController extends Controller
     /**
      * 获取时间趋势（按天统计）
      */
-    private function getTimeTrend($orderQuery, $pkgOrderQuery, $startDate)
+    private function getTimeTrend($orderQuery, $pkgOrderQuery, string $dateColumn = 'created_at')
     {
         // 普通订单按天统计
         $orderTrend = (clone $orderQuery)
             ->select(
-                DB::raw('DATE(created_at) as date'),
+                DB::raw("DATE({$dateColumn}) as date"),
                 DB::raw('count(*) as count'),
                 DB::raw('sum(total_amount) as total_amount')
             )
-            ->groupBy(DB::raw('DATE(created_at)'))
+            ->groupBy(DB::raw("DATE({$dateColumn})"))
             ->orderBy('date')
             ->get()
             ->keyBy('date')
@@ -330,11 +358,11 @@ class OperationReportController extends Controller
         // 打包订单按天统计
         $pkgOrderTrend = (clone $pkgOrderQuery)
             ->select(
-                DB::raw('DATE(created_at) as date'),
+                DB::raw("DATE({$dateColumn}) as date"),
                 DB::raw('count(*) as count'),
                 DB::raw('sum(total_amount) as total_amount')
             )
-            ->groupBy(DB::raw('DATE(created_at)'))
+            ->groupBy(DB::raw("DATE({$dateColumn})"))
             ->orderBy('date')
             ->get()
             ->keyBy('date')
@@ -363,6 +391,79 @@ class OperationReportController extends Controller
         }
 
         return $trend;
+    }
+
+    /**
+     * 获取销售额排名前十产品（普通产品+打包产品）
+     */
+    private function getTopProducts($orderQuery, $pkgOrderQuery)
+    {
+        $orderProducts = (clone $orderQuery)
+            ->join('products', 'orders.product_id', '=', 'products.id')
+            ->select(
+                DB::raw("'order' as product_type"),
+                'products.id as product_id',
+                'products.name as product_name',
+                DB::raw('count(*) as order_count'),
+                DB::raw('sum(orders.total_amount) as total_amount'),
+                DB::raw('sum(orders.settlement_amount) as settlement_amount')
+            )
+            ->groupBy('products.id', 'products.name')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'product_type' => $item->product_type,
+                    'product_id' => $item->product_id,
+                    'product_name' => $item->product_name,
+                    'order_count' => (int)$item->order_count,
+                    'total_amount' => (float)$item->total_amount,
+                    'settlement_amount' => (float)$item->settlement_amount,
+                ];
+            });
+
+        $pkgOrderProducts = (clone $pkgOrderQuery)
+            ->join('pkg_products', 'pkg_orders.pkg_product_id', '=', 'pkg_products.id')
+            ->select(
+                DB::raw("'pkg_order' as product_type"),
+                'pkg_products.id as product_id',
+                'pkg_products.product_name as product_name',
+                DB::raw('count(*) as order_count'),
+                DB::raw('sum(pkg_orders.total_amount) as total_amount'),
+                DB::raw('sum(pkg_orders.settlement_amount) as settlement_amount')
+            )
+            ->groupBy('pkg_products.id', 'pkg_products.product_name')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'product_type' => $item->product_type,
+                    'product_id' => $item->product_id,
+                    'product_name' => $item->product_name,
+                    'order_count' => (int)$item->order_count,
+                    'total_amount' => (float)$item->total_amount,
+                    'settlement_amount' => (float)$item->settlement_amount,
+                ];
+            });
+
+        return $orderProducts
+            ->concat($pkgOrderProducts)
+            ->sortByDesc('total_amount')
+            ->take(10)
+            ->values();
+    }
+
+    /**
+     * 为查询应用时间范围过滤
+     */
+    private function applyDateRangeFilter($query, string $column, $startDate, $endDate, bool $useDateOnly = false): void
+    {
+        if ($useDateOnly) {
+            $query->whereDate($column, '>=', $startDate->toDateString())
+                ->whereDate($column, '<=', $endDate->toDateString());
+            return;
+        }
+        
+        $query->where($column, '>=', $startDate)
+            ->where($column, '<=', $endDate);
     }
 }
 

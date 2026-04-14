@@ -2,6 +2,37 @@
     <div class="operation-report-container">
         <h2>运营快报</h2>
         <el-card>
+            <div class="filter-row">
+                <el-select
+                    v-model="selectedScenicSpotId"
+                    placeholder="选择景区（默认全部）"
+                    clearable
+                    filterable
+                    style="width: 260px"
+                    @change="handleFilterChange"
+                >
+                    <el-option
+                        v-for="spot in scenicSpotOptions"
+                        :key="spot.id"
+                        :label="spot.name"
+                        :value="spot.id"
+                    />
+                </el-select>
+
+                <el-radio-group v-model="dateType" @change="handleFilterChange">
+                    <el-radio-button label="booking">预定日期</el-radio-button>
+                    <el-radio-button label="arrival">预达日期</el-radio-button>
+                </el-radio-group>
+            </div>
+            <div class="date-type-tip">
+                <el-text v-if="dateType === 'arrival'" type="warning">
+                    当前按预达日期（check_in_date）统计，反映游客到达节奏而非下单节奏。
+                </el-text>
+                <el-text v-else type="info">
+                    当前按预定日期（created_at）统计，反映平台下单节奏。
+                </el-text>
+            </div>
+
             <!-- 时间周期切换 -->
             <div class="period-tabs">
                 <el-radio-group v-model="selectedPeriod" @change="handlePeriodChange">
@@ -198,6 +229,41 @@
                         </el-table-column>
                     </el-table>
                 </el-card>
+
+                <!-- 销售TOP10产品 -->
+                <el-card class="chart-card" v-if="reportData.top_products?.length > 0">
+                    <template #header>
+                        <div class="card-header">
+                            <span>销售TOP10产品（按销售额）</span>
+                        </div>
+                    </template>
+                    <el-table :data="reportData.top_products" border>
+                        <el-table-column type="index" label="排名" width="80" align="center" />
+                        <el-table-column prop="product_name" label="产品名称" min-width="260" />
+                        <el-table-column prop="product_type" label="产品类型" width="120" align="center">
+                            <template #default="{ row }">
+                                <el-tag size="small" :type="row.product_type === 'order' ? 'primary' : 'success'">
+                                    {{ row.product_type === 'order' ? '普通产品' : '打包产品' }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="order_count" label="订单数" width="120" align="right">
+                            <template #default="{ row }">
+                                {{ row.order_count }} 单
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="total_amount" label="销售额" width="160" align="right">
+                            <template #default="{ row }">
+                                ¥{{ formatPrice(row.total_amount) }}
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="settlement_amount" label="结算额" width="160" align="right">
+                            <template #default="{ row }">
+                                ¥{{ formatPrice(row.settlement_amount) }}
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-card>
             </div>
         </el-card>
     </div>
@@ -211,16 +277,23 @@ import { ElMessage } from 'element-plus';
 const loading = ref(false);
 const selectedPeriod = ref('realtime');
 const customDateRange = ref(null);
+const selectedScenicSpotId = ref(null);
+const scenicSpotOptions = ref([]);
+const dateType = ref('booking');
 const reportData = ref({
     period: 'day',
+    date_type: 'booking',
+    scenic_spot_id: null,
     start_date: '',
     end_date: '',
+    available_scenic_spots: [],
     stats: {},
     order_stats: {},
     pkg_order_stats: {},
     status_distribution: [],
     platform_distribution: [],
     time_trend: [],
+    top_products: [],
 });
 
 const fetchReport = async () => {
@@ -228,7 +301,12 @@ const fetchReport = async () => {
     try {
         const params = {
             period: selectedPeriod.value,
+            date_type: dateType.value,
         };
+
+        if (selectedScenicSpotId.value) {
+            params.scenic_spot_id = selectedScenicSpotId.value;
+        }
         
         // 如果是自定义日期范围，传递日期参数
         if (selectedPeriod.value === 'custom' && customDateRange.value && customDateRange.value.length === 2) {
@@ -238,6 +316,7 @@ const fetchReport = async () => {
         
         const response = await axios.get('/operation-report', { params });
         reportData.value = response.data;
+        scenicSpotOptions.value = response.data.available_scenic_spots || [];
     } catch (error) {
         console.error('获取运营快报数据失败:', error);
         ElMessage.error('获取运营快报数据失败');
@@ -259,6 +338,10 @@ const handleCustomDateChange = () => {
     if (customDateRange.value && customDateRange.value.length === 2) {
         fetchReport();
     }
+};
+
+const handleFilterChange = () => {
+    fetchReport();
 };
 
 const formatPrice = (price) => {
@@ -334,6 +417,19 @@ onMounted(() => {
     justify-content: center;
     flex-wrap: wrap;
     gap: 10px;
+}
+
+.filter-row {
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.date-type-tip {
+    margin-bottom: 12px;
 }
 
 .custom-date-range {
@@ -430,6 +526,11 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+    .filter-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
     .stats-cards {
         grid-template-columns: 1fr;
     }
