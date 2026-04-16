@@ -7,7 +7,6 @@ use App\Models\ChannelSyncRequest;
 use App\Models\Inventory;
 use App\Services\Channel\ResHotelRoomMappingService;
 use App\Services\Channel\ResHotelRoomStockOtaPushService;
-use App\Services\Channel\RoomSwitchDecisionService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -39,7 +38,6 @@ class ProcessRoomSwitchSyncJob implements ShouldQueue
     }
 
     public function handle(
-        RoomSwitchDecisionService $decisionService,
         ResHotelRoomMappingService $mappingService,
         ResHotelRoomStockOtaPushService $otaPushService
     ): void {
@@ -83,13 +81,14 @@ class ProcessRoomSwitchSyncJob implements ShouldQueue
                     continue;
                 }
 
-                $targetOpen = $decisionService->shouldOpen($availability);
-
                 foreach ($availability as $dailyItem) {
                     $bizDate = (string) ($dailyItem['date'] ?? '');
                     if ($bizDate === '') {
                         continue;
                     }
+
+                    $dailyStatus = (int) ($dailyItem['status'] ?? 0);
+                    $targetOpen = $dailyStatus === 1;
 
                     $changed = $this->applyRoomSwitch(
                         $mapping['room_type_id'],
