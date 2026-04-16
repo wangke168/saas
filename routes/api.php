@@ -46,6 +46,10 @@ Route::prefix('webhooks')->group(function () {
     }
 });
 
+// 资源方开关房状态推送（无需认证，使用签名校验）
+Route::post('/channel/{provider}/room-switch-sync', [\App\Http\Controllers\Channel\RoomSwitchSyncController::class, 'store'])
+    ->middleware('channel.signature');
+
 // 认证相关路由（无需认证）
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);

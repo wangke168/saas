@@ -15,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
+            'channel.signature' => \App\Http\Middleware\VerifyChannelSignature::class,
         ]);
         // 注意：EnsureFrontendRequestsAreStateful 可能导致重定向
         // 如果不需要状态认证，可以移除或配置
