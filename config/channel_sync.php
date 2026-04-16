@@ -2,6 +2,8 @@
 
 return [
     'debug_signature' => (bool) env('CHANNEL_SYNC_DEBUG_SIGNATURE', false),
+    'debug_payload' => (bool) env('CHANNEL_SYNC_DEBUG_PAYLOAD', false),
+    'payload_log_limit_bytes' => (int) env('CHANNEL_SYNC_PAYLOAD_LOG_LIMIT_BYTES', 50_000),
 
     'providers' => [
         'wuzhen' => [

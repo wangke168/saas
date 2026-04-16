@@ -17,6 +17,8 @@ class RoomSwitchSyncController extends Controller
         $requestId = (string) $payload['request_id'];
         $source = (string) $payload['source'];
         $rawBody = (string) $request->getContent();
+        $rawBodySize = strlen($rawBody);
+        $rawBodySha256 = hash('sha256', $rawBody);
         $payloadHash = hash('sha256', $rawBody);
 
         $syncRequest = ChannelSyncRequest::firstOrCreate(
@@ -46,6 +48,23 @@ class RoomSwitchSyncController extends Controller
                     'request_id' => $requestId,
                     'idempotent_hit' => true,
                 ],
+            ]);
+        }
+
+        if ((bool) config('channel_sync.debug_payload', false)) {
+            $limitBytes = (int) config('channel_sync.payload_log_limit_bytes', 50_000);
+            $truncated = $rawBodySize > $limitBytes
+                ? mb_strcut($rawBody, 0, $limitBytes, 'UTF-8')
+                : $rawBody;
+
+            Log::info('开关房同步调试：记录原始 JSON payload', [
+                'provider' => $provider,
+                'request_id' => $requestId,
+                'source' => $source,
+                'raw_body_size' => $rawBodySize,
+                'raw_body_sha256' => $rawBodySha256,
+                'raw_body_truncated' => $truncated,
+                'truncated' => $rawBodySize > $limitBytes,
             ]);
         }
 
