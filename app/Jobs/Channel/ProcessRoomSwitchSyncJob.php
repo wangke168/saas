@@ -4,7 +4,7 @@ namespace App\Jobs\Channel;
 
 use App\Enums\PriceSource;
 use App\Models\ChannelSyncRequest;
-use App\Models\Res\ResHotelDailyStock;
+use App\Models\Inventory;
 use App\Services\Channel\ResHotelRoomMappingService;
 use App\Services\Channel\ResHotelRoomStockOtaPushService;
 use App\Services\Channel\RoomSwitchDecisionService;
@@ -58,8 +58,6 @@ class ProcessRoomSwitchSyncJob implements ShouldQueue
         ];
 
         $autoPush = (bool) config("channel_sync.providers.{$this->provider}.auto_push_ota", true);
-        $providerApiType = config("channel_sync.providers.{$this->provider}.software_provider_api_type");
-
         foreach ((array) ($this->payload['data'] ?? []) as $hotelItem) {
             $externalHotelCode = (string) ($hotelItem['hotel_name'] ?? '');
             $poiId = isset($hotelItem['poi_id']) ? (string) $hotelItem['poi_id'] : null;
@@ -72,7 +70,7 @@ class ProcessRoomSwitchSyncJob implements ShouldQueue
                     $externalHotelCode,
                     $externalRoomTypeCode,
                     $poiId,
-                    is_string($providerApiType) ? $providerApiType : null
+                    null
                 );
 
                 if ($mapping === null) {
@@ -94,7 +92,6 @@ class ProcessRoomSwitchSyncJob implements ShouldQueue
                     }
 
                     $changed = $this->applyRoomSwitch(
-                        $mapping['hotel_id'],
                         $mapping['room_type_id'],
                         $bizDate,
                         $targetOpen
@@ -140,26 +137,21 @@ class ProcessRoomSwitchSyncJob implements ShouldQueue
         ]);
     }
 
-    private function applyRoomSwitch(int $hotelId, int $roomTypeId, string $bizDate, bool $open): bool
+    private function applyRoomSwitch(int $roomTypeId, string $bizDate, bool $open): bool
     {
-        return (bool) DB::transaction(function () use ($hotelId, $roomTypeId, $bizDate, $open): bool {
-            $stock = ResHotelDailyStock::lockForUpdate()
-                ->where('hotel_id', $hotelId)
+        return (bool) DB::transaction(function () use ($roomTypeId, $bizDate, $open): bool {
+            $inventory = Inventory::lockForUpdate()
                 ->where('room_type_id', $roomTypeId)
-                ->whereDate('biz_date', $bizDate)
+                ->whereDate('date', $bizDate)
                 ->first();
 
-            if ($stock === null) {
-                $stock = ResHotelDailyStock::create([
-                    'hotel_id' => $hotelId,
+            if ($inventory === null) {
+                Inventory::create([
                     'room_type_id' => $roomTypeId,
-                    'biz_date' => $bizDate,
-                    'cost_price' => 0,
-                    'sale_price' => 0,
-                    'stock_total' => 0,
-                    'stock_sold' => 0,
-                    'stock_available' => 0,
-                    'version' => 0,
+                    'date' => $bizDate,
+                    'total_quantity' => 0,
+                    'available_quantity' => 0,
+                    'locked_quantity' => 0,
                     'source' => PriceSource::API->value,
                     'is_closed' => !$open,
                 ]);
@@ -168,11 +160,11 @@ class ProcessRoomSwitchSyncJob implements ShouldQueue
             }
 
             $newClosed = !$open;
-            if ((bool) $stock->is_closed === $newClosed) {
+            if ((bool) $inventory->is_closed === $newClosed) {
                 return false;
             }
 
-            $stock->update([
+            $inventory->update([
                 'is_closed' => $newClosed,
                 'source' => PriceSource::API->value,
             ]);
