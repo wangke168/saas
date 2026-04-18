@@ -3,14 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Enums\OtaPlatform;
-use App\Models\OtaProduct;
+use App\Models\Price;
 use App\Models\Product;
 use App\Services\OTA\CtripService;
 use App\Services\ProductService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Carbon;
 
 class ProductController extends Controller
 {
@@ -31,7 +31,7 @@ class ProductController extends Controller
             $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
                 $query->whereIn('resource_providers.id', $resourceProviderIds);
             })->pluck('id');
-            
+
             $query->whereIn('scenic_spot_id', $scenicSpotIds);
         }
 
@@ -40,8 +40,8 @@ class ProductController extends Controller
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('code', 'like', "%{$search}%")
-                  ->orWhere('external_code', 'like', "%{$search}%");
+                    ->orWhere('code', 'like', "%{$search}%")
+                    ->orWhere('external_code', 'like', "%{$search}%");
             });
         }
 
@@ -73,7 +73,7 @@ class ProductController extends Controller
         try {
             // 先加载基本关联
             $product->load(['scenicSpot', 'softwareProvider', 'unavailablePeriods']);
-            
+
             if ($includePrices) {
                 // 加载价格及其关联（如果存在）
                 $product->load(['prices' => function ($query) {
@@ -82,14 +82,14 @@ class ProductController extends Controller
                     }]);
                 }]);
             }
-            
+
             // 加载加价规则及其关联（如果存在）
             $product->load(['priceRules' => function ($query) {
                 $query->with(['items' => function ($q) {
                     $q->with(['hotel', 'roomType']);
                 }]);
             }]);
-            
+
             // 加载OTA产品关联（如果存在）
             $product->load(['otaProducts' => function ($query) {
                 $query->with('otaPlatform');
@@ -100,7 +100,7 @@ class ProductController extends Controller
                 'product_id' => $product->id,
                 'error' => $e->getMessage(),
             ]);
-            
+
             // 尝试只加载基本关联
             $relations = ['scenicSpot', 'softwareProvider', 'priceRules', 'otaProducts'];
             if ($includePrices) {
@@ -108,7 +108,7 @@ class ProductController extends Controller
             }
             $product->load($relations);
         }
-        
+
         return response()->json([
             'data' => $product,
         ]);
@@ -139,6 +139,72 @@ class ProductController extends Controller
     }
 
     /**
+     * 产品日历价格（应用加价规则后，与 OTA 同步口径的 sale/settlement/market）
+     *
+     * 每条记录对应一条基础 {@see Price}；展示字段为计算后的 OTA 价，base_* 为库中基础价（用于编辑）。
+     */
+    public function calendarOtaPrices(Request $request, Product $product): JsonResponse
+    {
+        $this->authorize('view', $product);
+
+        $validated = $request->validate([
+            'year' => 'required|integer|min:2000|max:2100',
+            'month' => 'required|integer|min:1|max:12',
+            'room_type_ids' => 'required|array|min:1|max:8',
+            'room_type_ids.*' => 'integer|exists:room_types,id',
+        ]);
+
+        $year = (int) $validated['year'];
+        $month = (int) $validated['month'];
+        $daysInMonth = Carbon::create($year, $month, 1)->daysInMonth;
+
+        $rows = [];
+
+        foreach ($validated['room_type_ids'] as $roomTypeId) {
+            $roomTypeId = (int) $roomTypeId;
+
+            for ($day = 1; $day <= $daysInMonth; $day++) {
+                $dateStr = sprintf('%04d-%02d-%02d', $year, $month, $day);
+
+                $basePrice = Price::query()
+                    ->where('product_id', $product->id)
+                    ->where('room_type_id', $roomTypeId)
+                    ->whereDate('date', $dateStr)
+                    ->first();
+
+                if ($basePrice === null) {
+                    continue;
+                }
+
+                $calculated = $this->productService->calculatePrice($product, $roomTypeId, $dateStr);
+
+                $rows[] = [
+                    'id' => $basePrice->id,
+                    'date' => $dateStr,
+                    'room_type_id' => $roomTypeId,
+                    'market_price' => $calculated['market_price'],
+                    'settlement_price' => $calculated['settlement_price'],
+                    'sale_price' => $calculated['sale_price'],
+                    'base_market_price' => (float) $basePrice->market_price,
+                    'base_settlement_price' => (float) $basePrice->settlement_price,
+                    'base_sale_price' => (float) $basePrice->sale_price,
+                    'source' => $basePrice->source instanceof \BackedEnum ? $basePrice->source->value : $basePrice->source,
+                ];
+            }
+        }
+
+        usort($rows, function (array $a, array $b): int {
+            $dc = strcmp($a['date'], $b['date']);
+
+            return $dc !== 0 ? $dc : $a['room_type_id'] <=> $b['room_type_id'];
+        });
+
+        return response()->json([
+            'data' => $rows,
+        ]);
+    }
+
+    /**
      * 创建产品
      */
     public function store(Request $request): JsonResponse
@@ -155,7 +221,7 @@ class ProductController extends Controller
                         $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
                         if ($scenicSpot) {
                             $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
-                            if (!in_array($value, $providerIds)) {
+                            if (! in_array($value, $providerIds)) {
                                 $fail('选择的服务商不属于该景区的服务商列表');
                             }
                         }
@@ -183,7 +249,7 @@ class ProductController extends Controller
                             $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
                             if ($scenicSpot) {
                                 $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
-                                if (!in_array($value, $providerIds)) {
+                                if (! in_array($value, $providerIds)) {
                                     $fail('选择的订单下发服务商不属于该景区的服务商列表');
                                 }
                             }
@@ -242,7 +308,7 @@ class ProductController extends Controller
                         $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
                         if ($scenicSpot) {
                             $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
-                            if (!in_array($value, $providerIds)) {
+                            if (! in_array($value, $providerIds)) {
                                 $fail('选择的服务商不属于该景区的服务商列表');
                             }
                         }
@@ -250,7 +316,7 @@ class ProductController extends Controller
                 },
             ],
             'name' => 'sometimes|required|string|max:255',
-            'code' => ['sometimes', 'nullable', 'string', 'max:255', 'unique:products,code,' . $product->id], // code 不可修改，但允许为空（自动生成）
+            'code' => ['sometimes', 'nullable', 'string', 'max:255', 'unique:products,code,'.$product->id], // code 不可修改，但允许为空（自动生成）
             'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
             'description' => 'nullable|string',
             'price_source' => 'sometimes|in:manual,api',
@@ -270,7 +336,7 @@ class ProductController extends Controller
                             $scenicSpot = \App\Models\ScenicSpot::find($scenicSpotId);
                             if ($scenicSpot) {
                                 $providerIds = $scenicSpot->softwareProviders()->pluck('software_providers.id')->toArray();
-                                if (!in_array($value, $providerIds)) {
+                                if (! in_array($value, $providerIds)) {
                                     $fail('选择的订单下发服务商不属于该景区的服务商列表');
                                 }
                             }
@@ -341,7 +407,7 @@ class ProductController extends Controller
 
         // 获取携程平台
         $ctripPlatform = \App\Models\OtaPlatform::where('code', OtaPlatform::CTRIP->value)->first();
-        if (!$ctripPlatform) {
+        if (! $ctripPlatform) {
             return response()->json([
                 'message' => '携程平台不存在',
             ], 404);
@@ -352,7 +418,7 @@ class ProductController extends Controller
             ->where('ota_platform_id', $ctripPlatform->id)
             ->first();
 
-        if (!$otaProduct) {
+        if (! $otaProduct) {
             return response()->json([
                 'message' => '该产品未绑定到携程平台，请先在产品详情页绑定OTA平台',
             ], 400);
@@ -370,7 +436,7 @@ class ProductController extends Controller
 
         // 获取产品的所有"产品-酒店-房型"组合
         $prices = $product->prices()->with(['roomType.hotel'])->get();
-        
+
         if ($prices->isEmpty()) {
             return response()->json([
                 'message' => '产品未关联价格数据，请先添加价格',
@@ -384,12 +450,12 @@ class ProductController extends Controller
 
         foreach ($prices as $price) {
             $roomType = $price->roomType;
-            if (!$roomType) {
+            if (! $roomType) {
                 continue;
             }
 
             $hotel = $roomType->hotel;
-            if (!$hotel) {
+            if (! $hotel) {
                 continue;
             }
 
@@ -405,13 +471,14 @@ class ProductController extends Controller
                 $missingFields[] = "房型编码（{$roomType->name}）";
             }
 
-            if (!empty($missingFields)) {
-                $missingCodes[] = "酒店：{$hotel->name}，房型：{$roomType->name}（缺少：" . implode('、', $missingFields) . "）";
+            if (! empty($missingFields)) {
+                $missingCodes[] = "酒店：{$hotel->name}，房型：{$roomType->name}（缺少：".implode('、', $missingFields).'）';
+
                 continue;
             }
 
             $key = "{$hotel->id}_{$roomType->id}";
-            if (!isset($seen[$key])) {
+            if (! isset($seen[$key])) {
                 // 生成携程PLU编号
                 $ctripPlu = $ctripService->generateCtripProductCode(
                     $product->code,
@@ -434,19 +501,19 @@ class ProductController extends Controller
         // 如果没有可导出的数据
         if (empty($exportData)) {
             $errorMessage = '没有可导出的数据。';
-            if (!empty($missingCodes)) {
-                $errorMessage .= '原因：' . implode('；', array_unique($missingCodes));
+            if (! empty($missingCodes)) {
+                $errorMessage .= '原因：'.implode('；', array_unique($missingCodes));
             } else {
                 $errorMessage .= '请确保产品已关联酒店和房型，并且产品、酒店、房型都有编码。';
             }
-            
+
             return response()->json([
                 'message' => $errorMessage,
             ], 400);
         }
 
         // 生成CSV内容（可以重命名为.xlsx，Excel也能打开）
-        $filename = 'product_' . $product->code . '_' . date('Y-m-d_His') . '.csv';
+        $filename = 'product_'.$product->code.'_'.date('Y-m-d_His').'.csv';
         $headers = [
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Content-Disposition' => "attachment; filename=\"{$filename}\"",
@@ -480,8 +547,9 @@ class ProductController extends Controller
     {
         // 如果字段包含逗号、引号或换行符，需要用引号包裹，并转义引号
         if (strpos($field, ',') !== false || strpos($field, '"') !== false || strpos($field, "\n") !== false) {
-            return '"' . str_replace('"', '""', $field) . '"';
+            return '"'.str_replace('"', '""', $field).'"';
         }
+
         return $field;
     }
 }

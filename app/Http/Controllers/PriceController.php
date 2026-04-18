@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Price;
 use App\Enums\PriceSource;
+use App\Models\Price;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -14,25 +14,43 @@ class PriceController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'product_id' => 'sometimes|integer|exists:products,id',
+            'room_type_id' => 'sometimes|integer|exists:room_types,id',
+            'room_type_ids' => 'sometimes|array',
+            'room_type_ids.*' => 'integer|exists:room_types,id',
+            'date' => 'sometimes|date',
+            'start_date' => 'sometimes|date',
+            'end_date' => 'sometimes|date|after_or_equal:start_date',
+            'per_page' => 'sometimes|integer|min:1|max:500',
+        ]);
+
         $query = Price::with(['product', 'roomType']);
 
-        if ($request->has('product_id')) {
-            $query->where('product_id', $request->product_id);
+        if (! empty($validated['product_id'])) {
+            $query->where('product_id', $validated['product_id']);
         }
 
-        if ($request->has('room_type_id')) {
-            $query->where('room_type_id', $request->room_type_id);
+        if (! empty($validated['room_type_ids'])) {
+            $query->whereIn('room_type_id', $validated['room_type_ids']);
+        } elseif (! empty($validated['room_type_id'])) {
+            $query->where('room_type_id', $validated['room_type_id']);
         }
 
-        if ($request->has('date')) {
-            $query->where('date', $request->date);
+        if (! empty($validated['date'])) {
+            $query->where('date', $validated['date']);
         }
 
-        if ($request->has('start_date') && $request->has('end_date')) {
-            $query->whereBetween('date', [$request->start_date, $request->end_date]);
+        if (! empty($validated['start_date']) && ! empty($validated['end_date'])) {
+            $query->whereBetween('date', [$validated['start_date'], $validated['end_date']]);
         }
 
-        $prices = $query->orderBy('date')->paginate($request->get('per_page', 15));
+        $perPage = (int) ($validated['per_page'] ?? $request->get('per_page', 15));
+
+        $prices = $query
+            ->orderBy('date')
+            ->orderBy('room_type_id')
+            ->paginate($perPage);
 
         return response()->json($prices);
     }

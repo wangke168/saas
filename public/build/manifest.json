@@ -5,7 +5,7 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-DcsKLzHd.js",
+    "file": "assets/app-C_2tFy3c.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -39,7 +39,7 @@
     ]
   },
   "resources/js/views/ExceptionOrders/Index.vue": {
-    "file": "assets/Index-Bw4cWqEe.js",
+    "file": "assets/Index-CyUfNSuV.js",
     "name": "Index",
     "src": "resources/js/views/ExceptionOrders/Index.vue",
     "isDynamicEntry": true,
@@ -48,7 +48,7 @@
     ]
   },
   "resources/js/views/Hotels/Index.vue": {
-    "file": "assets/Index-BFUxHNdS.js",
+    "file": "assets/Index-C8okafQk.js",
     "name": "Index",
     "src": "resources/js/views/Hotels/Index.vue",
     "isDynamicEntry": true,
@@ -60,7 +60,7 @@
     ]
   },
   "resources/js/views/Login.vue": {
-    "file": "assets/Login-B57zvwSs.js",
+    "file": "assets/Login-CfDVWMKm.js",
     "name": "Login",
     "src": "resources/js/views/Login.vue",
     "isDynamicEntry": true,
@@ -72,7 +72,7 @@
     ]
   },
   "resources/js/views/OperationReport/Index.vue": {
-    "file": "assets/Index-BN5Z940p.js",
+    "file": "assets/Index-C8aXuEPK.js",
     "name": "Index",
     "src": "resources/js/views/OperationReport/Index.vue",
     "isDynamicEntry": true,
@@ -84,7 +84,7 @@
     ]
   },
   "resources/js/views/Orders/Detail.vue": {
-    "file": "assets/Detail-CPqhRE1P.js",
+    "file": "assets/Detail-CySwb-h_.js",
     "name": "Detail",
     "src": "resources/js/views/Orders/Detail.vue",
     "isDynamicEntry": true,
@@ -96,7 +96,7 @@
     ]
   },
   "resources/js/views/Orders/Index.vue": {
-    "file": "assets/Index-CNBWtfM6.js",
+    "file": "assets/Index-DSQU22rb.js",
     "name": "Index",
     "src": "resources/js/views/Orders/Index.vue",
     "isDynamicEntry": true,
@@ -108,7 +108,7 @@
     ]
   },
   "resources/js/views/OtaPlatforms/Index.vue": {
-    "file": "assets/Index-BpDgsr6-.js",
+    "file": "assets/Index-C4FNRpVD.js",
     "name": "Index",
     "src": "resources/js/views/OtaPlatforms/Index.vue",
     "isDynamicEntry": true,
@@ -117,7 +117,7 @@
     ]
   },
   "resources/js/views/PkgOrders/Detail.vue": {
-    "file": "assets/Detail-CiHhStYV.js",
+    "file": "assets/Detail-C_vDupiS.js",
     "name": "Detail",
     "src": "resources/js/views/PkgOrders/Detail.vue",
     "isDynamicEntry": true,
@@ -129,7 +129,7 @@
     ]
   },
   "resources/js/views/PkgOrders/Index.vue": {
-    "file": "assets/Index-BIxKEJIc.js",
+    "file": "assets/Index-BFZ4SVeh.js",
     "name": "Index",
     "src": "resources/js/views/PkgOrders/Index.vue",
     "isDynamicEntry": true,
@@ -141,7 +141,7 @@
     ]
   },
   "resources/js/views/PkgProducts/Detail.vue": {
-    "file": "assets/Detail-DScURclO.js",
+    "file": "assets/Detail-Cju-kjEa.js",
     "name": "Detail",
     "src": "resources/js/views/PkgProducts/Detail.vue",
     "isDynamicEntry": true,
@@ -153,7 +153,7 @@
     ]
   },
   "resources/js/views/PkgProducts/Index.vue": {
-    "file": "assets/Index-D_Ew_GtR.js",
+    "file": "assets/Index-CEYOuSd6.js",
     "name": "Index",
     "src": "resources/js/views/PkgProducts/Index.vue",
     "isDynamicEntry": true,
@@ -165,7 +165,7 @@
     ]
   },
   "resources/js/views/PkgProducts/PriceManagement.vue": {
-    "file": "assets/PriceManagement-BnuqCpDc.js",
+    "file": "assets/PriceManagement-TYigbY8x.js",
     "name": "PriceManagement",
     "src": "resources/js/views/PkgProducts/PriceManagement.vue",
     "isDynamicEntry": true,
@@ -177,7 +177,7 @@
     ]
   },
   "resources/js/views/Products/Detail.vue": {
-    "file": "assets/Detail-CWc8jyY9.js",
+    "file": "assets/Detail-DYSUH2Yq.js",
     "name": "Detail",
     "src": "resources/js/views/Products/Detail.vue",
     "isDynamicEntry": true,
@@ -185,11 +185,11 @@
       "resources/js/app.js"
     ],
     "css": [
-      "assets/Detail-D4N-qhR4.css"
+      "assets/Detail-BR5rCZ4J.css"
     ]
   },
   "resources/js/views/Products/Index.vue": {
-    "file": "assets/Index-BV_YeBnW.js",
+    "file": "assets/Index-D_4Chufa.js",
     "name": "Index",
     "src": "resources/js/views/Products/Index.vue",
     "isDynamicEntry": true,
@@ -201,7 +201,7 @@
     ]
   },
   "resources/js/views/Profile/Index.vue": {
-    "file": "assets/Index-DWw0EmMx.js",
+    "file": "assets/Index-CFzLTuUL.js",
     "name": "Index",
     "src": "resources/js/views/Profile/Index.vue",
     "isDynamicEntry": true,
@@ -210,7 +210,7 @@
     ]
   },
   "resources/js/views/ResHotels/Detail.vue": {
-    "file": "assets/Detail-BGR_xHBD.js",
+    "file": "assets/Detail-Bux5_fwv.js",
     "name": "Detail",
     "src": "resources/js/views/ResHotels/Detail.vue",
     "isDynamicEntry": true,
@@ -219,7 +219,7 @@
     ]
   },
   "resources/js/views/ResHotels/Index.vue": {
-    "file": "assets/Index-BMT5vVrc.js",
+    "file": "assets/Index-DNVuP-Wb.js",
     "name": "Index",
     "src": "resources/js/views/ResHotels/Index.vue",
     "isDynamicEntry": true,
@@ -231,7 +231,7 @@
     ]
   },
   "resources/js/views/ResourceProviders/Index.vue": {
-    "file": "assets/Index-CZ0cmH5s.js",
+    "file": "assets/Index-BFJ6plwu.js",
     "name": "Index",
     "src": "resources/js/views/ResourceProviders/Index.vue",
     "isDynamicEntry": true,
@@ -243,7 +243,7 @@
     ]
   },
   "resources/js/views/ScenicSpots/Index.vue": {
-    "file": "assets/Index-ClwQYf7y.js",
+    "file": "assets/Index-BShUikrw.js",
     "name": "Index",
     "src": "resources/js/views/ScenicSpots/Index.vue",
     "isDynamicEntry": true,
@@ -255,7 +255,7 @@
     ]
   },
   "resources/js/views/SoftwareProviders/Index.vue": {
-    "file": "assets/Index-DYDR9fhf.js",
+    "file": "assets/Index-BV97TOVO.js",
     "name": "Index",
     "src": "resources/js/views/SoftwareProviders/Index.vue",
     "isDynamicEntry": true,
@@ -267,7 +267,7 @@
     ]
   },
   "resources/js/views/Tickets/Detail.vue": {
-    "file": "assets/Detail-CV51r_f_.js",
+    "file": "assets/Detail-B1f01C-G.js",
     "name": "Detail",
     "src": "resources/js/views/Tickets/Detail.vue",
     "isDynamicEntry": true,
@@ -279,7 +279,7 @@
     ]
   },
   "resources/js/views/Tickets/Index.vue": {
-    "file": "assets/Index-CfI5WmUV.js",
+    "file": "assets/Index-BHiOa_Ro.js",
     "name": "Index",
     "src": "resources/js/views/Tickets/Index.vue",
     "isDynamicEntry": true,
@@ -291,7 +291,7 @@
     ]
   },
   "resources/js/views/Users/Index.vue": {
-    "file": "assets/Index-DAsXAmS9.js",
+    "file": "assets/Index-dHJCx9MV.js",
     "name": "Index",
     "src": "resources/js/views/Users/Index.vue",
     "isDynamicEntry": true,

@@ -9,7 +9,7 @@ Route::prefix('webhooks')->group(function () {
     Route::post('/ctrip', [\App\Http\Controllers\Webhooks\CtripController::class, 'handleOrder']);
     Route::post('/fliggy/product-change', [\App\Http\Controllers\Webhooks\FliggyController::class, 'productChange']);
     Route::post('/fliggy/order-status', [\App\Http\Controllers\Webhooks\FliggyController::class, 'orderStatus']);
-    
+
     // 美团Webhook路由
     // ⚠️ 测试模式：临时指向测试控制器，测试完成后改回 MeituanController
     // 原路由：Route::post('/meituan/order/create/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
@@ -24,22 +24,22 @@ Route::prefix('webhooks')->group(function () {
     Route::post('/meituan/order/refunded', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
     // 原路由：Route::post('/meituan/order/close', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleOrder']);
     Route::post('/meituan/order/close', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleOrder']);
-    
+
     // 美团产品相关路由（拉取价格日历等）
     // 原路由：Route::post('/meituan/product/price/calendar', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductPriceCalendar']);
     Route::post('/meituan/product/price/calendar', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleProductPriceCalendar']);
     // 原路由：Route::post('/meituan/product/level/price/calendar/v2', [\App\Http\Controllers\Webhooks\MeituanController::class, 'handleProductLevelPriceCalendarV2']);
     Route::post('/meituan/product/level/price/calendar/v2', [\App\Http\Controllers\Test\MeituanTestController::class, 'handleProductLevelPriceCalendarV2']);
-    
+
     // 资源方Webhook路由
     Route::post('/resource/hengdian/inventory', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);
-    
+
     // 资源方订单核销状态推送路由（每个服务商使用不同路径）
     Route::post('/resource/{api_type}/order-verification', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleOrderVerification']);
-    
+
     // 自我游回调通知（统一回调地址）
     Route::post('/ziwoyou', [\App\Http\Controllers\Webhooks\ZiwoyouController::class, 'callback']);
-    
+
     // 测试接口（仅开发环境使用）
     if (app()->environment(['local', 'testing'])) {
         Route::post('/test/resource-inventory-push', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);
@@ -92,7 +92,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [\App\Http\Controllers\ScenicSpotController::class, 'store']);
         Route::put('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'update']);
         Route::delete('/{scenicSpot}', [\App\Http\Controllers\ScenicSpotController::class, 'destroy']);
-        
+
         // 资源配置
         Route::get('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'show']);
         Route::post('/{scenicSpot}/resource-config', [\App\Http\Controllers\ResourceConfigController::class, 'store']);
@@ -171,6 +171,8 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         // 价格分组分页（用于价格管理提速）
         Route::get('/{product}/price-groups', [\App\Http\Controllers\ProductController::class, 'priceGroups']);
+        // 日历展示：与 OTA 推送一致的应用加价规则后的价格
+        Route::get('/{product}/calendar-ota-prices', [\App\Http\Controllers\ProductController::class, 'calendarOtaPrices']);
         // 通用路由放在最后
         Route::get('/{product}', [\App\Http\Controllers\ProductController::class, 'show']);
         Route::put('/{product}', [\App\Http\Controllers\ProductController::class, 'update']);
@@ -229,7 +231,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('pkg-orders')->group(function () {
         Route::get('/', [\App\Http\Controllers\PkgOrderController::class, 'index']);
         Route::get('/{pkgOrder}', [\App\Http\Controllers\PkgOrderController::class, 'show']);
-        
+
         // 订单项操作
         Route::post('/{pkgOrder}/items/{item}/confirm', [\App\Http\Controllers\PkgOrderController::class, 'confirmOrderItem']);
         Route::post('/{pkgOrder}/items/{item}/verify', [\App\Http\Controllers\PkgOrderController::class, 'verifyOrderItem']);
@@ -305,15 +307,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'show']);
         Route::put('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'update']);
         Route::delete('/{pkgProduct}', [\App\Http\Controllers\PkgProductController::class, 'destroy']);
-        
+
         // OTA绑定路由（需要在 prices 之前定义，避免路由冲突）
         Route::post('/{pkgProduct}/bind-ota', [\App\Http\Controllers\PkgOtaProductController::class, 'bindOta']);
-        
+
         // 价格管理路由
         Route::prefix('{pkgProduct}/prices')->group(function () {
             // 价格日历查询（所有已认证用户可查看）
             Route::get('/calendar', [\App\Http\Controllers\PkgProductPriceController::class, 'getPriceCalendar']);
-            
+
             // 价格管理操作（需要操作员或管理员权限）
             Route::middleware('role:admin,operator')->group(function () {
                 Route::post('/calculate', [\App\Http\Controllers\PkgProductPriceController::class, 'calculate']);
@@ -343,16 +345,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('admin/ota-platforms')->middleware('auth:sanctum')->group(function () {
         Route::get('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'index']);
         Route::post('/', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'store']);
-        
+
         // OTA配置管理（必须在/{otaPlatform}之前，避免路由冲突）
         Route::get('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'show']);
         Route::post('/{otaPlatform}/config', [\App\Http\Controllers\Admin\OtaConfigController::class, 'store']);
-        
+
         // OTA平台CRUD
         Route::get('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'show']);
         Route::put('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'update']);
         Route::delete('/{otaPlatform}', [\App\Http\Controllers\Admin\OtaPlatformController::class, 'destroy']);
-        
+
         // OTA配置更新和删除（使用config ID）
         Route::put('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'update']);
         Route::delete('/config/{otaConfig}', [\App\Http\Controllers\Admin\OtaConfigController::class, 'destroy']);

@@ -211,95 +211,142 @@
                             </div>
                             <el-empty v-else description="暂无价格数据" />
                         </div>
+                    </el-tab-pane>
 
-                        <!-- 价格管理对话框 -->
-                        <el-dialog
-                            v-model="priceDialogVisible"
-                            :title="priceDialogTitle"
-                            width="600px"
-                            @close="resetPriceForm"
-                        >
-                            <el-form
-                                ref="priceFormRef"
-                                :model="priceForm"
-                                :rules="priceFormRules"
-                                label-width="120px"
-                            >
-                                <el-form-item label="选择房型" prop="room_type_ids">
-                                    <el-select
-                                        v-model="priceForm.room_type_ids"
-                                        :multiple="!editingPriceId"
-                                        :disabled="!!editingPriceId"
-                                        :placeholder="editingPriceId ? '编辑模式下不可修改房型' : '请选择房型（可多选）'"
-                                        style="width: 100%"
-                                    >
-                                        <el-option
-                                            v-for="roomType in roomTypes"
-                                            :key="roomType.id"
-                                            :label="`${roomType.hotel?.name} - ${roomType.name}`"
-                                            :value="roomType.id"
-                                        />
-                                    </el-select>
-                                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                                        <span v-if="editingPriceId">编辑模式下只能修改价格，不能修改房型</span>
-                                        <span v-else>可同时为多个房型设置价格</span>
-                                    </span>
-                                </el-form-item>
-                                <el-form-item label="日期范围">
-                                    <el-alert
-                                        v-if="product.sale_start_date || product.sale_end_date"
-                                        type="info"
-                                        :closable="false"
-                                    >
-                                        <template #title>
-                                            <span>将使用产品的销售日期范围：</span>
-                                            <span v-if="product.sale_start_date">{{ formatDateOnly(product.sale_start_date) }}</span>
-                                            <span v-else>不限制</span>
-                                            <span> 至 </span>
-                                            <span v-if="product.sale_end_date">{{ formatDateOnly(product.sale_end_date) }}</span>
-                                            <span v-else>不限制</span>
-                                        </template>
-                                    </el-alert>
-                                    <el-alert
-                                        v-else
-                                        type="warning"
-                                        :closable="false"
-                                    >
-                                        <template #title>
-                                            <span>产品未设置销售日期范围，请先在产品编辑页面设置销售开始日期和结束日期</span>
-                                        </template>
-                                    </el-alert>
-                                </el-form-item>
-                                <el-form-item label="门市价（元）" prop="market_price">
-                                    <el-input-number
-                                        v-model="priceForm.market_price"
-                                        :min="0"
-                                        :precision="2"
-                                        style="width: 100%"
+                    <!-- 日历价格 -->
+                    <el-tab-pane label="日历价格" name="calendarPrices">
+                        <div class="calendar-price-tab">
+                            <div class="calendar-toolbar">
+                                <el-select
+                                    v-model="calendarSelectedRoomTypeIds"
+                                    multiple
+                                    collapse-tags
+                                    collapse-tags-tooltip
+                                    placeholder="选择房型（可多选）"
+                                    style="min-width: 320px; max-width: 560px;"
+                                    filterable
+                                    @change="onCalendarRoomTypesChange"
+                                >
+                                    <el-option
+                                        v-for="rt in calendarRoomTypesOptions"
+                                        :key="rt.id"
+                                        :label="`${rt.hotel?.name || ''} - ${rt.name}`"
+                                        :value="rt.id"
                                     />
-                                </el-form-item>
-                                <el-form-item label="结算价（元）" prop="settlement_price">
-                                    <el-input-number
-                                        v-model="priceForm.settlement_price"
-                                        :min="0"
-                                        :precision="2"
-                                        style="width: 100%"
-                                    />
-                                </el-form-item>
-                                <el-form-item label="销售价（元）" prop="sale_price">
-                                    <el-input-number
-                                        v-model="priceForm.sale_price"
-                                        :min="0"
-                                        :precision="2"
-                                        style="width: 100%"
-                                    />
-                                </el-form-item>
-                            </el-form>
-                            <template #footer>
-                                <el-button @click="priceDialogVisible = false">取消</el-button>
-                                <el-button type="primary" @click="handleSubmitPrice" :loading="priceSubmitting">确定</el-button>
-                            </template>
-                        </el-dialog>
+                                </el-select>
+                                <span class="calendar-toolbar-hint">
+                                    展示价为应用加价规则后与 OTA 推送一致的销售价/结算价；编辑仍修改基础库存价。最多 {{ CALENDAR_MAX_ROOM_TYPES }} 个房型
+                                </span>
+                            </div>
+
+                            <el-alert
+                                v-if="!isManualPriceProduct"
+                                title="只读"
+                                type="info"
+                                description="接口推送产品价格由上游同步，日历中不可修改；日历展示价为与 OTA 一致的加价后口径。不可订时段内不展示价格。"
+                                :closable="false"
+                                style="margin-bottom: 12px;"
+                            />
+                            <el-alert
+                                v-else
+                                title="编辑说明"
+                                type="info"
+                                description="点击日期或下方房型区域可编辑当天基础价（加价规则另行叠加）；日历数字为推送 OTA 的销售/结算口径。不可订时段内不展示且不可编辑。"
+                                :closable="false"
+                                style="margin-bottom: 12px;"
+                            />
+
+                            <div class="calendar-nav">
+                                <el-button-group>
+                                    <el-button @click="calendarShiftYear(-1)">«</el-button>
+                                    <el-button @click="calendarShiftMonth(-1)">‹</el-button>
+                                </el-button-group>
+                                <span class="calendar-title">{{ calendarYear }}年 {{ calendarMonth }}月</span>
+                                <el-button-group>
+                                    <el-button @click="calendarShiftMonth(1)">›</el-button>
+                                    <el-button @click="calendarShiftYear(1)">»</el-button>
+                                </el-button-group>
+                            </div>
+
+                            <div v-loading="calendarPricesLoading" class="calendar-grid-wrap">
+                                <table class="calendar-grid" v-if="calendarRoomTypesOptions.length">
+                                    <thead>
+                                        <tr>
+                                            <th v-for="w in calendarWeekLabels" :key="w">{{ w }}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(week, wi) in calendarWeeks" :key="wi">
+                                            <td
+                                                v-for="(cell, ci) in week"
+                                                :key="ci"
+                                                :class="{
+                                                    'cal-cell-muted': !cell.inMonth,
+                                                    'cal-cell-today': cell.isToday && cell.inMonth,
+                                                }"
+                                                @click="onCalendarCellSurfaceClick(cell, $event)"
+                                            >
+                                                <div class="cal-cell-day">{{ cell.day }}</div>
+                                                <template v-if="cell.inMonth">
+                                                    <template v-if="calendarSelectedRoomTypeIds.length === 0">
+                                                        <div class="cal-placeholder">请选择房型</div>
+                                                    </template>
+                                                    <template v-else-if="isCalendarDateUnavailable(cell.dateStr)">
+                                                        <div class="cal-unavail">不可订</div>
+                                                    </template>
+                                                    <template v-else>
+                                                        <div
+                                                            v-for="rid in calendarSelectedRoomTypeIds"
+                                                            :key="`${cell.dateStr}-${rid}`"
+                                                            class="cal-room-block"
+                                                            :class="{
+                                                                'cal-room-editable': isManualPriceProduct,
+                                                            }"
+                                                            @click.stop="
+                                                                handleCalendarRoomBlockClick(cell.dateStr, rid)
+                                                            "
+                                                        >
+                                                            <div class="cal-room-title">
+                                                                {{ getCalendarRoomShortLabel(rid) }}
+                                                            </div>
+                                                            <template
+                                                                v-if="getCalendarPriceRow(cell.dateStr, rid)"
+                                                            >
+                                                                <div class="cal-price-line">
+                                                                    <span>销售(OTA)</span>
+                                                                    <strong>{{
+                                                                        formatPrice(
+                                                                            getCalendarPriceRow(cell.dateStr, rid)
+                                                                                .sale_price
+                                                                        )
+                                                                    }}</strong>
+                                                                </div>
+                                                                <div class="cal-price-line">
+                                                                    <span>结算(OTA)</span>
+                                                                    <strong>{{
+                                                                        formatPrice(
+                                                                            getCalendarPriceRow(cell.dateStr, rid)
+                                                                                .settlement_price
+                                                                        )
+                                                                    }}</strong>
+                                                                </div>
+                                                            </template>
+                                                            <template v-else>
+                                                                <div class="cal-no-price">--</div>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                </template>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                                <el-empty
+                                    v-else
+                                    description="暂无已绑定房型，请先在「价格管理」中添加产品价格"
+                                />
+                            </div>
+                        </div>
                     </el-tab-pane>
 
                     <!-- 加价规则管理标签页 -->
@@ -752,13 +799,104 @@
                         </el-dialog>
                     </el-tab-pane>
                 </el-tabs>
+
+                <!-- 添加/编辑价格：与「价格管理」「日历价格」共用，必须挂在 tabs 外，避免当前非「价格管理」Tab 时弹窗不挂载或遮罩异常 -->
+                <el-dialog
+                    v-model="priceDialogVisible"
+                    :title="priceDialogTitle"
+                    width="600px"
+                    append-to-body
+                    :align-center="true"
+                    @close="resetPriceForm"
+                >
+                    <el-form
+                        ref="priceFormRef"
+                        :model="priceForm"
+                        :rules="priceFormRules"
+                        label-width="120px"
+                    >
+                        <el-form-item label="选择房型" prop="room_type_ids">
+                            <el-select
+                                v-model="priceForm.room_type_ids"
+                                :multiple="!editingPriceId"
+                                :disabled="!!editingPriceId"
+                                :placeholder="editingPriceId ? (priceDialogEditingRoomLabel || '—') : '请选择房型（可多选）'"
+                                style="width: 100%"
+                            >
+                                <el-option
+                                    v-for="roomType in roomTypes"
+                                    :key="roomType.id"
+                                    :label="`${roomType.hotel?.name} - ${roomType.name}`"
+                                    :value="roomType.id"
+                                />
+                            </el-select>
+                            <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                                <span v-if="editingPriceId">所选房型：{{ priceDialogEditingRoomLabel || '—' }}</span>
+                                <span v-else>可同时为多个房型设置价格</span>
+                            </span>
+                        </el-form-item>
+                        <el-form-item label="日期范围">
+                            <el-alert
+                                v-if="product.sale_start_date || product.sale_end_date"
+                                type="info"
+                                :closable="false"
+                            >
+                                <template #title>
+                                    <span>将使用产品的销售日期范围：</span>
+                                    <span v-if="product.sale_start_date">{{ formatDateOnly(product.sale_start_date) }}</span>
+                                    <span v-else>不限制</span>
+                                    <span> 至 </span>
+                                    <span v-if="product.sale_end_date">{{ formatDateOnly(product.sale_end_date) }}</span>
+                                    <span v-else>不限制</span>
+                                </template>
+                            </el-alert>
+                            <el-alert
+                                v-else
+                                type="warning"
+                                :closable="false"
+                            >
+                                <template #title>
+                                    <span>产品未设置销售日期范围，请先在产品编辑页面设置销售开始日期和结束日期</span>
+                                </template>
+                            </el-alert>
+                        </el-form-item>
+                        <el-form-item label="门市价（元）" prop="market_price">
+                            <el-input-number
+                                v-model="priceForm.market_price"
+                                :min="0"
+                                :precision="2"
+                                style="width: 100%"
+                            />
+                        </el-form-item>
+                        <el-form-item label="结算价（元）" prop="settlement_price">
+                            <el-input-number
+                                v-model="priceForm.settlement_price"
+                                :min="0"
+                                :precision="2"
+                                style="width: 100%"
+                            />
+                        </el-form-item>
+                        <el-form-item label="销售价（元）" prop="sale_price">
+                            <el-input-number
+                                v-model="priceForm.sale_price"
+                                :min="0"
+                                :precision="2"
+                                style="width: 100%"
+                            />
+                        </el-form-item>
+                    </el-form>
+                    <template #footer>
+                        <el-button @click="priceDialogVisible = false">取消</el-button>
+                        <el-button type="primary" @click="handleSubmitPrice" :loading="priceSubmitting">确定</el-button>
+                    </template>
+                </el-dialog>
             </div>
         </el-card>
     </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -826,6 +964,20 @@ const hotels = ref([]);
 const roomTypes = ref([]);
 const allRoomTypes = ref([]);
 const otaPlatforms = ref([]);
+
+/** 日历价格 Tab */
+const CALENDAR_MAX_ROOM_TYPES = 8;
+const calendarYear = ref(new Date().getFullYear());
+const calendarMonth = ref(new Date().getMonth() + 1);
+const calendarSelectedRoomTypeIds = ref([]);
+const calendarPricesLoading = ref(false);
+/** @type {import('vue').Ref<Record<string, object>>} */
+const calendarPricesLookup = ref({});
+const calendarAddContext = ref(null);
+const calendarDefaultsApplied = ref(false);
+const calendarApplyingDefaults = ref(false);
+const calendarWeekLabels = ['日', '一', '二', '三', '四', '五', '六'];
+let calendarFetchTimer = null;
 
 // OTA推送相关
 const otaBindDialogVisible = ref(false);
@@ -948,7 +1100,38 @@ const priceRuleFormRules = {
     ],
 };
 
-const priceDialogTitle = computed(() => editingPriceId.value ? '编辑价格' : '添加价格');
+const priceDialogTitle = computed(() => {
+    if (calendarAddContext.value) {
+        return `添加价格 · ${calendarAddContext.value.date}`;
+    }
+    return editingPriceId.value ? '编辑价格' : '添加价格';
+});
+
+/** 编辑模式下「选择房型」旁展示所选房型全称 */
+const priceDialogEditingRoomLabel = computed(() => {
+    if (!editingPriceId.value || !priceForm.value.room_type_ids?.length) {
+        return '';
+    }
+    const parts = priceForm.value.room_type_ids.map((id) => {
+        const rt = roomTypes.value.find((r) => r.id === id)
+            ?? allRoomTypes.value.find((r) => r.id === id);
+        return rt ? `${rt.hotel?.name || ''} - ${rt.name}` : `#${id}`;
+    });
+    return parts.join('；');
+});
+
+/** 日历房型下拉：仅 price-groups 中与该产品已有价格记录的房型（与「价格管理」一致） */
+const calendarRoomTypesOptions = computed(() => {
+    const allowed = new Set(priceRoomTypeIds.value);
+    return roomTypes.value.filter((rt) => allowed.has(rt.id));
+});
+
+/** 接口偶发序列化为枚举对象时兼容 */
+const isManualPriceProduct = computed(() => {
+    const ps = product.value?.price_source;
+    return ps === 'manual' || ps?.value === 'manual';
+});
+
 const priceRuleDialogTitle = computed(() => editingPriceRuleId.value ? '编辑加价规则' : '添加加价规则');
 
 // 获取已添加价格的酒店和房型列表（用于加价规则）
@@ -1160,6 +1343,177 @@ const fetchPriceGroups = async () => {
     }
 };
 
+const refreshCalendarIfActive = () => {
+    if (activeTab.value === 'calendarPrices') {
+        fetchCalendarPrices();
+    }
+};
+
+const scheduleCalendarFetch = () => {
+    clearTimeout(calendarFetchTimer);
+    calendarFetchTimer = setTimeout(() => {
+        if (activeTab.value === 'calendarPrices') {
+            fetchCalendarPrices();
+        }
+    }, 400);
+};
+
+const onCalendarRoomTypesChange = (val) => {
+    if (calendarApplyingDefaults.value) {
+        return;
+    }
+    if (val.length > CALENDAR_MAX_ROOM_TYPES) {
+        ElMessage.warning(`最多选择 ${CALENDAR_MAX_ROOM_TYPES} 个房型`);
+        calendarSelectedRoomTypeIds.value = val.slice(0, CALENDAR_MAX_ROOM_TYPES);
+    }
+    scheduleCalendarFetch();
+};
+
+const calendarShiftMonth = (delta) => {
+    let m = calendarMonth.value + delta;
+    let y = calendarYear.value;
+    while (m < 1) {
+        m += 12;
+        y--;
+    }
+    while (m > 12) {
+        m -= 12;
+        y++;
+    }
+    calendarMonth.value = m;
+    calendarYear.value = y;
+    fetchCalendarPrices();
+};
+
+const calendarShiftYear = (delta) => {
+    calendarYear.value += delta;
+    fetchCalendarPrices();
+};
+
+/**
+ * 入住日是否在任一不可订时段内（闭区间）
+ */
+const isCalendarDateUnavailable = (dateStr) => {
+    const periods = product.value?.unavailable_periods;
+    if (!periods?.length || !dateStr) {
+        return false;
+    }
+    const d = new Date(`${dateStr}T12:00:00`);
+    return periods.some((p) => {
+        const start = new Date(`${formatDateOnly(p.start_date)}T12:00:00`);
+        const end = new Date(`${formatDateOnly(p.end_date)}T12:00:00`);
+        return d >= start && d <= end;
+    });
+};
+
+const getCalendarPriceRow = (dateStr, roomTypeId) => {
+    const key = `${dateStr}_${roomTypeId}`;
+    return calendarPricesLookup.value[key] ?? null;
+};
+
+const getCalendarRoomShortLabel = (roomTypeId) => {
+    const rt =
+        calendarRoomTypesOptions.value.find((r) => r.id === roomTypeId) ||
+        roomTypes.value.find((r) => r.id === roomTypeId) ||
+        allRoomTypes.value.find((r) => r.id === roomTypeId);
+    if (!rt) return `#${roomTypeId}`;
+    const hn = rt.hotel?.name || '';
+    const name = rt.name || '';
+    const full = hn ? `${hn}-${name}` : name;
+    return full.length > 22 ? `${full.slice(0, 20)}…` : full;
+};
+
+const fetchCalendarPrices = async () => {
+    if (!product.value?.id || activeTab.value !== 'calendarPrices') {
+        return;
+    }
+    const ids = calendarSelectedRoomTypeIds.value || [];
+    if (!ids.length) {
+        calendarPricesLookup.value = {};
+        return;
+    }
+
+    const y = calendarYear.value;
+    const m = calendarMonth.value;
+
+    calendarPricesLoading.value = true;
+    try {
+        const response = await axios.get(`/products/${product.value.id}/calendar-ota-prices`, {
+            params: {
+                year: y,
+                month: m,
+                room_type_ids: ids,
+            },
+        });
+
+        const rows = response.data?.data ?? [];
+        /** @type {Record<string, object>} */
+        const lookup = {};
+        rows.forEach((row) => {
+            const ds = formatDateOnly(row.date);
+            const key = `${ds}_${row.room_type_id}`;
+            lookup[key] = row;
+        });
+        calendarPricesLookup.value = lookup;
+    } catch (error) {
+        ElMessage.error(error.response?.data?.message || '获取日历价格失败');
+        calendarPricesLookup.value = {};
+    } finally {
+        calendarPricesLoading.value = false;
+    }
+};
+
+const onCalendarCellSurfaceClick = (cell, evt) => {
+    if (!cell.inMonth || !evt?.target) return;
+    if (evt.target instanceof Element && evt.target.closest('.cal-room-block')) {
+        return;
+    }
+    if (!isManualPriceProduct.value) return;
+    const ids = calendarSelectedRoomTypeIds.value;
+    if (!ids.length) {
+        ElMessage.info('请先在上方选择房型');
+        return;
+    }
+    handleCalendarRoomBlockClick(cell.dateStr, ids[0]);
+};
+
+const handleCalendarRoomBlockClick = (dateStr, roomTypeId) => {
+    if (!product.value) return;
+    if (!isManualPriceProduct.value) {
+        return;
+    }
+    if (isCalendarDateUnavailable(dateStr)) {
+        ElMessage.warning('该日期在不可订时段内');
+        return;
+    }
+    const existing = getCalendarPriceRow(dateStr, roomTypeId);
+    if (existing) {
+        handleEditPrice(existing);
+        return;
+    }
+    if (!product.value.sale_start_date || !product.value.sale_end_date) {
+        ElMessage.warning('请先在产品编辑页面设置销售开始日期和结束日期');
+        return;
+    }
+    const ds = formatDateOnly(dateStr);
+    const saleStart = formatDateOnly(product.value.sale_start_date);
+    const saleEnd = formatDateOnly(product.value.sale_end_date);
+    if (ds < saleStart || ds > saleEnd) {
+        ElMessage.warning('该日期不在产品销售日期范围内');
+        return;
+    }
+
+    editingPriceId.value = null;
+    calendarAddContext.value = { date: ds, room_type_id: roomTypeId };
+    priceForm.value = {
+        room_type_ids: [roomTypeId],
+        market_price: 0,
+        settlement_price: 0,
+        sale_price: 0,
+    };
+    priceDialogVisible.value = true;
+};
+
 const formatDate = (date) => {
     if (!date) return '';
     return new Date(date).toLocaleString('zh-CN', {
@@ -1181,10 +1535,43 @@ const formatDateOnly = (date) => {
     return `${year}-${month}-${day}`;
 };
 
+const calendarWeeks = computed(() => {
+    const y = calendarYear.value;
+    const m = calendarMonth.value;
+    const first = new Date(y, m - 1, 1);
+    const pad = first.getDay();
+    const cells = [];
+    const cur = new Date(first);
+    cur.setDate(cur.getDate() - pad);
+    const todayStr = formatDateOnly(new Date());
+    for (let i = 0; i < 42; i++) {
+        const dateStr = formatDateOnly(cur);
+        const inMonth = cur.getMonth() === m - 1 && cur.getFullYear() === y;
+        cells.push({
+            dateStr,
+            inMonth,
+            day: cur.getDate(),
+            isToday: dateStr === todayStr,
+        });
+        cur.setDate(cur.getDate() + 1);
+    }
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) {
+        weeks.push(cells.slice(i, i + 7));
+    }
+    return weeks;
+});
+
 
 const formatPrice = (price) => {
     if (!price) return '0.00';
     return parseFloat(price).toFixed(2);
+};
+
+/** 表单用：避免 NaN 导致 el-input-number / 弹窗异常 */
+const parsePriceField = (value) => {
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : 0;
 };
 
 const formatWeekdays = (weekdays) => {
@@ -1217,9 +1604,9 @@ const handleEditPrice = (row) => {
     editingPriceId.value = row.id;
     priceForm.value = {
         room_type_ids: [row.room_type_id], // 编辑时只显示当前房型
-        market_price: parseFloat(row.market_price),
-        settlement_price: parseFloat(row.settlement_price),
-        sale_price: parseFloat(row.sale_price),
+        market_price: parsePriceField(row.base_market_price ?? row.market_price),
+        settlement_price: parsePriceField(row.base_settlement_price ?? row.settlement_price),
+        sale_price: parsePriceField(row.base_sale_price ?? row.sale_price),
     };
     priceDialogVisible.value = true;
 };
@@ -1232,6 +1619,7 @@ const handleDeletePrice = async (row) => {
         await axios.delete(`/prices/${row.id}`);
         ElMessage.success('删除成功');
         fetchProduct();
+        refreshCalendarIfActive();
     } catch (error) {
         if (error !== 'cancel') {
             ElMessage.error('删除失败');
@@ -1302,6 +1690,7 @@ const handleDeletePriceRange = async (group, range) => {
         await Promise.all(pricesInRange.map(p => axios.delete(`/prices/${p.id}`)));
         ElMessage.success('删除成功');
         fetchProduct();
+        refreshCalendarIfActive();
     } catch (error) {
         if (error !== 'cancel') {
             ElMessage.error('删除失败');
@@ -1393,6 +1782,31 @@ const handleSubmitPrice = async () => {
                         sale_price: priceForm.value.sale_price,
                     });
                     ElMessage.success('价格更新成功');
+                } else if (calendarAddContext.value) {
+                    const ctx = calendarAddContext.value;
+                    if (!product.value.sale_start_date || !product.value.sale_end_date) {
+                        ElMessage.warning('请先在产品编辑页面设置销售开始日期和结束日期');
+                        priceSubmitting.value = false;
+                        return;
+                    }
+                    const saleStart = formatDateOnly(product.value.sale_start_date);
+                    const saleEnd = formatDateOnly(product.value.sale_end_date);
+                    if (ctx.date < saleStart || ctx.date > saleEnd) {
+                        ElMessage.warning('该日期不在产品销售日期范围内');
+                        priceSubmitting.value = false;
+                        return;
+                    }
+                    await axios.post('/prices', {
+                        product_id: product.value.id,
+                        room_type_id: ctx.room_type_id,
+                        prices: [{
+                            date: ctx.date,
+                            market_price: priceForm.value.market_price,
+                            settlement_price: priceForm.value.settlement_price,
+                            sale_price: priceForm.value.sale_price,
+                        }],
+                    });
+                    ElMessage.success('价格创建成功');
                 } else {
                     // 检查产品是否有销售日期范围
                     if (!product.value.sale_start_date || !product.value.sale_end_date) {
@@ -1432,6 +1846,7 @@ const handleSubmitPrice = async () => {
                 priceDialogVisible.value = false;
                 resetPriceForm();
                 fetchProduct();
+                refreshCalendarIfActive();
             } catch (error) {
                 const message = error.response?.data?.message || '操作失败';
                 ElMessage.error(message);
@@ -1450,6 +1865,7 @@ const resetPriceForm = () => {
         sale_price: 0,
     };
     editingPriceId.value = null;
+    calendarAddContext.value = null;
     priceFormRef.value?.clearValidate();
 };
 
@@ -1900,11 +2316,36 @@ onMounted(async () => {
     await fetchOtaPlatforms();
 });
 
+watch(
+    () => [...priceRoomTypeIds.value],
+    () => {
+        const allowed = new Set(priceRoomTypeIds.value);
+        const filtered = calendarSelectedRoomTypeIds.value.filter((id) => allowed.has(id));
+        if (filtered.length !== calendarSelectedRoomTypeIds.value.length) {
+            calendarSelectedRoomTypeIds.value = filtered;
+        }
+    },
+);
+
 watch(activeTab, (tabName) => {
     if (tabName === 'prices') {
         fetchPriceGroups();
     } else if (tabName === 'priceRules') {
         fetchPriceRules();
+    } else if (tabName === 'calendarPrices') {
+        if (!calendarDefaultsApplied.value && calendarRoomTypesOptions.value.length) {
+            calendarApplyingDefaults.value = true;
+            calendarSelectedRoomTypeIds.value = calendarRoomTypesOptions.value
+                .slice(0, 1)
+                .map((rt) => rt.id);
+            calendarDefaultsApplied.value = true;
+            nextTick(() => {
+                calendarApplyingDefaults.value = false;
+                fetchCalendarPrices();
+            });
+            return;
+        }
+        fetchCalendarPrices();
     }
 });
 
@@ -2018,6 +2459,7 @@ const resetExternalCodeMappingForm = () => {
 onUnmounted(() => {
     // 组件卸载时清理所有轮询
     clearAllPolling();
+    clearTimeout(calendarFetchTimer);
 });
 
 
@@ -2026,5 +2468,113 @@ onUnmounted(() => {
 <style scoped>
 .el-page-header {
     margin-bottom: 20px;
+}
+
+.calendar-price-tab .calendar-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.calendar-price-tab .calendar-toolbar-hint {
+    color: #909399;
+    font-size: 12px;
+}
+
+.calendar-price-tab .calendar-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.calendar-price-tab .calendar-title {
+    font-size: 16px;
+    font-weight: 600;
+    min-width: 140px;
+    text-align: center;
+}
+
+.calendar-price-tab .calendar-grid-wrap {
+    overflow-x: auto;
+}
+
+.calendar-price-tab .calendar-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+}
+
+.calendar-price-tab .calendar-grid th,
+.calendar-price-tab .calendar-grid td {
+    border: 1px solid #ebeef5;
+    vertical-align: top;
+    padding: 6px;
+    width: 14.28%;
+}
+
+.calendar-price-tab .calendar-grid th {
+    background: #f5f7fa;
+    font-weight: 600;
+}
+
+.calendar-price-tab .cal-cell-muted {
+    background: #fafafa;
+    color: #c0c4cc;
+}
+
+.calendar-price-tab .cal-cell-today .cal-cell-day {
+    color: var(--el-color-primary);
+    font-weight: 700;
+}
+
+.calendar-price-tab .cal-cell-day {
+    font-size: 14px;
+    margin-bottom: 6px;
+}
+
+.calendar-price-tab .cal-placeholder,
+.calendar-price-tab .cal-no-price {
+    color: #909399;
+}
+
+.calendar-price-tab .cal-unavail {
+    color: #f56c6c;
+    font-size: 12px;
+}
+
+.calendar-price-tab .cal-room-block {
+    padding: 6px 4px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    background: #fafcff;
+    border: 1px dashed #dcdfe6;
+}
+
+.calendar-price-tab .cal-room-editable:hover {
+    border-color: var(--el-color-primary);
+    background: #ecf5ff;
+}
+
+.calendar-price-tab .cal-room-title {
+    font-size: 11px;
+    color: #606266;
+    margin-bottom: 4px;
+    word-break: break-all;
+}
+
+.calendar-price-tab .cal-price-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    line-height: 1.35;
+}
+
+.calendar-price-tab .cal-price-line span {
+    color: #909399;
 }
 </style>
