@@ -139,6 +139,7 @@ class OrderService
             ]),
             OrderStatus::CONFIRMED => in_array($to, [
                 OrderStatus::CANCEL_REQUESTED,
+                OrderStatus::CANCEL_APPROVED, // 允许直连取消成功后直接取消通过（景区+OTA双成功）
                 OrderStatus::VERIFIED,
             ]),
             OrderStatus::CANCEL_REQUESTED => in_array($to, [

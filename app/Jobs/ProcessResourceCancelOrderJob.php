@@ -164,6 +164,20 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
                     'order_id' => $this->order->id,
                 ]);
 
+                // 仅在允许的状态下落取消通过，避免非预期状态跳转
+                if (!$this->canMarkCancelApproved($this->order)) {
+                    Log::warning('ProcessResourceCancelOrderJob: 当前状态不允许标记取消通过', [
+                        'order_id' => $this->order->id,
+                        'current_status' => $this->order->status->value,
+                    ]);
+
+                    $this->createExceptionOrder([
+                        'success' => false,
+                        'message' => '订单状态不允许更新为取消通过，当前状态：' . $this->order->status->label(),
+                    ]);
+                    return;
+                }
+
                 // 更新订单状态
                 $orderService = app(OrderService::class);
                 $orderService->updateOrderStatus(
@@ -417,5 +431,16 @@ class ProcessResourceCancelOrderJob implements ShouldQueue
         
         // 默认视为业务性错误，不重试
         return false;
+    }
+
+    /**
+     * 仅允许在直连取消成功链路中的状态落取消通过
+     */
+    protected function canMarkCancelApproved(Order $order): bool
+    {
+        return in_array($order->status, [
+            OrderStatus::CONFIRMED,
+            OrderStatus::CANCEL_REQUESTED,
+        ], true);
     }
 }
