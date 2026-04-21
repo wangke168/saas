@@ -238,10 +238,10 @@ class HengdianService implements ResourceServiceInterface
 
     /**
      * 下单金额构建（兼容新旧横店文档）
-     * - yuan: 按元传递（新文档，Decimal）
+     * - yuan: 按元传递（新文档，Decimal），XML 中固定两位小数字符串（如 999.00）
      * - fen: 按分传递（旧文档，Int）
      */
-    protected function buildBookAmount(float $amountYuan): int|float
+    protected function buildBookAmount(float $amountYuan): int|string
     {
         $amountUnit = env('HENGDIAN_BOOK_AMOUNT_UNIT', 'yuan');
 
@@ -249,7 +249,7 @@ class HengdianService implements ResourceServiceInterface
             return $this->convertYuanToFen($amountYuan);
         }
 
-        return round($amountYuan, 2);
+        return number_format(round($amountYuan, 2), 2, '.', '');
     }
 
     /**

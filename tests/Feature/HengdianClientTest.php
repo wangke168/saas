@@ -131,7 +131,7 @@ class HengdianClientTest extends TestCase
             'RoomType' => '标准间',
             'CheckIn' => '2026-06-01',
             'CheckOut' => '2026-06-02',
-            'Amount' => 100.50,
+            'Amount' => '100.50',
             'RoomNum' => 1,
             'PaymentType' => 1,
             'ContactName' => '张三',
@@ -152,7 +152,7 @@ class HengdianClientTest extends TestCase
             return str_contains($body, '<BookRQ>')
                 && str_contains($body, '<OrderGuests>')
                 && str_contains($body, '<OrderGuest>')
-                && str_contains($body, '<Amount>100.5</Amount>')
+                && str_contains($body, '<Amount>100.50</Amount>')
                 && str_contains($body, '<Name>张三</Name>')
                 && str_contains($body, '<IdType>0</IdType>')
                 && str_contains($body, '<IdCode>110101199001011234</IdCode>');
