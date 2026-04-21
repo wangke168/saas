@@ -783,29 +783,23 @@ class ResourceController extends Controller
     {
         try {
             $rawBody = $request->getContent();
-            
-            // 解析XML请求
+
+            // 优先处理横店新文档 3.7：JSON 推送
+            $jsonData = json_decode($rawBody, true);
+            if (is_array($jsonData) && isset($jsonData['orders']) && is_array($jsonData['orders'])) {
+                return $this->handleHengdianOrderVerificationJson($jsonData['orders']);
+            }
+
+            // 兼容历史格式：XML 推送
             $xmlObj = new SimpleXMLElement($rawBody);
-            
-            // 提取订单号和状态（根据横店系统的实际推送格式调整）
             $otaOrderNo = (string)($xmlObj->OtaOrderId ?? '');
             $status = (string)($xmlObj->Status ?? '');
-            
+
             if (empty($otaOrderNo)) {
                 Log::error('横店订单核销推送：订单号为空', [
                     'body' => $rawBody,
                 ]);
                 return $this->xmlResponse('-1', '订单号不能为空');
-            }
-
-            // 查找订单
-            $order = \App\Models\Order::where('ota_order_no', $otaOrderNo)->first();
-            
-            if (!$order) {
-                Log::warning('横店订单核销推送：订单不存在', [
-                    'ota_order_no' => $otaOrderNo,
-                ]);
-                return $this->xmlResponse('-1', '订单不存在');
             }
 
             // 只有状态为'5'（已使用/已核销）时才处理
@@ -817,7 +811,6 @@ class ResourceController extends Controller
                 return $this->xmlResponse('0', '订单状态不是已核销');
             }
 
-            // 构建核销数据
             $verificationData = [
                 'status' => \App\Enums\OrderStatus::VERIFIED->value,
                 'verified_at' => isset($xmlObj->VerifiedTime) ? (string)$xmlObj->VerifiedTime : null,
@@ -828,14 +821,10 @@ class ResourceController extends Controller
                 'vouchers' => [],
             ];
 
-            // 异步处理订单核销状态（避免阻塞webhook响应）
-            \App\Jobs\ProcessOrderVerificationJob::dispatch($order->id, $verificationData, 'webhook')
-                ->onQueue('order-verification');
-
-            Log::info('横店订单核销推送：已接收并放入队列', [
-                'ota_order_no' => $otaOrderNo,
-                'order_id' => $order->id,
-            ]);
+            $processed = $this->dispatchHengdianOrderVerification((string)$otaOrderNo, $verificationData);
+            if (!$processed) {
+                return $this->xmlResponse('-1', '订单不存在');
+            }
 
             return $this->xmlResponse('0', '已接收');
             
@@ -847,6 +836,78 @@ class ResourceController extends Controller
             
             return $this->xmlResponse('-1', '处理失败：' . $e->getMessage());
         }
+    }
+
+    /**
+     * 处理横店 3.7 JSON 订单使用状态推送
+     *
+     * @param array<int, array<string, mixed>> $orders
+     */
+    protected function handleHengdianOrderVerificationJson(array $orders): JsonResponse
+    {
+        $receivedCount = count($orders);
+        $acceptedCount = 0;
+
+        foreach ($orders as $item) {
+            $otaOrderNo = (string)($item['otaOrderNo'] ?? '');
+            $useDate = isset($item['useDate']) ? (string)$item['useDate'] : null;
+
+            if ($otaOrderNo === '') {
+                continue;
+            }
+
+            $verificationData = [
+                'status' => \App\Enums\OrderStatus::VERIFIED->value,
+                'verified_at' => $useDate,
+                'use_start_date' => $useDate,
+                'use_end_date' => $useDate,
+                'use_quantity' => null,
+                'passengers' => [],
+                'vouchers' => [],
+            ];
+
+            if ($this->dispatchHengdianOrderVerification($otaOrderNo, $verificationData)) {
+                $acceptedCount++;
+            }
+        }
+
+        Log::info('横店订单核销推送(JSON)：处理完成', [
+            'received_count' => $receivedCount,
+            'accepted_count' => $acceptedCount,
+        ]);
+
+        // 按横店 3.7 文档返回状态字符串
+        return response()->json([
+            'result' => 'TRUE',
+            'accepted' => $acceptedCount,
+            'received' => $receivedCount,
+        ]);
+    }
+
+    /**
+     * 查单并派发横店核销处理任务
+     */
+    protected function dispatchHengdianOrderVerification(string $otaOrderNo, array $verificationData): bool
+    {
+        $order = \App\Models\Order::where('ota_order_no', $otaOrderNo)->first();
+
+        if (!$order) {
+            Log::warning('横店订单核销推送：订单不存在', [
+                'ota_order_no' => $otaOrderNo,
+            ]);
+
+            return false;
+        }
+
+        \App\Jobs\ProcessOrderVerificationJob::dispatch($order->id, $verificationData, 'webhook')
+            ->onQueue('order-verification');
+
+        Log::info('横店订单核销推送：已接收并放入队列', [
+            'ota_order_no' => $otaOrderNo,
+            'order_id' => $order->id,
+        ]);
+
+        return true;
     }
 
     /**

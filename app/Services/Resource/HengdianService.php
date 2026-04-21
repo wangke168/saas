@@ -237,6 +237,67 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
+     * 下单金额构建（兼容新旧横店文档）
+     * - yuan: 按元传递（新文档，Decimal）
+     * - fen: 按分传递（旧文档，Int）
+     */
+    protected function buildBookAmount(float $amountYuan): int|float
+    {
+        $amountUnit = env('HENGDIAN_BOOK_AMOUNT_UNIT', 'yuan');
+
+        if ($amountUnit === 'fen') {
+            return $this->convertYuanToFen($amountYuan);
+        }
+
+        return round($amountYuan, 2);
+    }
+
+    /**
+     * 证件类型映射（横店文档：0=身份证，1=护照，2=其他）
+     */
+    protected function mapGuestIdType(array $guest): string
+    {
+        // 横店原生字段优先
+        if (isset($guest['idType']) && $guest['idType'] !== null && $guest['idType'] !== '') {
+            return $this->mapGenericIdType((string)$guest['idType']);
+        }
+
+        // 携程 cardType：1=身份证, 2=护照, 0/null=无需证件
+        $cardType = $guest['cardType'] ?? $guest['card_type'] ?? null;
+        if ($cardType !== null && $cardType !== '') {
+            return match ((string)$cardType) {
+                '1' => '0',
+                '2' => '1',
+                default => '2',
+            };
+        }
+
+        // 美团 credentialType（当前接入约定）：0=身份证, 1=护照
+        $credentialType = $guest['credentialType'] ?? $guest['credential_type'] ?? null;
+        if ($credentialType !== null && $credentialType !== '') {
+            return match ((string)$credentialType) {
+                '0' => '0',
+                '1' => '1',
+                default => '2',
+            };
+        }
+
+        return '2';
+    }
+
+    /**
+     * 通用证件类型映射（字符串语义）
+     */
+    protected function mapGenericIdType(string $rawType): string
+    {
+        return match (strtolower($rawType)) {
+            '0', 'idcard', 'identity', 'identity_card', '身份证' => '0',
+            '1', 'passport', '护照' => '1',
+            default => '2',
+        };
+    }
+
+    /**
      * 状态映射：资源方状态 → 系统状态
      */
     protected function mapStatus(string $resourceStatus): ?OrderStatus
@@ -319,11 +380,86 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
+     * 解析横店错误码，便于日志与异常单快速定位。
+     */
+    protected function getHengdianErrorDescription(string $errorCode): ?string
+    {
+        return match ($errorCode) {
+            '1000' => '房间数量不足',
+            '1001' => '请求参数有误',
+            '1002' => '产品配置错误',
+            '1003' => '价格错误',
+            '1004' => '证件格式错误',
+            '1005' => '存在重复证件',
+            '1006' => '代理商无购买权限',
+            '1007' => '违反产品售卖规则',
+            '-1' => '其他错误',
+            default => null,
+        };
+    }
+
+    /**
+     * 标准化可订检查请求数据（兼容新版文档中的入住人信息节点）。
+     */
+    protected function normalizeValidateData(array $data): array
+    {
+        if (!isset($data['OrderGuests']) && isset($data['guest_info']) && is_array($data['guest_info'])) {
+            $orderGuests = [];
+            foreach ($data['guest_info'] as $guest) {
+                if (!is_array($guest)) {
+                    continue;
+                }
+                $name = trim((string)($guest['name'] ?? $guest['Name'] ?? ''));
+                $idCode = trim((string)($guest['cardNo'] ?? $guest['idCode'] ?? $guest['id_code'] ?? $guest['IdCode'] ?? ''));
+                if ($name === '' || $idCode === '') {
+                    continue;
+                }
+                $orderGuests[] = [
+                    'Name' => $name,
+                    'IdType' => $this->mapGuestIdType($guest),
+                    'IdCode' => $idCode,
+                ];
+            }
+
+            if ($orderGuests !== []) {
+                $data['OrderGuests'] = [
+                    'OrderGuest' => $orderGuests,
+                ];
+            }
+        } elseif (isset($data['OrderGuests']['OrderGuest']) && is_array($data['OrderGuests']['OrderGuest'])) {
+            $normalized = [];
+            foreach ($data['OrderGuests']['OrderGuest'] as $guest) {
+                if (!is_array($guest)) {
+                    continue;
+                }
+                $guest['IdType'] = $guest['IdType'] ?? $this->mapGuestIdType($guest);
+                $normalized[] = $guest;
+            }
+            $data['OrderGuests']['OrderGuest'] = $normalized;
+        }
+
+        return $data;
+    }
+
+    /**
      * 验证价格和库存
      */
     public function validate(array $data): array
     {
-        return $this->getClient()->validate($data);
+        $normalizedData = $this->normalizeValidateData($data);
+        $result = $this->getClient()->validate($normalizedData);
+
+        if (!($result['success'] ?? false)) {
+            $errorCode = (string)($result['data']->ResultCode ?? '');
+            $errorDesc = $this->getHengdianErrorDescription($errorCode);
+            Log::warning('横店可订检查失败', [
+                'result_code' => $errorCode,
+                'result_code_desc' => $errorDesc,
+                'message' => (string)($result['data']->Message ?? $result['message'] ?? ''),
+            ]);
+        }
+
+        return $result;
     }
 
     /**
@@ -397,6 +533,7 @@ class HengdianService implements ResourceServiceInterface
                     if (!empty($name) && !empty($idCode)) {
                         $orderGuestList[] = [
                             'Name' => $name,
+                            'IdType' => $this->mapGuestIdType($guest),
                             'IdCode' => $idCode,
                         ];
                     } else {
@@ -483,7 +620,7 @@ class HengdianService implements ResourceServiceInterface
                 'RoomType' => $order->roomType->external_code ?? $order->roomType->name ?? '',
                 'CheckIn' => $order->check_in_date->format('Y-m-d'),
                 'CheckOut' => $checkOutDate->format('Y-m-d'),
-                'Amount' => $this->convertYuanToFen($order->total_amount ?? 0),
+                'Amount' => $this->buildBookAmount((float)($order->total_amount ?? 0)),
                 'RoomNum' => $order->room_count,
                 'PaymentType' => 1, // 预付
                 'ContactName' => $order->contact_name ?? '',
@@ -511,9 +648,11 @@ class HengdianService implements ResourceServiceInterface
             if (!($result['success'] ?? false)) {
                 $errorCode = (string)($result['data']->ResultCode ?? '');
                 $errorMessage = (string)($result['data']->Message ?? $result['message'] ?? '未知错误');
+                $errorDesc = $this->getHengdianErrorDescription($errorCode);
                 
                 $this->createExceptionOrder($order, 'BookRQ', $errorMessage, [
                     'result_code' => $errorCode,
+                    'result_code_desc' => $errorDesc,
                     'response' => $result,
                 ]);
             }
@@ -908,6 +1047,7 @@ class HengdianService implements ResourceServiceInterface
             if (!($result['success'] ?? false)) {
                 $errorCode = (string)($result['data']->ResultCode ?? '');
                 $errorMessage = (string)($result['data']->Message ?? $result['message'] ?? '订单不可以取消');
+                $errorDesc = $this->getHengdianErrorDescription($errorCode);
                 
                 // 如果是 -200 错误码，说明订单已过期不能取消
                 if ($errorCode === '-200') {
@@ -918,6 +1058,7 @@ class HengdianService implements ResourceServiceInterface
                 } else {
                     $this->createExceptionOrder($order, 'CancelRQ', $errorMessage, [
                         'result_code' => $errorCode,
+                        'result_code_desc' => $errorDesc,
                         'response' => $result,
                     ]);
                 }

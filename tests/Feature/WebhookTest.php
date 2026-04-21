@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessOrderVerificationJob;
 use App\Models\Order;
 use App\Models\OtaPlatform;
 use App\Enums\OrderStatus;
@@ -95,6 +96,55 @@ class WebhookTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonValidationErrors(['orderId']);
+    }
+
+    /**
+     * 测试横店订单使用状态定时推送（3.7 JSON）会派发核销处理任务
+     */
+    public function test_hengdian_order_verification_json_webhook_dispatches_jobs(): void
+    {
+        Queue::fake();
+
+        $order = Order::create([
+            'order_no' => 'ORD-HD-001',
+            'ota_order_no' => 'OTA-HD-001',
+            'status' => OrderStatus::CONFIRMED->value,
+            'product_id' => 1,
+            'hotel_id' => 1,
+            'check_in_date' => now(),
+            'check_out_date' => now()->addDay(),
+            'contact_name' => 'Test',
+            'contact_phone' => '13800138000',
+            'total_amount' => 100,
+        ]);
+
+        $response = $this->postJson('/api/webhooks/resource/hengdian/order-verification', [
+            'orders' => [
+                [
+                    'otaOrderNo' => 'OTA-HD-001',
+                    'orderNo' => 'HD-ORDER-001',
+                    'useDate' => '2026-04-20 03:00:00',
+                ],
+                [
+                    'otaOrderNo' => 'OTA-NOT-EXISTS',
+                    'orderNo' => 'HD-ORDER-999',
+                    'useDate' => '2026-04-20 03:00:00',
+                ],
+            ],
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'result' => 'TRUE',
+                'received' => 2,
+                'accepted' => 1,
+            ]);
+
+        Queue::assertPushed(ProcessOrderVerificationJob::class, function (ProcessOrderVerificationJob $job) use ($order) {
+            return $job->orderId === $order->id
+                && $job->source === 'webhook'
+                && ($job->verificationData['status'] ?? null) === OrderStatus::VERIFIED->value;
+        });
     }
 }
 

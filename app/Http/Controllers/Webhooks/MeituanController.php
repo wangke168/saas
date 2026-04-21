@@ -738,14 +738,18 @@ class MeituanController extends Controller
                     foreach ($contacts as $contact) {
                         $guestName = $contact['name'] ?? $contactName;
                         $guestIdCode = '';
+                        $guestCredentialType = null;
                         
                         if (!empty($contact['credentials']) && is_array($contact['credentials'])) {
-                            $guestIdCode = reset($contact['credentials']) ?: '';
+                            $resolvedCredential = $this->resolveMeituanCredentialFromContact($contact['credentials']);
+                            $guestIdCode = $resolvedCredential['credentialNo'];
+                            $guestCredentialType = $resolvedCredential['credentialType'];
                         }
                         
                         if (empty($guestIdCode) && !empty($credentialList)) {
                             if (count($credentialList) === 1) {
                                 $guestIdCode = $credentialList[0]['credentialNo'] ?? '';
+                                $guestCredentialType = intval($credentialList[0]['credentialType'] ?? 0);
                             }
                         }
                         
@@ -754,7 +758,7 @@ class MeituanController extends Controller
                                 'name' => $guestName,
                                 'idCode' => $guestIdCode,
                                 'cardNo' => $guestIdCode,
-                                'credentialType' => 0,
+                                'credentialType' => $guestCredentialType ?? 0,
                                 'credentialNo' => $guestIdCode,
                             ];
                         }
@@ -988,11 +992,13 @@ class MeituanController extends Controller
                     foreach ($contacts as $contact) {
                         $guestName = $contact['name'] ?? $contactName;
                         $guestIdCode = '';
+                        $guestCredentialType = null;
                         
                         // 从 contact 的 credentials 中获取证件号
                         if (!empty($contact['credentials']) && is_array($contact['credentials'])) {
-                            // credentials 可能是数组，取第一个证件号
-                            $guestIdCode = reset($contact['credentials']) ?: '';
+                            $resolvedCredential = $this->resolveMeituanCredentialFromContact($contact['credentials']);
+                            $guestIdCode = $resolvedCredential['credentialNo'];
+                            $guestCredentialType = $resolvedCredential['credentialType'];
                         }
                         
                         // 如果 credentials 中没有，尝试从 credentialList 中匹配
@@ -1000,6 +1006,7 @@ class MeituanController extends Controller
                             // 如果只有一个证件，直接使用
                             if (count($credentialList) === 1) {
                                 $guestIdCode = $credentialList[0]['credentialNo'] ?? '';
+                                $guestCredentialType = intval($credentialList[0]['credentialType'] ?? 0);
                             }
                         }
                         
@@ -1009,7 +1016,7 @@ class MeituanController extends Controller
                                 'name' => $guestName,
                                 'idCode' => $guestIdCode,
                                 'cardNo' => $guestIdCode, // 兼容携程格式
-                                'credentialType' => 0, // 默认身份证
+                                'credentialType' => $guestCredentialType ?? 0,
                                 'credentialNo' => $guestIdCode,
                             ];
                         }
@@ -2923,5 +2930,30 @@ class MeituanController extends Controller
         }
         
         return $voucherPics;
+    }
+
+    /**
+     * 从美团 contacts.credentials 结构中提取证件号与证件类型
+     *
+     * @param array<string|int, mixed> $credentials
+     * @return array{credentialNo: string, credentialType: int|null}
+     */
+    protected function resolveMeituanCredentialFromContact(array $credentials): array
+    {
+        foreach ($credentials as $credentialType => $credentialNo) {
+            if ($credentialNo === null || $credentialNo === '') {
+                continue;
+            }
+
+            return [
+                'credentialNo' => (string)$credentialNo,
+                'credentialType' => is_numeric((string)$credentialType) ? intval($credentialType) : null,
+            ];
+        }
+
+        return [
+            'credentialNo' => '',
+            'credentialType' => null,
+        ];
     }
 }

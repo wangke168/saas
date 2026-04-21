@@ -76,6 +76,45 @@ class HengdianClientTest extends TestCase
         });
     }
 
+    public function test_validate_supports_order_guests_with_id_type(): void
+    {
+        Http::fake([
+            self::FAKE_URL => Http::response(
+                '<Result><Message>ok</Message><ResultCode>0</ResultCode><InventoryPrice>[]</InventoryPrice></Result>',
+                200,
+                ['Content-Type' => 'application/xml']
+            ),
+        ]);
+
+        $client = new HengdianClient($this->config);
+        $result = $client->validate([
+            'HotelId' => '001',
+            'RoomType' => '标准间',
+            'CheckIn' => '2026-06-01',
+            'CheckOut' => '2026-06-03',
+            'RoomNum' => 1,
+            'CustomerNumber' => 2,
+            'PaymentType' => 1,
+            'OrderGuests' => [
+                'OrderGuest' => [
+                    ['Name' => 'Alice', 'IdType' => '1', 'IdCode' => 'P12345678'],
+                ],
+            ],
+            'Extensions' => '{}',
+        ]);
+
+        $this->assertTrue($result['success']);
+        Http::assertSent(function (\Illuminate\Http\Client\Request $request): bool {
+            $body = html_entity_decode($request->body(), ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+            return str_contains($body, '<ValidateRQ>')
+                && str_contains($body, '<OrderGuests>')
+                && str_contains($body, '<OrderGuest>')
+                && str_contains($body, '<IdType>1</IdType>')
+                && str_contains($body, '<IdCode>P12345678</IdCode>');
+        });
+    }
+
     public function test_book_sends_order_guests(): void
     {
         Http::fake([
@@ -92,14 +131,14 @@ class HengdianClientTest extends TestCase
             'RoomType' => '标准间',
             'CheckIn' => '2026-06-01',
             'CheckOut' => '2026-06-02',
-            'Amount' => 10000,
+            'Amount' => 100.50,
             'RoomNum' => 1,
             'PaymentType' => 1,
             'ContactName' => '张三',
             'ContactTel' => '13800000000',
             'OrderGuests' => [
                 'OrderGuest' => [
-                    ['Name' => '张三', 'IdCode' => '110101199001011234'],
+                    ['Name' => '张三', 'IdType' => '0', 'IdCode' => '110101199001011234'],
                 ],
             ],
             'Comment' => '',
@@ -113,7 +152,9 @@ class HengdianClientTest extends TestCase
             return str_contains($body, '<BookRQ>')
                 && str_contains($body, '<OrderGuests>')
                 && str_contains($body, '<OrderGuest>')
+                && str_contains($body, '<Amount>100.5</Amount>')
                 && str_contains($body, '<Name>张三</Name>')
+                && str_contains($body, '<IdType>0</IdType>')
                 && str_contains($body, '<IdCode>110101199001011234</IdCode>');
         });
     }
