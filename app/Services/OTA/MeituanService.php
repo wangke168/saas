@@ -164,9 +164,10 @@ class MeituanService
                         break;
                     }
                     
-                    // 检查该日期是否关闭或库存为0
+                    // 检查该日期是否关闭或按 OTA 规则视为无库存（<= 阈值会被推 0）
                     $checkData = $inventoryByDate[$checkDate];
-                    if ($checkData['is_closed'] || $checkData['quantity'] <= 0) {
+                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity']);
+                    if ($checkData['is_closed'] || $otaQuantity <= 0) {
                         $canAccommodate = false;
                         break;
                     }
@@ -333,9 +334,10 @@ class MeituanService
                         break;
                     }
                     
-                    // 检查该日期是否关闭或库存为0
+                    // 检查该日期是否关闭或按 OTA 规则视为无库存（<= 阈值会被推 0）
                     $checkData = $inventoryByDate[$checkDate];
-                    if ($checkData['is_closed'] || $checkData['quantity'] <= 0) {
+                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity']);
+                    if ($checkData['is_closed'] || $otaQuantity <= 0) {
                         $canAccommodate = false;
                         break;
                     }
@@ -482,9 +484,10 @@ class MeituanService
                         break;
                     }
                     
-                    // 检查该日期是否关闭或库存为0
+                    // 检查该日期是否关闭或按 OTA 规则视为无库存（<= 阈值会被推 0）
                     $checkData = $inventoryByDate[$checkDate];
-                    if ($checkData['is_closed'] || $checkData['quantity'] <= 0) {
+                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity']);
+                    if ($checkData['is_closed'] || $otaQuantity <= 0) {
                         $canAccommodate = false;
                         break;
                     }
