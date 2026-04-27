@@ -175,6 +175,8 @@ const roomTypes = ref([]);
 const controls = ref([]);
 const tableLoading = ref(false);
 const batchSubmitting = ref(false);
+const availableHotelIds = ref(new Set());
+const availableRoomTypeIds = ref(new Set());
 
 const queryForm = ref({
     hotel_id: null,
@@ -209,13 +211,37 @@ const actionRoomTypes = computed(() => {
     return roomTypes.value.filter((roomType) => roomType.hotel_id === actionForm.value.hotel_id);
 });
 
-const fetchHotels = async () => {
-    const params = { per_page: 1000 };
-    if (props.scenicSpotId) {
-        params.scenic_spot_id = props.scenicSpotId;
-    }
-    const response = await axios.get('/hotels', { params });
-    hotels.value = response.data.data || [];
+const fetchProductRelations = async () => {
+    const response = await axios.get(`/products/${props.productId}`, {
+        params: { include_prices: true },
+    });
+    const productData = response.data?.data || {};
+    const prices = productData.prices || [];
+    const hotelIds = new Set();
+    const roomTypeIds = new Set();
+    const roomTypeMap = new Map();
+    const hotelMap = new Map();
+
+    prices.forEach((price) => {
+        const roomType = price.room_type;
+        if (!roomType || !roomType.id) {
+            return;
+        }
+        roomTypeIds.add(roomType.id);
+        roomTypeMap.set(roomType.id, roomType);
+
+        const hotel = roomType.hotel;
+        if (!hotel || !hotel.id) {
+            return;
+        }
+        hotelIds.add(hotel.id);
+        hotelMap.set(hotel.id, hotel);
+    });
+
+    availableHotelIds.value = hotelIds;
+    availableRoomTypeIds.value = roomTypeIds;
+    hotels.value = Array.from(hotelMap.values());
+    roomTypes.value = Array.from(roomTypeMap.values());
 };
 
 const fetchRoomTypes = async () => {
@@ -223,8 +249,7 @@ const fetchRoomTypes = async () => {
         params: { per_page: 1000 },
     });
     const allRoomTypes = response.data.data || [];
-    const hotelIds = new Set(hotels.value.map((hotel) => hotel.id));
-    roomTypes.value = allRoomTypes.filter((roomType) => hotelIds.has(roomType.hotel_id));
+    roomTypes.value = allRoomTypes.filter((roomType) => availableRoomTypeIds.value.has(roomType.id));
 };
 
 const fetchControls = async () => {
@@ -354,7 +379,7 @@ const formatDateTime = (dateTime) => {
 
 onMounted(async () => {
     try {
-        await fetchHotels();
+        await fetchProductRelations();
         await fetchRoomTypes();
         await fetchControls();
     } catch (error) {
