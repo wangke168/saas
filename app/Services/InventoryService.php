@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Inventory;
+use App\Models\ProductRoomInventoryControl;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Redis;
@@ -11,6 +12,61 @@ use Carbon\Carbon;
 
 class InventoryService
 {
+    /**
+     * 按产品维度检查库存可用性（方案B：共享库存池 + 产品级可售开关）。
+     *
+     * @param int $productId 产品ID
+     * @param int $roomTypeId 房型ID
+     * @param array $dates 日期数组 (Y-m-d)
+     * @param int $quantity 需要数量
+     * @return array{success: bool, message: string}
+     */
+    public function checkInventoryAvailabilityForProduct(int $productId, int $roomTypeId, array $dates, int $quantity): array
+    {
+        foreach ($dates as $date) {
+            $inventory = Inventory::where('room_type_id', $roomTypeId)
+                ->where('date', $date)
+                ->first();
+
+            if (!$inventory) {
+                return [
+                    'success' => false,
+                    'message' => "日期 {$date} 没有库存记录",
+                ];
+            }
+
+            if ($inventory->is_closed) {
+                return [
+                    'success' => false,
+                    'message' => "日期 {$date} 库存已关闭",
+                ];
+            }
+
+            if ($inventory->available_quantity < $quantity) {
+                return [
+                    'success' => false,
+                    'message' => "日期 {$date} 库存不足",
+                ];
+            }
+
+            $isProductClosed = ProductRoomInventoryControl::query()
+                ->where('product_id', $productId)
+                ->where('room_type_id', $roomTypeId)
+                ->whereDate('date', $date)
+                ->where('is_closed', true)
+                ->exists();
+
+            if ($isProductClosed) {
+                return [
+                    'success' => false,
+                    'message' => "日期 {$date} 产品维度已关闭",
+                ];
+            }
+        }
+
+        return ['success' => true, 'message' => ''];
+    }
+
     /**
      * 锁定库存（支持单天）
      *

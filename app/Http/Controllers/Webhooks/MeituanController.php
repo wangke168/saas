@@ -2283,6 +2283,22 @@ class MeituanController extends Controller
 
         $dates = $this->inventoryService->getDateRange($checkInDate->format('Y-m-d'), $stayDays);
 
+        if ($product !== null) {
+            $checkResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                (int) $product->id,
+                $roomTypeId,
+                $dates,
+                $quantity
+            );
+            if (!$checkResult['success']) {
+                return [
+                    'success' => false,
+                    'message' => $checkResult['message'],
+                ];
+            }
+            return ['success' => true];
+        }
+
         foreach ($dates as $date) {
             $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
                 ->where('date', $date)
@@ -2313,20 +2329,20 @@ class MeituanController extends Controller
         );
         $required = $order->room_count + $buffer;
 
-        foreach ($dates as $date) {
-            $inventory = \App\Models\Inventory::where('room_type_id', $order->room_type_id)
-                ->where('date', $date)
-                ->first();
+        $checkResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+            (int) $order->product_id,
+            (int) $order->room_type_id,
+            $dates,
+            $required
+        );
 
-            if (!$inventory || $inventory->is_closed || $inventory->available_quantity < $required) {
-                Log::info('美团订单出票：库存未达充裕条件，不自动接单', [
-                    'order_id' => $order->id,
-                    'date' => $date,
-                    'available_quantity' => $inventory->available_quantity ?? null,
-                    'required' => $required,
-                ]);
-                return false;
-            }
+        if (!$checkResult['success']) {
+            Log::info('美团订单出票：库存未达充裕条件，不自动接单', [
+                'order_id' => $order->id,
+                'required' => $required,
+                'reason' => $checkResult['message'],
+            ]);
+            return false;
         }
 
         return true;
@@ -2584,7 +2600,13 @@ class MeituanController extends Controller
                     ->first();
 
                 $stock = 0;
-                if ($inventory && !$inventory->is_closed) {
+                $controlCheckResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                    (int) $product->id,
+                    (int) $price->room_type_id,
+                    [$price->date->format('Y-m-d')],
+                    1
+                );
+                if ($inventory && $controlCheckResult['success']) {
                     // 检查销售日期范围
                     $isInSalePeriod = true;
                     if ($product->sale_start_date || $product->sale_end_date) {

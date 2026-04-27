@@ -6,6 +6,7 @@ use App\Enums\OtaPlatform;
 use App\Http\Client\CtripClient;
 use App\Models\OtaConfig;
 use App\Services\OTA\OtaInventoryHelper;
+use App\Services\InventoryService;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Services\ProductService;
 use App\Services\ProductUnavailableNightService;
@@ -18,7 +19,8 @@ class CtripService
 
     public function __construct(
         protected ProductService $productService,
-        protected OtaConfigResolver $otaConfigResolver
+        protected OtaConfigResolver $otaConfigResolver,
+        protected InventoryService $inventoryService
     ) {}
 
     /**
@@ -209,6 +211,13 @@ class CtripService
         $inventoryByDate = [];
         foreach ($inventoryList as $inventory) {
             $date = $inventory->date->format('Y-m-d');
+
+            $productControlResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                (int) $product->id,
+                (int) $roomType->id,
+                [$date],
+                1
+            );
             
             // 检查销售日期范围
             $isInSalePeriod = true;
@@ -744,6 +753,12 @@ class CtripService
                     'is_closed' => false,
                 ];
             }
+
+            if (!$productControlResult['success']) {
+                $inventoryByDate[$date]['quantity'] = 0;
+                $inventoryByDate[$date]['is_closed'] = true;
+                continue;
+            }
             
             if ($inventory->is_closed) {
                 $inventoryByDate[$date]['is_closed'] = true;
@@ -819,7 +834,14 @@ class CtripService
                         }
                         
                         // 如果不在销售日期范围内、关闭或库存为0，无法满足连续入住
-                        if (!$isInSalePeriod || $missingInventory->is_closed || $missingInventory->available_quantity <= 0) {
+                        $missingControlResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                            (int) $product->id,
+                            (int) $roomType->id,
+                            [$checkDate],
+                            1
+                        );
+
+                        if (!$isInSalePeriod || $missingInventory->is_closed || $missingInventory->available_quantity <= 0 || !$missingControlResult['success']) {
                             $canAccommodate = false;
                             $checkDetails[] = [
                                 'check_date' => $checkDate,
@@ -827,7 +849,7 @@ class CtripService
                                 'is_in_sale_period' => $isInSalePeriod,
                                 'is_closed' => $missingInventory->is_closed,
                                 'available_quantity' => $missingInventory->available_quantity,
-                                'reason' => !$isInSalePeriod ? '不在销售日期范围内' : ($missingInventory->is_closed ? '库存已关闭' : '库存为0'),
+                                'reason' => !$isInSalePeriod ? '不在销售日期范围内' : (!$missingControlResult['success'] ? $missingControlResult['message'] : ($missingInventory->is_closed ? '库存已关闭' : '库存为0')),
                             ];
                             Log::debug('连续入住检查：日期不在查询范围内且不满足条件', [
                                 'date' => $date,

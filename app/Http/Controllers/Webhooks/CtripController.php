@@ -21,6 +21,7 @@ use App\Models\Res\ResHotelDailyStock;
 use App\Services\OTA\OtaConfigResolver;
 use App\Services\OTA\OtaAutoAcceptConfigService;
 use App\Services\OTA\NotificationFactory;
+use App\Services\InventoryService;
 use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\Resource\ResourceServiceFactory;
@@ -38,6 +39,7 @@ class CtripController extends Controller
     public function __construct(
         protected OrderService $orderService,
         protected OrderProcessorService $orderProcessorService,
+        protected InventoryService $inventoryService,
         protected OtaConfigResolver $otaConfigResolver,
         protected OtaAutoAcceptConfigService $otaAutoAcceptConfigService,
     ) {}
@@ -1038,22 +1040,21 @@ class CtripController extends Controller
         $buffer = $this->otaAutoAcceptConfigService->getAutoAcceptBuffer($scenicSpotId, OtaPlatform::CTRIP);
         $stayDays = $order->product?->stay_days ?: 1;
         $required = $order->room_count + $buffer;
+        $dates = $this->inventoryService->getDateRange($order->check_in_date->format('Y-m-d'), $stayDays);
+        $checkResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+            (int) $order->product_id,
+            (int) $order->room_type_id,
+            $dates,
+            $required
+        );
 
-        for ($i = 0; $i < $stayDays; $i++) {
-            $date = $order->check_in_date->copy()->addDays($i);
-            $inventory = \App\Models\Inventory::where('room_type_id', $order->room_type_id)
-                ->where('date', $date->format('Y-m-d'))
-                ->first();
-
-            if (!$inventory || $inventory->is_closed || $inventory->available_quantity < $required) {
-                Log::info('携程预下单支付：库存未达充裕条件，不自动接单', [
-                    'order_id' => $order->id,
-                    'date' => $date->format('Y-m-d'),
-                    'available_quantity' => $inventory->available_quantity ?? null,
-                    'required' => $required,
-                ]);
-                return false;
-            }
+        if (!$checkResult['success']) {
+            Log::info('携程预下单支付：库存未达充裕条件，不自动接单', [
+                'order_id' => $order->id,
+                'required' => $required,
+                'reason' => $checkResult['message'],
+            ]);
+            return false;
         }
 
         return true;
@@ -2436,13 +2437,16 @@ class CtripController extends Controller
                 return $this->errorResponse('1001', '产品PLU不存在/错误：产品未关联酒店或房型');
             }
 
-            // 检查库存
-            $inventory = \App\Models\Inventory::where('room_type_id', $roomType->id)
-                ->where('date', $useStartDate)
-                ->first();
+            // 检查库存（产品维度）
+            $checkResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                (int) $product->id,
+                (int) $roomType->id,
+                [$useStartDate],
+                (int) $quantity
+            );
 
-            if (!$inventory || $inventory->is_closed || $inventory->available_quantity < $quantity) {
-                return $this->errorResponse('1003', '库存不足。日期：' . $useStartDate . '，实际库存：' . ($inventory->available_quantity ?? 0));
+            if (!$checkResult['success']) {
+                return $this->errorResponse('1003', '库存不足。日期：' . $useStartDate . '，原因：' . $checkResult['message']);
             }
 
             // 验证通过，返回成功
@@ -2587,37 +2591,33 @@ class CtripController extends Controller
             ];
         }
 
-        // 检查连续入住天数的库存
-        for ($i = 0; $i < $stayDays; $i++) {
-            $date = $checkInDate->copy()->addDays($i);
+        $dates = $this->inventoryService->getDateRange($checkInDate->format('Y-m-d'), $stayDays);
+        if ($product !== null) {
+            $checkResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                (int) $product->id,
+                $roomTypeId,
+                $dates,
+                $quantity
+            );
+            if (!$checkResult['success']) {
+                return ['success' => false, 'message' => '库存不足。' . $checkResult['message']];
+            }
+            return ['success' => true, 'message' => ''];
+        }
+
+        // 兼容无产品上下文场景（保留原房型维度检查）
+        foreach ($dates as $date) {
             $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
-                ->where('date', $date->format('Y-m-d'))
+                ->where('date', $date)
                 ->first();
 
-            if (!$inventory) {
+            if (!$inventory || $inventory->is_closed || $inventory->available_quantity < $quantity) {
                 return [
                     'success' => false,
-                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，没有库存记录',
-                ];
-            }
-
-            if ($inventory->is_closed) {
-                return [
-                    'success' => false,
-                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，库存已关闭',
-                ];
-            }
-
-            // 可用库存 = 总库存 - 锁定库存 - 已扣减库存
-            // available_quantity 已经考虑了锁定库存，所以直接比较即可
-            if ($inventory->available_quantity < $quantity) {
-                return [
-                    'success' => false,
-                    'message' => '库存不足。日期：' . $date->format('Y-m-d') . '，实际可用库存：' . $inventory->available_quantity . '，需要：' . $quantity,
+                    'message' => '库存不足。日期：' . $date . '，库存不足或已关闭',
                 ];
             }
         }
-
         return ['success' => true, 'message' => ''];
     }
 
@@ -2691,10 +2691,16 @@ class CtripController extends Controller
                     }
 
                     // 再次检查（双重检查，确保在获取行锁后库存仍然足够）
-                    if ($inventory->is_closed || $inventory->available_quantity < $quantity) {
+                    $productCheckResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                        (int) $order->product_id,
+                        (int) $roomTypeId,
+                        [$date->format('Y-m-d')],
+                        (int) $quantity
+                    );
+                    if (!$productCheckResult['success']) {
                         return [
                             'success' => false,
-                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 库存不足或已关闭',
+                            'message' => '库存锁定失败：' . $productCheckResult['message'],
                         ];
                     }
 

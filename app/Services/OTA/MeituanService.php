@@ -5,6 +5,7 @@ namespace App\Services\OTA;
 use App\Enums\OtaPlatform;
 use App\Http\Client\MeituanClient;
 use App\Services\OTA\OtaInventoryHelper;
+use App\Services\InventoryService;
 use App\Services\ProductService;
 use App\Services\ProductUnavailableNightService;
 use Illuminate\Support\Facades\Log;
@@ -26,7 +27,8 @@ class MeituanService
 
     public function __construct(
         protected ProductService $productService,
-        protected OtaConfigResolver $otaConfigResolver
+        protected OtaConfigResolver $otaConfigResolver,
+        protected InventoryService $inventoryService
     ) {}
 
     /**
@@ -100,6 +102,12 @@ class MeituanService
             $stock = 0;
             $isClosed = true;
             if ($inventory) {
+                $controlResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                    (int) $product->id,
+                    (int) $roomType->id,
+                    [$date],
+                    1
+                );
                 $isInSalePeriod = true;
                 if ($product->sale_start_date || $product->sale_end_date) {
                     $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
@@ -113,7 +121,7 @@ class MeituanService
                     }
                 }
                 
-                if ($isInSalePeriod && !$inventory->is_closed) {
+                if ($isInSalePeriod && !$inventory->is_closed && $controlResult['success']) {
                     $stock = $inventory->available_quantity;
                     $isClosed = false;
                 }
@@ -270,6 +278,12 @@ class MeituanService
             $stock = 0;
             $isClosed = true;
             if ($inventory) {
+                $controlResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                    (int) $product->id,
+                    (int) $roomType->id,
+                    [$date],
+                    1
+                );
                 $isInSalePeriod = true;
                 if ($product->sale_start_date || $product->sale_end_date) {
                     $saleStartDate = $product->sale_start_date ? $product->sale_start_date->format('Y-m-d') : null;
@@ -283,7 +297,7 @@ class MeituanService
                     }
                 }
                 
-                if ($isInSalePeriod && !$inventory->is_closed) {
+                if ($isInSalePeriod && !$inventory->is_closed && $controlResult['success']) {
                     $stock = $inventory->available_quantity;
                     $isClosed = false;
                 }

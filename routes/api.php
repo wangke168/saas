@@ -173,6 +173,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/{product}/price-groups', [\App\Http\Controllers\ProductController::class, 'priceGroups']);
         // 日历展示：与 OTA 推送一致的应用加价规则后的价格
         Route::get('/{product}/calendar-ota-prices', [\App\Http\Controllers\ProductController::class, 'calendarOtaPrices']);
+        // 产品维度库存开关（方案B：共享库存池 + 产品级可售开关）
+        Route::get('/{product}/inventory-controls', [\App\Http\Controllers\ProductRoomInventoryControlController::class, 'index']);
+        Route::post('/{product}/inventory-controls/batch-close', [\App\Http\Controllers\ProductRoomInventoryControlController::class, 'batchClose']);
+        Route::post('/{product}/inventory-controls/batch-open', [\App\Http\Controllers\ProductRoomInventoryControlController::class, 'batchOpen']);
         // 通用路由放在最后
         Route::get('/{product}', [\App\Http\Controllers\ProductController::class, 'show']);
         Route::put('/{product}', [\App\Http\Controllers\ProductController::class, 'update']);

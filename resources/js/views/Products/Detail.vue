@@ -690,6 +690,14 @@
                         </el-dialog>
                     </el-tab-pane>
 
+                    <!-- 产品维度库存开关 -->
+                    <el-tab-pane label="库存开关" name="inventoryControls">
+                        <ProductInventoryControlSection
+                            :product-id="product.id"
+                            :scenic-spot-id="product.scenic_spot_id"
+                        />
+                    </el-tab-pane>
+
                     <!-- OTA推送管理标签页 -->
                     <el-tab-pane label="OTA推送" name="otaProducts">
                         <div style="margin-bottom: 20px;">
@@ -900,6 +908,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import ProductInventoryControlSection from './components/ProductInventoryControlSection.vue';
 
 const route = useRoute();
 const router = useRouter();
