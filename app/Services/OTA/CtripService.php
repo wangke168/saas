@@ -214,7 +214,7 @@ class CtripService
 
             $productControlResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
                 (int) $product->id,
-                (int) $roomType->id,
+                (int) $inventory->room_type_id,
                 [$date],
                 1
             );
@@ -753,6 +753,13 @@ class CtripService
                     'is_closed' => false,
                 ];
             }
+
+            $productControlResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
+                (int) $product->id,
+                (int) $inventory->room_type_id,
+                [$date],
+                1
+            );
 
             if (!$productControlResult['success']) {
                 $inventoryByDate[$date]['quantity'] = 0;
