@@ -8,11 +8,15 @@ use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Models\ScenicSpotOtaAccount;
 
 /**
- * OTA 配置解析：平台级共用配置 + 景区级 account 映射
- * 仅 account/partnerId 按景区区分，其余从 .env 平台级读取
+ * OTA 配置解析：平台级共用配置 + 景区级账号配置
  */
 class OtaConfigResolver
 {
+    protected function isCtripScenicCredentialsRequired(): bool
+    {
+        return (bool) env('CTRIP_SCENIC_CREDENTIALS_REQUIRED', false);
+    }
+
     /**
      * 获取携程平台级配置（用于 Webhook 验签/解密，不区分景区）
      */
@@ -56,23 +60,84 @@ class OtaConfigResolver
         return $config;
     }
 
+    protected function buildCtripConfigFromScenicAccount(ScenicSpotOtaAccount $accountConfig): ?OtaConfig
+    {
+        if (
+            empty($accountConfig->account)
+            || empty($accountConfig->secret_key)
+            || empty($accountConfig->aes_key)
+            || empty($accountConfig->aes_iv)
+        ) {
+            return null;
+        }
+
+        $config = new OtaConfig();
+        $config->account = $accountConfig->account;
+        $config->secret_key = $accountConfig->secret_key;
+        $config->aes_key = $accountConfig->aes_key;
+        $config->aes_iv = $accountConfig->aes_iv;
+        $config->api_url = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
+        $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
+        $config->environment = 'production';
+        $config->is_active = true;
+
+        return $config;
+    }
+
     /**
-     * 按景区获取携程配置（平台级 + 映射表覆盖 account）
+     * 按景区获取携程配置（优先景区级四件套，必要时回退平台级）
      */
     public function getCtripConfigForScenicSpot(?int $scenicSpotId): ?OtaConfig
     {
-        $config = $this->getPlatformConfigForCtrip();
-        if (!$config) {
-            return null;
-        }
         $platform = OtaPlatformModel::where('code', OtaPlatformEnum::CTRIP->value)->first();
+
         if ($platform && $scenicSpotId !== null) {
-            $account = ScenicSpotOtaAccount::getAccountFor($scenicSpotId, $platform->id);
-            if ($account !== null) {
-                $config->account = $account;
+            $accountConfig = ScenicSpotOtaAccount::getConfigFor($scenicSpotId, $platform->id);
+            if ($accountConfig) {
+                $configFromAccount = $this->buildCtripConfigFromScenicAccount($accountConfig);
+                if ($configFromAccount) {
+                    return $configFromAccount;
+                }
+
+                if ($this->isCtripScenicCredentialsRequired()) {
+                    return null;
+                }
             }
         }
-        return $config;
+
+        return $this->getPlatformConfigForCtrip();
+    }
+
+    /**
+     * 按携程账号获取配置（Webhook 验签/解密用）
+     */
+    public function getCtripConfigByAccount(string $account): ?OtaConfig
+    {
+        if ($account === '') {
+            return null;
+        }
+
+        $platform = OtaPlatformModel::where('code', OtaPlatformEnum::CTRIP->value)->first();
+        if ($platform) {
+            $accountConfig = ScenicSpotOtaAccount::getConfigByAccount($platform->id, $account);
+            if ($accountConfig) {
+                $configFromAccount = $this->buildCtripConfigFromScenicAccount($accountConfig);
+                if ($configFromAccount) {
+                    return $configFromAccount;
+                }
+
+                if ($this->isCtripScenicCredentialsRequired()) {
+                    return null;
+                }
+            }
+        }
+
+        $platformConfig = $this->getPlatformConfigForCtrip();
+        if ($platformConfig && $platformConfig->account === $account) {
+            return $platformConfig;
+        }
+
+        return null;
     }
 
     /**

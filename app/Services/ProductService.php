@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\PushProductToOtaJob;
 use App\Models\Price;
 use App\Models\PriceRule;
+use App\Models\ProductExternalCodeMapping;
 use App\Models\Product;
 use App\Models\ProductUnavailablePeriod;
 use Carbon\Carbon;
@@ -165,6 +166,111 @@ class ProductService
             }
 
             return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules', 'unavailablePeriods']);
+        });
+    }
+
+    /**
+     * 复制产品及其关联数据（价格、加价规则、不可订时段、外部编码映射）
+     */
+    public function duplicateProduct(Product $sourceProduct, array $data): Product
+    {
+        return DB::transaction(function () use ($sourceProduct, $data) {
+            $sourceProduct->load([
+                'prices',
+                'priceRules.items',
+                'unavailablePeriods',
+                'externalCodeMappings',
+            ]);
+
+            $periods = null;
+            if (array_key_exists('unavailable_periods', $data)) {
+                $periods = $data['unavailable_periods'];
+                unset($data['unavailable_periods']);
+            }
+
+            // code 由模型自动生成，复制时始终重建
+            unset($data['code']);
+            $newProduct = Product::create($data);
+
+            // 复制价格（房型关联通过 room_type_id 一并复制）
+            if ($sourceProduct->prices->isNotEmpty()) {
+                $priceRows = $sourceProduct->prices->map(function (Price $price) use ($newProduct): array {
+                    $source = $price->source instanceof \BackedEnum ? $price->source->value : $price->source;
+
+                    return [
+                        'product_id' => $newProduct->id,
+                        'room_type_id' => $price->room_type_id,
+                        'date' => $price->date?->toDateString(),
+                        'market_price' => $price->market_price,
+                        'settlement_price' => $price->settlement_price,
+                        'sale_price' => $price->sale_price,
+                        'source' => $source,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ];
+                })->all();
+                Price::insert($priceRows);
+            }
+
+            // 复制加价规则及规则明细
+            foreach ($sourceProduct->priceRules as $rule) {
+                $newRule = PriceRule::create([
+                    'product_id' => $newProduct->id,
+                    'name' => $rule->name,
+                    'type' => $rule->type instanceof \BackedEnum ? $rule->type->value : $rule->type,
+                    'weekdays' => $rule->weekdays,
+                    'start_date' => $rule->start_date?->toDateString(),
+                    'end_date' => $rule->end_date?->toDateString(),
+                    'market_price_adjustment' => $rule->market_price_adjustment,
+                    'settlement_price_adjustment' => $rule->settlement_price_adjustment,
+                    'sale_price_adjustment' => $rule->sale_price_adjustment,
+                    'is_active' => $rule->is_active,
+                ]);
+
+                if ($rule->items->isNotEmpty()) {
+                    $items = $rule->items->map(function ($item) use ($newRule): array {
+                        return [
+                            'price_rule_id' => $newRule->id,
+                            'hotel_id' => $item->hotel_id,
+                            'room_type_id' => $item->room_type_id,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+                    })->all();
+
+                    DB::table('price_rule_items')->insert($items);
+                }
+            }
+
+            // 如果前端传了不可订时段，使用输入值；否则复制源产品值
+            if (is_array($periods)) {
+                $this->replaceUnavailablePeriods($newProduct, $periods);
+            } elseif ($sourceProduct->unavailablePeriods->isNotEmpty()) {
+                foreach ($sourceProduct->unavailablePeriods as $period) {
+                    ProductUnavailablePeriod::create([
+                        'product_id' => $newProduct->id,
+                        'start_date' => $period->start_date?->toDateString(),
+                        'end_date' => $period->end_date?->toDateString(),
+                        'note' => $period->note,
+                    ]);
+                }
+            }
+
+            // 复制外部编码映射
+            if ($sourceProduct->externalCodeMappings->isNotEmpty()) {
+                foreach ($sourceProduct->externalCodeMappings as $mapping) {
+                    ProductExternalCodeMapping::create([
+                        'product_id' => $newProduct->id,
+                        'external_code' => $mapping->external_code,
+                        'start_date' => $mapping->start_date?->toDateString(),
+                        'end_date' => $mapping->end_date?->toDateString(),
+                        'is_active' => $mapping->is_active,
+                        'sort_order' => $mapping->sort_order,
+                    ]);
+                }
+            }
+
+            return $newProduct->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules.items', 'unavailablePeriods']);
         });
     }
 

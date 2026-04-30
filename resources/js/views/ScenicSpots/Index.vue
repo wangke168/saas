@@ -409,7 +409,7 @@
             </template>
         </el-dialog>
 
-        <!-- OTA账号配置对话框（携程 ACCOUNT_ID / 美团 PARTNER_ID 按景区） -->
+        <!-- OTA账号配置对话框（景区级 OTA 账号与密钥） -->
         <el-dialog
             v-model="otaAccountDialogVisible"
             :title="`OTA账号 - ${currentOtaScenicSpot?.name || ''}`"
@@ -422,7 +422,7 @@
                 :closable="false"
                 style="margin-bottom: 16px;"
             >
-                仅配置该景区在携程/美团的账号（携程填 ACCOUNT_ID，美团填 PARTNER_ID）。密钥、API 地址等共用系统 .env 配置。未配置时使用系统默认账号。
+                支持按景区配置 OTA 账号。携程可额外配置 SECRET_KEY、ENCRYPT_KEY、ENCRYPT_IV（可选）；若不配置则可回退系统默认配置。
             </el-alert>
             <el-table :data="otaAccountList" v-loading="otaAccountLoading" border size="small">
                 <el-table-column prop="ota_platform" label="平台" width="100">
@@ -469,6 +469,33 @@
                     <el-input
                         v-model="otaAccountForm.account"
                         :placeholder="otaAccountForm.ota_platform_id ? (otaPlatformAccountPlaceholder) : '请先选择平台'"
+                        clearable
+                    />
+                </el-form-item>
+                <el-form-item label="密钥" prop="secret_key">
+                    <el-input
+                        v-model="otaAccountForm.secret_key"
+                        type="password"
+                        :placeholder="otaAccountEditingId ? '留空表示不修改 SECRET_KEY' : '携程 SECRET_KEY（可选）'"
+                        show-password
+                        clearable
+                    />
+                </el-form-item>
+                <el-form-item label="加密Key" prop="aes_key">
+                    <el-input
+                        v-model="otaAccountForm.aes_key"
+                        type="password"
+                        :placeholder="otaAccountEditingId ? '留空表示不修改 ENCRYPT_KEY' : '携程 ENCRYPT_KEY（可选）'"
+                        show-password
+                        clearable
+                    />
+                </el-form-item>
+                <el-form-item label="加密IV" prop="aes_iv">
+                    <el-input
+                        v-model="otaAccountForm.aes_iv"
+                        type="password"
+                        :placeholder="otaAccountEditingId ? '留空表示不修改 ENCRYPT_IV' : '携程 ENCRYPT_IV（可选）'"
+                        show-password
                         clearable
                     />
                 </el-form-item>
@@ -605,7 +632,7 @@ const currentScenicSpotProviders = ref([]);
 const selectedProviderId = ref(null);
 const selectedParamTemplate = ref(null);
 
-// OTA 账号配置（景区-平台-account 映射）
+// OTA 账号配置（景区-平台账号及密钥）
 const otaAccountDialogVisible = ref(false);
 const currentOtaScenicSpot = ref(null);
 const otaAccountList = ref([]);
@@ -617,10 +644,16 @@ const otaAccountEditingId = ref(null); // 编辑时的 ScenicSpotOtaAccount id
 const otaAccountForm = ref({
     ota_platform_id: null,
     account: '',
+    secret_key: '',
+    aes_key: '',
+    aes_iv: '',
 });
 const otaAccountFormRules = {
     ota_platform_id: [{ required: true, message: '请选择平台', trigger: 'change' }],
     account: [{ required: true, message: '请输入账号', trigger: 'blur' }, { max: 64, message: '账号不能超过64个字符', trigger: 'blur' }],
+    secret_key: [{ max: 255, message: '密钥不能超过255个字符', trigger: 'blur' }],
+    aes_key: [{ max: 255, message: '加密Key不能超过255个字符', trigger: 'blur' }],
+    aes_iv: [{ max: 255, message: '加密IV不能超过255个字符', trigger: 'blur' }],
 };
 
 const resourceConfigForm = ref({
@@ -1221,13 +1254,19 @@ const fetchOtaAccountList = async () => {
 
 const showAddOtaAccountForm = () => {
     otaAccountEditingId.value = null;
-    otaAccountForm.value = { ota_platform_id: null, account: '' };
+    otaAccountForm.value = { ota_platform_id: null, account: '', secret_key: '', aes_key: '', aes_iv: '' };
     otaAccountFormVisible.value = true;
 };
 
 const handleEditOtaAccount = (row) => {
     otaAccountEditingId.value = row.id;
-    otaAccountForm.value = { ota_platform_id: row.ota_platform_id, account: row.account || '' };
+    otaAccountForm.value = {
+        ota_platform_id: row.ota_platform_id,
+        account: row.account || '',
+        secret_key: '',
+        aes_key: '',
+        aes_iv: '',
+    };
     otaAccountFormVisible.value = true;
 };
 
@@ -1243,15 +1282,24 @@ const submitOtaAccountForm = async () => {
         otaAccountSubmitting.value = true;
         try {
             if (otaAccountEditingId.value) {
-                await axios.put(`/admin/scenic-spot-ota-accounts/${otaAccountEditingId.value}`, {
+                const payload = {
                     account: otaAccountForm.value.account,
-                });
+                };
+
+                if (otaAccountForm.value.secret_key) payload.secret_key = otaAccountForm.value.secret_key;
+                if (otaAccountForm.value.aes_key) payload.aes_key = otaAccountForm.value.aes_key;
+                if (otaAccountForm.value.aes_iv) payload.aes_iv = otaAccountForm.value.aes_iv;
+
+                await axios.put(`/admin/scenic-spot-ota-accounts/${otaAccountEditingId.value}`, payload);
                 ElMessage.success('更新成功');
             } else {
                 await axios.post('/admin/scenic-spot-ota-accounts', {
                     scenic_spot_id: currentOtaScenicSpot.value.id,
                     ota_platform_id: otaAccountForm.value.ota_platform_id,
                     account: otaAccountForm.value.account,
+                    secret_key: otaAccountForm.value.secret_key || null,
+                    aes_key: otaAccountForm.value.aes_key || null,
+                    aes_iv: otaAccountForm.value.aes_iv || null,
                 });
                 ElMessage.success('添加成功');
             }

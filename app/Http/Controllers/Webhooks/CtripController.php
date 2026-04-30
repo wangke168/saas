@@ -35,6 +35,7 @@ use Illuminate\Support\Facades\Redis;
 class CtripController extends Controller
 {
     protected ?CtripClient $client = null;
+    protected ?CtripClient $currentRequestClient = null;
 
     public function __construct(
         protected OrderService $orderService,
@@ -45,7 +46,7 @@ class CtripController extends Controller
     ) {}
 
     /**
-     * 获取携程客户端（平台级配置，用于 Webhook 验签/解密；多景区共用同一套密钥）
+     * 获取携程客户端（平台级默认配置）
      */
     protected function getClient(): ?CtripClient
     {
@@ -89,22 +90,21 @@ class CtripController extends Controller
             // 获取请求中的 accountId
             $requestAccountId = $header['accountId'] ?? '';
 
-            $client = $this->getClient();
-            if (!$client) {
+            $config = $this->otaConfigResolver->getCtripConfigByAccount((string) $requestAccountId);
+            if (!$config) {
+                Log::warning('携程订单回调账号配置不存在或不完整', [
+                    'request_account_id' => $requestAccountId,
+                ]);
                 return $this->errorResponse('0001', '供应商账户为空');
             }
 
-            // 验证账号：在景区-平台-账号映射中查找，或与平台默认 account 一致
-            $configAccount = $client->getConfigAccount();
-            $ctripPlatformId = $this->otaConfigResolver->getCtripPlatformId();
-            $scenicSpotIdFromMapping = $ctripPlatformId !== null && $requestAccountId !== ''
-                ? $this->otaConfigResolver->getScenicSpotIdByAccount($ctripPlatformId, $requestAccountId)
-                : null;
-            $isDefaultAccount = $requestAccountId !== '' && $requestAccountId === $configAccount;
-            if (empty($requestAccountId) || ($scenicSpotIdFromMapping === null && !$isDefaultAccount)) {
+            $client = new CtripClient($config);
+            $this->currentRequestClient = $client;
+
+            if ($requestAccountId === '' || $requestAccountId !== $client->getConfigAccount()) {
                 Log::warning('携程订单回调账号验证失败', [
                     'request_account_id' => $requestAccountId,
-                    'config_account' => $configAccount,
+                    'config_account' => $client->getConfigAccount(),
                 ]);
                 return $this->errorResponse('0003', '供应商账户信息不正确');
             }
@@ -168,7 +168,7 @@ class CtripController extends Controller
      */
     protected function successResponse(array $body = []): JsonResponse
     {
-        $client = $this->getClient();
+        $client = $this->currentRequestClient ?? $this->getClient();
         $encryptedBody = '';
 
         if (!empty($body) && $client) {

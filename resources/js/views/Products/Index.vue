@@ -70,10 +70,11 @@
                         {{ formatDate(row.created_at) }}
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="350" fixed="right">
+                <el-table-column label="操作" width="420" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" @click="handleViewDetail(row)">详情</el-button>
                         <el-button size="small" @click="handleEdit(row)">编辑</el-button>
+                        <el-button size="small" type="primary" plain @click="handleDuplicate(row)">复制</el-button>
                         <el-button size="small" type="success" @click="handleExport(row)" :loading="exporting[row.id]">
                             <el-icon><Download /></el-icon>
                             导出
@@ -351,9 +352,15 @@ const currentPage = ref(1);
 const pageSize = ref(15);
 const total = ref(0);
 const editingId = ref(null);
+const duplicateSourceId = ref(null);
 
 const isEdit = computed(() => editingId.value !== null);
-const dialogTitle = computed(() => isEdit.value ? '编辑产品' : '创建产品');
+const isDuplicate = computed(() => duplicateSourceId.value !== null);
+const dialogTitle = computed(() => {
+    if (isEdit.value) return '编辑产品';
+    if (isDuplicate.value) return '复制产品';
+    return '创建产品';
+});
 
 const form = ref({
     scenic_spot_id: null,
@@ -501,6 +508,7 @@ const handleFilter = () => {
 
 const handleCreate = async () => {
     editingId.value = null;
+    duplicateSourceId.value = null;
     resetForm();
     // 确保景区列表已加载（特别是运营用户）
     if (scenicSpots.value.length === 0) {
@@ -587,6 +595,7 @@ const mapUnavailablePeriodsFromApi = (list) => {
 
 const handleEdit = async (row) => {
     editingId.value = row.id;
+    duplicateSourceId.value = null;
 
     let unavailablePeriods = [];
     try {
@@ -622,6 +631,45 @@ const handleEdit = async (row) => {
         await handleScenicSpotChange(row.scenic_spot_id, true);
     }
     
+    dialogVisible.value = true;
+};
+
+const handleDuplicate = async (row) => {
+    editingId.value = null;
+    duplicateSourceId.value = row.id;
+
+    let unavailablePeriods = [];
+    try {
+        const res = await axios.get(`/products/${row.id}`, { params: { include_prices: false } });
+        unavailablePeriods = mapUnavailablePeriodsFromApi(res.data?.data?.unavailable_periods);
+    } catch (error) {
+        console.error(error);
+    }
+
+    form.value = {
+        scenic_spot_id: row.scenic_spot_id,
+        software_provider_id: row.software_provider_id || null,
+        name: `${row.name}-副本`,
+        code: '',
+        external_code: row.external_code || '',
+        description: row.description || '',
+        price_source: row.price_source || 'manual',
+        stay_days: row.stay_days || 1,
+        sale_start_date: formatDateForPicker(row.sale_start_date),
+        sale_end_date: formatDateForPicker(row.sale_end_date),
+        order_mode: row.order_mode || null,
+        order_provider_id: row.order_provider_id || null,
+        is_active: row.is_active,
+        is_realname: Number(row.is_realname) === 1,
+        is_realname_touched: false,
+        _is_realname_original_null: row.is_realname === null || row.is_realname === undefined,
+        unavailable_periods: unavailablePeriods,
+    };
+
+    if (row.scenic_spot_id) {
+        await handleScenicSpotChange(row.scenic_spot_id, true);
+    }
+
     dialogVisible.value = true;
 };
 
@@ -695,6 +743,9 @@ const handleSubmit = async () => {
                 if (isEdit.value) {
                     await axios.put(`/products/${editingId.value}`, submitData);
                     ElMessage.success('产品更新成功');
+                } else if (isDuplicate.value) {
+                    await axios.post(`/products/${duplicateSourceId.value}/duplicate`, submitData);
+                    ElMessage.success('产品复制成功');
                 } else {
                     await axios.post('/products', submitData);
                     ElMessage.success('产品创建成功');
@@ -740,6 +791,7 @@ const handleDelete = async (row) => {
 
 const resetForm = () => {
     editingId.value = null;
+    duplicateSourceId.value = null;
     form.value = {
         scenic_spot_id: null,
         software_provider_id: null,

@@ -16,6 +16,15 @@ class ScenicSpotOtaAccount extends Model
         'scenic_spot_id',
         'ota_platform_id',
         'account',
+        'secret_key',
+        'aes_key',
+        'aes_iv',
+    ];
+
+    protected $hidden = [
+        'secret_key',
+        'aes_key',
+        'aes_iv',
     ];
 
     /**
@@ -57,5 +66,29 @@ class ScenicSpotOtaAccount extends Model
             ->where('account', $account)
             ->first();
         return $row?->scenic_spot_id;
+    }
+
+    /**
+     * 按景区+平台获取账号配置
+     */
+    public static function getConfigFor(?int $scenicSpotId, int $otaPlatformId): ?self
+    {
+        if ($scenicSpotId === null) {
+            return null;
+        }
+
+        return static::where('scenic_spot_id', $scenicSpotId)
+            ->where('ota_platform_id', $otaPlatformId)
+            ->first();
+    }
+
+    /**
+     * 按平台+账号获取账号配置
+     */
+    public static function getConfigByAccount(int $otaPlatformId, string $account): ?self
+    {
+        return static::where('ota_platform_id', $otaPlatformId)
+            ->where('account', $account)
+            ->first();
     }
 }

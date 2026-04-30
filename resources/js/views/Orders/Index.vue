@@ -167,6 +167,12 @@
                         <div class="body-col col-guest">
                             <div class="guest-name">{{ order.contact_name || '-' }}</div>
                             <div class="guest-phone">{{ order.contact_phone || '-' }}</div>
+                            <div
+                                v-if="getOrderIdCardNo(order)"
+                                class="guest-id-card"
+                            >
+                                身份证：{{ getOrderIdCardNo(order) }}
+                            </div>
                         </div>
 
                         <!-- 第五列：金额信息 -->
@@ -430,6 +436,31 @@ const formatPrice = (price) => {
     if (!price) return '0.00';
     // 价格单位：数据库存储已经是元，直接格式化
     return parseFloat(price).toFixed(2);
+};
+
+/**
+ * 与后端 FliggyOrderDataBuilder::getContactCertificates 一致：credential_list[0] → guest_info[0] → card_no
+ */
+const getOrderIdCardNo = (order) => {
+    const list = order?.credential_list;
+    if (Array.isArray(list) && list.length > 0) {
+        const first = list[0] ?? {};
+        const no = first.credentialNo ?? first.credential_no ?? '';
+        if (no) return String(no);
+    }
+    const guests = order?.guest_info;
+    if (Array.isArray(guests) && guests.length > 0) {
+        const g = guests[0] ?? {};
+        const no =
+            g.idCode ??
+            g.id_code ??
+            g.cardNo ??
+            g.card_no ??
+            '';
+        if (no) return String(no);
+    }
+    const card = order?.card_no;
+    return card ? String(card) : '';
 };
 
 const formatDate = (date) => {
@@ -1056,6 +1087,14 @@ onUnmounted(() => {
     font-weight: 400;
 }
 
+.guest-id-card {
+    color: #909399;
+    font-size: 12px;
+    line-height: 1.5;
+    font-weight: 400;
+    word-break: break-all;
+}
+
 /* 第五列：金额信息 */
 .col-amount {
     flex-direction: column;
@@ -1291,6 +1330,7 @@ onUnmounted(() => {
 
     .hotel-details,
     .guest-phone,
+    .guest-id-card,
     .amount-label,
     .amount-value {
         font-size: 11px;

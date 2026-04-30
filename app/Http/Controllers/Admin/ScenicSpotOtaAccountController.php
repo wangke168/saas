@@ -9,8 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 /**
- * 景区-OTA-账号映射管理（仅超级管理员）
- * 仅 account/partnerId 按景区区分，其余配置平台共用
+ * 景区-OTA-账号配置管理（仅超级管理员）
  */
 class ScenicSpotOtaAccountController extends Controller
 {
@@ -60,6 +59,9 @@ class ScenicSpotOtaAccountController extends Controller
             'scenic_spot_id' => 'required|exists:scenic_spots,id',
             'ota_platform_id' => 'required|exists:ota_platforms,id',
             'account' => 'required|string|max:64',
+            'secret_key' => 'nullable|string|max:255',
+            'aes_key' => 'nullable|string|max:255',
+            'aes_iv' => 'nullable|string|max:255',
         ]);
 
         // 同一景区同一平台仅允许一条
@@ -104,6 +106,9 @@ class ScenicSpotOtaAccountController extends Controller
 
         $validated = $request->validate([
             'account' => 'required|string|max:64',
+            'secret_key' => 'nullable|string|max:255',
+            'aes_key' => 'nullable|string|max:255',
+            'aes_iv' => 'nullable|string|max:255',
         ]);
 
         try {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\OtaPlatform;
+use App\Http\Requests\Product\DuplicateProductRequest;
 use App\Models\Price;
 use App\Models\Product;
 use App\Services\OTA\CtripService;
@@ -395,6 +396,27 @@ class ProductController extends Controller
         return response()->json([
             'message' => '产品删除成功',
         ]);
+    }
+
+    /**
+     * 复制产品（包含价格、加价规则、不可订时段等关联）
+     */
+    public function duplicate(DuplicateProductRequest $request, Product $product): JsonResponse
+    {
+        // 需要先能查看源产品，再校验目标景区创建权限
+        $this->authorize('view', $product);
+        $policy = app(\App\Policies\ProductPolicy::class);
+        $targetScenicSpotId = $request->input('scenic_spot_id');
+        if (! $policy->create($request->user(), $targetScenicSpotId)) {
+            abort(403, '无权在该景区下复制产品');
+        }
+
+        $newProduct = $this->productService->duplicateProduct($product, $request->validated());
+
+        return response()->json([
+            'message' => '产品复制成功',
+            'data' => $newProduct,
+        ], 201);
     }
 
     /**
