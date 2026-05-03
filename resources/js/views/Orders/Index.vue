@@ -4,99 +4,111 @@
         <el-card>
             <!-- 筛选条件 -->
             <div class="filter-bar">
-                <el-select
-                    v-model="filters.status"
-                    placeholder="订单状态"
-                    clearable
-                    style="width: 150px;"
-                    @change="handleFilter"
-                >
-                    <el-option label="已支付/待确认" value="paid_pending" />
-                    <el-option label="确认中" value="confirming" />
-                    <el-option label="预订成功" value="confirmed" />
-                    <el-option label="预订失败/拒单" value="rejected" />
-                    <el-option label="申请取消中" value="cancel_requested" />
-                    <el-option label="取消拒绝" value="cancel_rejected" />
-                    <el-option label="取消通过" value="cancel_approved" />
-                    <el-option label="核销订单" value="verified" />
-                </el-select>
-                <el-input
-                    v-model="filters.order_no"
-                    placeholder="订单号"
-                    clearable
-                    style="width: 200px;"
-                    @clear="handleFilter"
-                    @keyup.enter="handleFilter"
-                />
-                <el-input
-                    v-model="filters.ota_order_no"
-                    placeholder="OTA订单号"
-                    clearable
-                    style="width: 200px;"
-                    @clear="handleFilter"
-                    @keyup.enter="handleFilter"
-                />
+                <div class="filter-row">
+                    <el-select
+                        v-model="filters.status"
+                        placeholder="订单状态"
+                        clearable
+                        style="width: 150px;"
+                        @change="handleFilter"
+                    >
+                        <el-option label="已支付/待确认" value="paid_pending" />
+                        <el-option label="确认中" value="confirming" />
+                        <el-option label="预订成功" value="confirmed" />
+                        <el-option label="预订失败/拒单" value="rejected" />
+                        <el-option label="申请取消中" value="cancel_requested" />
+                        <el-option label="取消拒绝" value="cancel_rejected" />
+                        <el-option label="取消通过" value="cancel_approved" />
+                        <el-option label="核销订单" value="verified" />
+                    </el-select>
+                    <el-input
+                        v-model="filters.order_no"
+                        placeholder="订单号"
+                        clearable
+                        style="width: 200px;"
+                        @clear="handleFilter"
+                        @keyup.enter="handleFilter"
+                    />
+                    <el-input
+                        v-model="filters.ota_order_no"
+                        placeholder="OTA订单号"
+                        clearable
+                        style="width: 200px;"
+                        @clear="handleFilter"
+                        @keyup.enter="handleFilter"
+                    />
 
-                <el-select
-                    v-model="filters.ota_platform_id"
-                    placeholder="渠道"
-                    clearable
-                    style="width: 150px;"
-                    @change="handleFilter"
-                >
-                    <el-option
-                        v-for="platform in otaPlatforms"
-                        :key="platform.id"
-                        :label="platform.name"
-                        :value="platform.id"
+                    <el-select
+                        v-model="filters.ota_platform_id"
+                        placeholder="渠道"
+                        clearable
+                        style="width: 150px;"
+                        @change="handleFilter"
+                    >
+                        <el-option
+                            v-for="platform in otaPlatforms"
+                            :key="platform.id"
+                            :label="platform.name"
+                            :value="platform.id"
+                        />
+                    </el-select>
+                    <el-select
+                        v-model="filters.scenic_spot_id"
+                        placeholder="景区"
+                        clearable
+                        style="width: 150px;"
+                        @change="handleFilter"
+                    >
+                        <el-option
+                            v-for="spot in scenicSpots"
+                            :key="spot.id"
+                            :label="spot.name"
+                            :value="spot.id"
+                        />
+                    </el-select>
+                </div>
+                <div class="filter-row">
+                    <el-input
+                        v-model="filters.contact_name"
+                        placeholder="客人姓名"
+                        clearable
+                        style="width: 150px;"
+                        @clear="handleFilter"
+                        @keyup.enter="handleFilter"
                     />
-                </el-select>
-                <el-select
-                    v-model="filters.scenic_spot_id"
-                    placeholder="景区"
-                    clearable
-                    style="width: 150px;"
-                    @change="handleFilter"
-                >
-                    <el-option
-                        v-for="spot in scenicSpots"
-                        :key="spot.id"
-                        :label="spot.name"
-                        :value="spot.id"
+                    <el-input
+                        v-model="filters.contact_phone"
+                        placeholder="客人手机号"
+                        clearable
+                        style="width: 180px;"
+                        @clear="handleFilter"
+                        @keyup.enter="handleFilter"
                     />
-                </el-select>
-                <el-input
-                    v-model="filters.contact_name"
-                    placeholder="客人姓名"
-                    clearable
-                    style="width: 150px;"
-                    @clear="handleFilter"
-                    @keyup.enter="handleFilter"
-                />
-                <el-date-picker
-                    v-model="filters.check_in_date_range"
-                    type="daterange"
-                    range-separator="至"
-                    start-placeholder="入住日期开始"
-                    end-placeholder="入住日期结束"
-                    format="YYYY-MM-DD"
-                    value-format="YYYY-MM-DD"
-                    style="width: 240px;"
-                    @change="handleFilter"
-                />
-                <el-date-picker
-                    v-model="filters.created_at_range"
-                    type="daterange"
-                    range-separator="至"
-                    start-placeholder="预定日期开始"
-                    end-placeholder="预定日期结束"
-                    format="YYYY-MM-DD"
-                    value-format="YYYY-MM-DD"
-                    style="width: 240px;"
-                    @change="handleFilter"
-                />
-                <el-button @click="handleFilter">筛选</el-button>
-                <el-button @click="resetFilter">重置</el-button>
+                    <el-date-picker
+                        v-model="filters.check_in_date_range"
+                        type="daterange"
+                        range-separator="至"
+                        start-placeholder="入住日期开始"
+                        end-placeholder="入住日期结束"
+                        format="YYYY-MM-DD"
+                        value-format="YYYY-MM-DD"
+                        style="width: 240px;"
+                        @change="handleFilter"
+                    />
+                    <el-date-picker
+                        v-model="filters.created_at_range"
+                        type="daterange"
+                        range-separator="至"
+                        start-placeholder="预定日期开始"
+                        end-placeholder="预定日期结束"
+                        format="YYYY-MM-DD"
+                        value-format="YYYY-MM-DD"
+                        style="width: 240px;"
+                        @change="handleFilter"
+                    />
+                    <el-button @click="handleFilter">筛选</el-button>
+                    <el-button @click="resetFilter">重置</el-button>
+                </div>
             </div>
 
             <!-- 订单列表 -->
@@ -348,6 +360,7 @@ const filters = ref({
     order_no: '',
     ota_order_no: '',
     contact_name: '',
+    contact_phone: '',
     ota_platform_id: null,
     scenic_spot_id: null,
     check_in_date_range: null,
@@ -374,6 +387,10 @@ const fetchOrders = async () => {
         }
         if (filters.value.contact_name) {
             params.contact_name = filters.value.contact_name;
+        }
+        const contactPhone = filters.value.contact_phone?.trim();
+        if (contactPhone) {
+            params.contact_phone = contactPhone;
         }
         if (filters.value.ota_platform_id) {
             params.ota_platform_id = filters.value.ota_platform_id;
@@ -424,6 +441,7 @@ const resetFilter = () => {
         order_no: '',
         ota_order_no: '',
         contact_name: '',
+        contact_phone: '',
         ota_platform_id: null,
         scenic_spot_id: null,
         check_in_date_range: null,
@@ -1282,6 +1300,12 @@ onUnmounted(() => {
 .filter-bar {
     margin-bottom: 20px;
     display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.filter-row {
+    display: flex;
     gap: 10px;
     flex-wrap: wrap;
     align-items: center;
@@ -1295,13 +1319,19 @@ onUnmounted(() => {
         gap: 12px;
     }
 
-    .filter-bar .el-select,
-    .filter-bar .el-input,
-    .filter-bar .el-date-picker {
+    .filter-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .filter-row .el-select,
+    .filter-row .el-input,
+    .filter-row .el-date-picker {
         width: 100% !important;
     }
 
-    .filter-bar .el-button {
+    .filter-row .el-button {
         width: 100%;
     }
 }

@@ -4,10 +4,10 @@ namespace App\Console\Commands;
 
 use App\Enums\OrderStatus;
 use App\Models\Order;
-use App\Models\SoftwareProvider;
 use App\Services\OrderVerificationService;
 use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 class QueryOrderVerificationStatusCommand extends Command
@@ -34,7 +34,7 @@ class QueryOrderVerificationStatusCommand extends Command
     public function handle(OrderVerificationService $verificationService): int
     {
         $orderId = $this->option('order-id');
-        $batchSize = (int)$this->option('batch-size');
+        $batchSize = (int) $this->option('batch-size');
 
         if ($orderId) {
             // 查询指定订单
@@ -55,18 +55,21 @@ class QueryOrderVerificationStatusCommand extends Command
         $order = Order::with(['otaPlatform', 'product', 'hotel.scenicSpot.softwareProvider'])
             ->find($orderId);
 
-        if (!$order) {
+        if (! $order) {
             $this->error("订单不存在: {$orderId}");
+
             return Command::FAILURE;
         }
 
         $result = $this->queryOrderStatus($order, $verificationService);
-        
+
         if ($result['success']) {
-            $this->info("查询成功: " . ($result['message'] ?? ''));
+            $this->info('查询成功: '.($result['message'] ?? ''));
+
             return Command::SUCCESS;
         } else {
-            $this->error("查询失败: " . ($result['message'] ?? ''));
+            $this->error('查询失败: '.($result['message'] ?? ''));
+
             return Command::FAILURE;
         }
     }
@@ -79,16 +82,21 @@ class QueryOrderVerificationStatusCommand extends Command
         $this->info("开始批量查询订单核销状态，批量大小: {$batchSize}");
 
         // 查询需要检查核销状态的订单
-        // 条件：状态为CONFIRMED，入住日期已到或已过
+        // 条件：状态为 CONFIRMED，入住日为今天 / 昨天 / 前天（共 3 天）
+        $today = Carbon::today();
+        $checkInFrom = $today->copy()->subDays(2)->toDateString();
+        $checkInTo = $today->toDateString();
+
         $orders = Order::with(['otaPlatform', 'product', 'hotel.scenicSpot.softwareProvider'])
             ->where('status', OrderStatus::CONFIRMED)
-            ->where('check_in_date', '<=', now()->format('Y-m-d'))
+            ->whereBetween('check_in_date', [$checkInFrom, $checkInTo])
             ->orderBy('check_in_date', 'asc')
             ->limit($batchSize)
             ->get();
 
         if ($orders->isEmpty()) {
             $this->info('没有需要查询的订单');
+
             return Command::SUCCESS;
         }
 
@@ -101,17 +109,19 @@ class QueryOrderVerificationStatusCommand extends Command
         foreach ($orders as $order) {
             // 检查订单关联的软件服务商是否支持查询
             $scenicSpot = $order->hotel->scenicSpot ?? null;
-            if (!$scenicSpot) {
+            if (! $scenicSpot) {
                 $skipCount++;
                 $this->warn("订单 {$order->id} 没有关联景区，跳过");
+
                 continue;
             }
 
             // 获取软件服务商
             $softwareProvider = $scenicSpot->softwareProvider ?? null;
-            if (!$softwareProvider) {
+            if (! $softwareProvider) {
                 $skipCount++;
                 $this->warn("订单 {$order->id} 关联的景区没有软件服务商，跳过");
+
                 continue;
             }
 
@@ -123,18 +133,19 @@ class QueryOrderVerificationStatusCommand extends Command
             if ($method === 'webhook') {
                 $skipCount++;
                 $this->info("订单 {$order->id} 的软件服务商使用webhook模式，跳过主动查询");
+
                 continue;
             }
 
             // 查询订单状态
             $result = $this->queryOrderStatus($order, $verificationService);
-            
+
             if ($result['success']) {
                 $successCount++;
                 $this->info("订单 {$order->id} 查询成功");
             } else {
                 $failCount++;
-                $this->error("订单 {$order->id} 查询失败: " . ($result['message'] ?? ''));
+                $this->error("订单 {$order->id} 查询失败: ".($result['message'] ?? ''));
             }
         }
 
@@ -151,8 +162,8 @@ class QueryOrderVerificationStatusCommand extends Command
         try {
             // 获取资源服务
             $resourceService = ResourceServiceFactory::getService($order, 'order');
-            
-            if (!$resourceService) {
+
+            if (! $resourceService) {
                 return [
                     'success' => false,
                     'message' => '无法获取资源服务，订单可能不是系统直连',
@@ -160,7 +171,7 @@ class QueryOrderVerificationStatusCommand extends Command
             }
 
             // 检查资源服务是否实现了queryOrderStatus方法
-            if (!method_exists($resourceService, 'queryOrderStatus')) {
+            if (! method_exists($resourceService, 'queryOrderStatus')) {
                 return [
                     'success' => false,
                     'message' => '资源服务不支持查询订单状态',
@@ -170,7 +181,7 @@ class QueryOrderVerificationStatusCommand extends Command
             // 查询订单状态
             $result = $resourceService->queryOrderStatus($order);
 
-            if (!($result['success'] ?? false)) {
+            if (! ($result['success'] ?? false)) {
                 return [
                     'success' => false,
                     'message' => $result['message'] ?? '查询订单状态失败',
@@ -208,12 +219,8 @@ class QueryOrderVerificationStatusCommand extends Command
 
             return [
                 'success' => false,
-                'message' => '查询异常：' . $e->getMessage(),
+                'message' => '查询异常：'.$e->getMessage(),
             ];
         }
     }
 }
-
-
-
-

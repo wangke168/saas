@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Enums\OrderStatus;
 use App\Models\Order;
-use App\Services\OrderService;
 use App\Services\OrderOperationService;
+use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -24,19 +24,19 @@ class OrderController extends Controller
         $this->authorize('viewAny', Order::class);
 
         $query = Order::with([
-            'otaPlatform', 
-            'product.scenicSpot', 
-            'hotel.scenicSpot.softwareProvider', 
-            'roomType'
+            'otaPlatform',
+            'product.scenicSpot',
+            'hotel.scenicSpot.softwareProvider',
+            'roomType',
         ]);
 
         // 权限过滤：非管理员只能查看所属资源方下的所有景区下的订单
-        if (!$request->user()->isAdmin()) {
+        if (! $request->user()->isAdmin()) {
             $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
             $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
                 $query->whereIn('resource_providers.id', $resourceProviderIds);
             })->pluck('id');
-            
+
             $query->whereHas('product', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
             });
@@ -72,7 +72,13 @@ class OrderController extends Controller
 
         // 客人姓名查询
         if ($request->has('contact_name')) {
-            $query->where('contact_name', 'like', '%' . $request->contact_name . '%');
+            $query->where('contact_name', 'like', '%'.$request->contact_name.'%');
+        }
+
+        // 客人手机号查询（trim 后精准匹配）
+        $contactPhone = trim((string) $request->input('contact_phone', ''));
+        if ($contactPhone !== '') {
+            $query->where('contact_phone', $contactPhone);
         }
 
         // 景区查询（通过product关联）
@@ -83,11 +89,11 @@ class OrderController extends Controller
         }
 
         if ($request->has('order_no')) {
-            $query->where('order_no', 'like', '%' . $request->order_no . '%');
+            $query->where('order_no', 'like', '%'.$request->order_no.'%');
         }
 
         if ($request->has('ota_order_no')) {
-            $query->where('ota_order_no', 'like', '%' . $request->ota_order_no . '%');
+            $query->where('ota_order_no', 'like', '%'.$request->ota_order_no.'%');
         }
 
         $orders = $query->orderBy('created_at', 'desc')
@@ -125,7 +131,7 @@ class OrderController extends Controller
         $this->authorize('updateStatus', $order);
 
         $validated = $request->validate([
-            'status' => ['required', 'in:' . implode(',', array_column(OrderStatus::cases(), 'value'))],
+            'status' => ['required', 'in:'.implode(',', array_column(OrderStatus::cases(), 'value'))],
             'remark' => 'nullable|string',
         ]);
 
@@ -153,10 +159,10 @@ class OrderController extends Controller
         $this->authorize('updateStatus', $order);
 
         // 检查订单状态是否允许接单
-        if (!in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMING])) {
+        if (! in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMING])) {
             return response()->json([
                 'success' => false,
-                'message' => '订单状态不允许接单，当前状态：' . $order->status->label(),
+                'message' => '订单状态不允许接单，当前状态：'.$order->status->label(),
             ], 400);
         }
 
@@ -195,10 +201,10 @@ class OrderController extends Controller
         $this->authorize('updateStatus', $order);
 
         // 检查订单状态是否允许拒单
-        if (!in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMING])) {
+        if (! in_array($order->status, [OrderStatus::PAID_PENDING, OrderStatus::CONFIRMING])) {
             return response()->json([
                 'success' => false,
-                'message' => '订单状态不允许拒单，当前状态：' . $order->status->label(),
+                'message' => '订单状态不允许拒单，当前状态：'.$order->status->label(),
             ], 400);
         }
 
@@ -240,14 +246,14 @@ class OrderController extends Controller
         if ($order->status !== OrderStatus::CONFIRMED) {
             return response()->json([
                 'success' => false,
-                'message' => '订单状态不允许核销，当前状态：' . $order->status->label(),
+                'message' => '订单状态不允许核销，当前状态：'.$order->status->label(),
             ], 400);
         }
 
         $validated = $request->validate([
             'use_start_date' => 'required|date',
             'use_end_date' => 'required|date|after:use_start_date',
-            'use_quantity' => 'required|integer|min:1|max:' . $order->room_count,
+            'use_quantity' => 'required|integer|min:1|max:'.$order->room_count,
             'passengers' => 'nullable|array',
             'vouchers' => 'nullable|array',
         ]);
@@ -286,7 +292,7 @@ class OrderController extends Controller
         if ($order->status !== OrderStatus::CANCEL_REQUESTED) {
             return response()->json([
                 'success' => false,
-                'message' => '订单状态不允许同意取消，当前状态：' . $order->status->label(),
+                'message' => '订单状态不允许同意取消，当前状态：'.$order->status->label(),
             ], 400);
         }
 
@@ -329,7 +335,7 @@ class OrderController extends Controller
         if ($order->status !== OrderStatus::CANCEL_REQUESTED) {
             return response()->json([
                 'success' => false,
-                'message' => '订单状态不允许拒绝取消，当前状态：' . $order->status->label(),
+                'message' => '订单状态不允许拒绝取消，当前状态：'.$order->status->label(),
             ], 400);
         }
 

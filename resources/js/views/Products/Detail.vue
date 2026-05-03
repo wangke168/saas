@@ -924,6 +924,8 @@ const priceRules = ref([]);
 const otaProducts = ref([]);
 const externalCodeMappings = ref([]);
 const activeTab = ref('prices');
+const pricesLoaded = ref(false);
+const priceRulesLoaded = ref(false);
 
 // 价格管理相关
 const priceDialogVisible = ref(false);
@@ -1249,6 +1251,8 @@ const fetchProduct = async () => {
         const response = await axios.get(`/products/${route.params.id}`, {
             params: {
                 include_prices: false,
+                include_price_rules: false,
+                include_price_rule_items: false,
             },
         });
 
@@ -1259,17 +1263,12 @@ const fetchProduct = async () => {
 
         product.value = response.data.data;
         otaProducts.value = product.value.ota_products || [];
-        
-        // 获取外部编码映射列表
-        await fetchExternalCodeMappings();
 
-        // 如果产品已加载，获取酒店和房型列表
+        const bootstrapTasks = [fetchExternalCodeMappings()];
         if (product.value && product.value.scenic_spot_id) {
-            await fetchHotels();
-            await fetchRoomTypes();
+            bootstrapTasks.push(fetchHotels().then(() => fetchRoomTypes()));
         }
-        await fetchPriceGroups();
-        await fetchPriceRules();
+        await Promise.all(bootstrapTasks);
     } catch (error) {
         const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || '获取产品详情失败';
         ElMessage.error(errorMessage);
@@ -1314,11 +1313,28 @@ const fetchPriceRules = async () => {
             priceRulePagination.value.current_page = priceRulePagination.value.last_page;
             await fetchPriceRules();
         }
+        priceRulesLoaded.value = true;
     } catch (error) {
         ElMessage.error(error.response?.data?.message || '获取加价规则失败');
     } finally {
         priceRulesLoading.value = false;
     }
+};
+
+const ensurePriceGroupsLoaded = async () => {
+    if (pricesLoaded.value) {
+        return;
+    }
+    await fetchPriceGroups();
+    pricesLoaded.value = true;
+};
+
+const ensurePriceRulesLoaded = async () => {
+    if (priceRulesLoaded.value) {
+        return;
+    }
+    await fetchPriceRules();
+    priceRulesLoaded.value = true;
 };
 
 const fetchPriceGroups = async () => {
@@ -1345,6 +1361,7 @@ const fetchPriceGroups = async () => {
             ...priceGroupPagination.value,
             ...(response.data?.meta || {}),
         };
+        pricesLoaded.value = true;
     } catch (error) {
         ElMessage.error(error.response?.data?.message || '获取价格数据失败');
     } finally {
@@ -1750,6 +1767,7 @@ const handleRoomTypeChange = () => {
 const handlePriceFilter = () => {
     priceGroupPagination.value.current_page = 1;
     expandedRoomTypes.value = [];
+    pricesLoaded.value = true;
     fetchPriceGroups();
 };
 
@@ -1759,12 +1777,14 @@ const resetPriceFilter = () => {
     priceFilterDateRange.value = null;
     priceGroupPagination.value.current_page = 1;
     expandedRoomTypes.value = [];
+    pricesLoaded.value = true;
     fetchPriceGroups();
 };
 
 const handlePriceGroupPageChange = (page) => {
     priceGroupPagination.value.current_page = page;
     expandedRoomTypes.value = [];
+    pricesLoaded.value = true;
     fetchPriceGroups();
 };
 
@@ -1772,6 +1792,7 @@ const handlePriceGroupSizeChange = (size) => {
     priceGroupPagination.value.per_page = size;
     priceGroupPagination.value.current_page = 1;
     expandedRoomTypes.value = [];
+    pricesLoaded.value = true;
     fetchPriceGroups();
 };
 
@@ -2010,12 +2031,14 @@ const handlePriceRuleHotelChange = (index) => {
 
 const handlePriceRulePageChange = (page) => {
     priceRulePagination.value.current_page = page;
+    priceRulesLoaded.value = true;
     fetchPriceRules();
 };
 
 const handlePriceRuleSizeChange = (size) => {
     priceRulePagination.value.per_page = size;
     priceRulePagination.value.current_page = 1;
+    priceRulesLoaded.value = true;
     fetchPriceRules();
 };
 
@@ -2323,6 +2346,11 @@ const clearAllPolling = () => {
 onMounted(async () => {
     await fetchProduct();
     await fetchOtaPlatforms();
+    if (activeTab.value === 'prices') {
+        await ensurePriceGroupsLoaded();
+    } else if (activeTab.value === 'priceRules') {
+        await ensurePriceRulesLoaded();
+    }
 });
 
 watch(
@@ -2336,25 +2364,34 @@ watch(
     },
 );
 
+const handleCalendarTabActivated = async () => {
+    if (!priceRoomTypeIds.value.length) {
+        await ensurePriceGroupsLoaded();
+    }
+
+    if (!calendarDefaultsApplied.value && calendarRoomTypesOptions.value.length) {
+        calendarApplyingDefaults.value = true;
+        calendarSelectedRoomTypeIds.value = calendarRoomTypesOptions.value
+            .slice(0, 1)
+            .map((rt) => rt.id);
+        calendarDefaultsApplied.value = true;
+        nextTick(() => {
+            calendarApplyingDefaults.value = false;
+            fetchCalendarPrices();
+        });
+        return;
+    }
+
+    fetchCalendarPrices();
+};
+
 watch(activeTab, (tabName) => {
     if (tabName === 'prices') {
-        fetchPriceGroups();
+        ensurePriceGroupsLoaded();
     } else if (tabName === 'priceRules') {
-        fetchPriceRules();
+        ensurePriceRulesLoaded();
     } else if (tabName === 'calendarPrices') {
-        if (!calendarDefaultsApplied.value && calendarRoomTypesOptions.value.length) {
-            calendarApplyingDefaults.value = true;
-            calendarSelectedRoomTypeIds.value = calendarRoomTypesOptions.value
-                .slice(0, 1)
-                .map((rt) => rt.id);
-            calendarDefaultsApplied.value = true;
-            nextTick(() => {
-                calendarApplyingDefaults.value = false;
-                fetchCalendarPrices();
-            });
-            return;
-        }
-        fetchCalendarPrices();
+        handleCalendarTabActivated();
     }
 });
 

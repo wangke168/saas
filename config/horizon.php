@@ -80,6 +80,7 @@ return [
 
     'waits' => [
         'redis:default' => 60,
+        'redis:order-verification' => 120,
         'redis:ota-push' => 60,
         'redis:ota-notification' => 30,  // OTA通知需要快速响应
         'redis:resource-push' => 30,  // 资源方推送需要快速响应
@@ -186,10 +187,11 @@ return [
                 'rest' => 0,
             ],
             
-            // 策略组2：中优先级 - OTA推送、OTA通知和默认队列
+            // 策略组2：中优先级 - 订单核销处理、OTA通知、OTA推送与默认队列
+            // order-verification：ProcessOrderVerificationJob / 查单与横店核销回调入队，漏监听会导致永不执行、OTA 收不到核销通知
             'supervisor-medium-priority' => [
                 'connection' => 'redis',
-                'queue' => ['ota-notification', 'ota-push', 'default'],
+                'queue' => ['order-verification', 'ota-notification', 'ota-push', 'default'],
                 'balance' => 'auto',
                 'minProcesses' => 1,
                 'maxProcesses' => 5,
@@ -228,7 +230,7 @@ return [
         'local' => [
             'supervisor-default' => [
                 'connection' => 'redis',
-                'queue' => ['default', 'ota-notification', 'ota-push', 'resource-push', 'ota-sync'],
+                'queue' => ['order-verification', 'default', 'ota-notification', 'ota-push', 'resource-push', 'ota-sync'],
                 'balance' => 'simple',
                 'processes' => 2,
                 'tries' => 3,

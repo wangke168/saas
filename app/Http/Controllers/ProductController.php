@@ -4,14 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Enums\OtaPlatform;
 use App\Http\Requests\Product\DuplicateProductRequest;
-use App\Models\Price;
 use App\Models\Product;
 use App\Services\OTA\CtripService;
 use App\Services\ProductService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Carbon;
 
 class ProductController extends Controller
 {
@@ -69,32 +67,45 @@ class ProductController extends Controller
     {
         $this->authorize('view', $product);
         $includePrices = $request->boolean('include_prices', true);
+        $includePriceRules = $request->boolean('include_price_rules', true);
+        $includeOtaProducts = $request->boolean('include_ota_products', true);
+        $includePriceRuleItems = $request->boolean('include_price_rule_items', $includePriceRules);
 
         // 加载关联数据，使用 try-catch 处理可能的关联缺失问题
         try {
             // 先加载基本关联
-            $product->load(['scenicSpot', 'softwareProvider', 'unavailablePeriods']);
+            $relations = ['scenicSpot', 'softwareProvider', 'unavailablePeriods'];
 
             if ($includePrices) {
                 // 加载价格及其关联（如果存在）
-                $product->load(['prices' => function ($query) {
+                $relations['prices'] = function ($query) {
                     $query->with(['roomType' => function ($q) {
                         $q->with('hotel');
                     }]);
-                }]);
+                };
             }
 
-            // 加载加价规则及其关联（如果存在）
-            $product->load(['priceRules' => function ($query) {
-                $query->with(['items' => function ($q) {
-                    $q->with(['hotel', 'roomType']);
-                }]);
-            }]);
+            if ($includePriceRules) {
+                // 加载加价规则及其关联（如果存在）
+                $relations['priceRules'] = function ($query) use ($includePriceRuleItems): void {
+                    if (! $includePriceRuleItems) {
+                        return;
+                    }
 
-            // 加载OTA产品关联（如果存在）
-            $product->load(['otaProducts' => function ($query) {
-                $query->with('otaPlatform');
-            }]);
+                    $query->with(['items' => function ($q) {
+                        $q->with(['hotel', 'roomType']);
+                    }]);
+                };
+            }
+
+            if ($includeOtaProducts) {
+                // 加载OTA产品关联（如果存在）
+                $relations['otaProducts'] = function ($query): void {
+                    $query->with('otaPlatform');
+                };
+            }
+
+            $product->load($relations);
         } catch (\Exception $e) {
             // 如果关联加载失败，记录日志但继续返回数据
             \Log::warning('加载产品关联数据失败', [
@@ -103,9 +114,15 @@ class ProductController extends Controller
             ]);
 
             // 尝试只加载基本关联
-            $relations = ['scenicSpot', 'softwareProvider', 'priceRules', 'otaProducts'];
+            $relations = ['scenicSpot', 'softwareProvider', 'unavailablePeriods'];
             if ($includePrices) {
                 $relations[] = 'prices';
+            }
+            if ($includePriceRules) {
+                $relations[] = 'priceRules';
+            }
+            if ($includeOtaProducts) {
+                $relations[] = 'otaProducts';
             }
             $product->load($relations);
         }
@@ -157,42 +174,9 @@ class ProductController extends Controller
 
         $year = (int) $validated['year'];
         $month = (int) $validated['month'];
-        $daysInMonth = Carbon::create($year, $month, 1)->daysInMonth;
+        $roomTypeIds = array_map(fn ($id): int => (int) $id, $validated['room_type_ids']);
 
-        $rows = [];
-
-        foreach ($validated['room_type_ids'] as $roomTypeId) {
-            $roomTypeId = (int) $roomTypeId;
-
-            for ($day = 1; $day <= $daysInMonth; $day++) {
-                $dateStr = sprintf('%04d-%02d-%02d', $year, $month, $day);
-
-                $basePrice = Price::query()
-                    ->where('product_id', $product->id)
-                    ->where('room_type_id', $roomTypeId)
-                    ->whereDate('date', $dateStr)
-                    ->first();
-
-                if ($basePrice === null) {
-                    continue;
-                }
-
-                $calculated = $this->productService->calculatePrice($product, $roomTypeId, $dateStr);
-
-                $rows[] = [
-                    'id' => $basePrice->id,
-                    'date' => $dateStr,
-                    'room_type_id' => $roomTypeId,
-                    'market_price' => $calculated['market_price'],
-                    'settlement_price' => $calculated['settlement_price'],
-                    'sale_price' => $calculated['sale_price'],
-                    'base_market_price' => (float) $basePrice->market_price,
-                    'base_settlement_price' => (float) $basePrice->settlement_price,
-                    'base_sale_price' => (float) $basePrice->sale_price,
-                    'source' => $basePrice->source instanceof \BackedEnum ? $basePrice->source->value : $basePrice->source,
-                ];
-            }
-        }
+        $rows = $this->productService->getCalendarOtaPrices($product, $year, $month, $roomTypeIds);
 
         usort($rows, function (array $a, array $b): int {
             $dc = strcmp($a['date'], $b['date']);

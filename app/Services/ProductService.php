@@ -5,8 +5,8 @@ namespace App\Services;
 use App\Jobs\PushProductToOtaJob;
 use App\Models\Price;
 use App\Models\PriceRule;
-use App\Models\ProductExternalCodeMapping;
 use App\Models\Product;
+use App\Models\ProductExternalCodeMapping;
 use App\Models\ProductUnavailablePeriod;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +14,119 @@ use Illuminate\Validation\ValidationException;
 
 class ProductService
 {
+    /**
+     * 批量计算指定月份和房型的日历 OTA 价格。
+     *
+     * @param  list<int>  $roomTypeIds
+     * @return list<array{
+     *   id:int,
+     *   date:string,
+     *   room_type_id:int,
+     *   market_price:float,
+     *   settlement_price:float,
+     *   sale_price:float,
+     *   base_market_price:float,
+     *   base_settlement_price:float,
+     *   base_sale_price:float,
+     *   source:string
+     * }>
+     */
+    public function getCalendarOtaPrices(Product $product, int $year, int $month, array $roomTypeIds): array
+    {
+        $startDate = Carbon::create($year, $month, 1)->startOfMonth()->toDateString();
+        $endDate = Carbon::create($year, $month, 1)->endOfMonth()->toDateString();
+
+        $normalizedRoomTypeIds = collect($roomTypeIds)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        $basePrices = Price::query()
+            ->where('product_id', $product->id)
+            ->whereIn('room_type_id', $normalizedRoomTypeIds->all())
+            ->whereBetween('date', [$startDate, $endDate])
+            ->orderBy('date')
+            ->orderBy('room_type_id')
+            ->get(['id', 'date', 'room_type_id', 'market_price', 'settlement_price', 'sale_price', 'source']);
+
+        if ($basePrices->isEmpty()) {
+            return [];
+        }
+
+        $rulesByRoomType = PriceRule::query()
+            ->where('product_id', $product->id)
+            ->where('is_active', true)
+            ->whereHas('items', function ($query) use ($normalizedRoomTypeIds): void {
+                $query->whereIn('room_type_id', $normalizedRoomTypeIds->all());
+            })
+            ->with(['items' => function ($query) use ($normalizedRoomTypeIds): void {
+                $query->whereIn('room_type_id', $normalizedRoomTypeIds->all())->select(['id', 'price_rule_id', 'room_type_id']);
+            }])
+            ->get();
+
+        $rulesByRoomTypeId = [];
+        foreach ($rulesByRoomType as $rule) {
+            foreach ($rule->items as $item) {
+                $roomTypeId = (int) $item->room_type_id;
+                $rulesByRoomTypeId[$roomTypeId] ??= [];
+                $rulesByRoomTypeId[$roomTypeId][] = $rule;
+            }
+        }
+
+        return $basePrices->map(function (Price $basePrice) use ($rulesByRoomTypeId): array {
+            $roomTypeId = (int) $basePrice->room_type_id;
+            $dateStr = Carbon::parse($basePrice->date)->toDateString();
+            $baseMarketPrice = (float) $basePrice->market_price;
+            $baseSettlementPrice = (float) $basePrice->settlement_price;
+            $baseSalePrice = (float) $basePrice->sale_price;
+
+            $bestMarketPrice = $baseMarketPrice;
+            $bestSettlementPrice = $baseSettlementPrice;
+            $bestSalePrice = $baseSalePrice;
+            $bestRuleId = null;
+
+            foreach ($rulesByRoomTypeId[$roomTypeId] ?? [] as $rule) {
+                if (! $this->shouldApplyPriceRule($rule, $dateStr)) {
+                    continue;
+                }
+
+                $candidateMarketPrice = $baseMarketPrice + (float) $rule->market_price_adjustment;
+                $candidateSettlementPrice = $baseSettlementPrice + (float) $rule->settlement_price_adjustment;
+                $candidateSalePrice = $baseSalePrice + (float) $rule->sale_price_adjustment;
+
+                $candidateSalePriceR = round($candidateSalePrice, 2);
+                $bestSalePriceR = round($bestSalePrice, 2);
+                $candidateMarketPriceR = round($candidateMarketPrice, 2);
+                $bestMarketPriceR = round($bestMarketPrice, 2);
+
+                $isBetter =
+                    $candidateSalePriceR > $bestSalePriceR
+                    || ($candidateSalePriceR === $bestSalePriceR && $candidateMarketPriceR > $bestMarketPriceR)
+                    || ($candidateSalePriceR === $bestSalePriceR && $candidateMarketPriceR === $bestMarketPriceR && ($bestRuleId === null || ($rule->id !== null && $rule->id > $bestRuleId)));
+
+                if ($isBetter) {
+                    $bestMarketPrice = $candidateMarketPrice;
+                    $bestSettlementPrice = $candidateSettlementPrice;
+                    $bestSalePrice = $candidateSalePrice;
+                    $bestRuleId = $rule->id;
+                }
+            }
+
+            return [
+                'id' => $basePrice->id,
+                'date' => $dateStr,
+                'room_type_id' => $roomTypeId,
+                'market_price' => max(0, $bestMarketPrice),
+                'settlement_price' => max(0, $bestSettlementPrice),
+                'sale_price' => max(0, $bestSalePrice),
+                'base_market_price' => $baseMarketPrice,
+                'base_settlement_price' => $baseSettlementPrice,
+                'base_sale_price' => $baseSalePrice,
+                'source' => $basePrice->source instanceof \BackedEnum ? $basePrice->source->value : $basePrice->source,
+            ];
+        })->values()->all();
+    }
+
     /**
      * 获取产品价格分组分页数据（按房型分组）
      */
@@ -275,7 +388,7 @@ class ProductService
     }
 
     /**
-     * @param list<array{start_date?: mixed, end_date?: mixed, note?: mixed}> $periods
+     * @param  list<array{start_date?: mixed, end_date?: mixed, note?: mixed}>  $periods
      */
     private function replaceUnavailablePeriods(Product $product, array $periods): void
     {
@@ -358,44 +471,7 @@ class ProductService
             ->get();
 
         foreach ($rules as $rule) {
-            $shouldApply = false;
-
-            // 兼容旧数据：根据 type 字段判断
-            if ($rule->type->value === 'weekday') {
-                // 旧格式：只有周几规则（全时段生效）
-                $weekday = date('N', strtotime($date));
-                $weekdays = explode(',', $rule->weekdays ?? '');
-                $shouldApply = in_array($weekday, $weekdays);
-            } elseif ($rule->type->value === 'date_range') {
-                // 旧格式：只有日期范围规则（范围内所有日期生效）
-                $dateCarbon = Carbon::parse($date)->startOfDay();
-                $startDate = Carbon::parse($rule->start_date)->startOfDay();
-                $endDate = Carbon::parse($rule->end_date)->startOfDay();
-                $shouldApply = $dateCarbon->gte($startDate) && $dateCarbon->lte($endDate);
-            } else {
-                // 新格式：统一规则（日期范围 + 周几可选）
-                // 检查日期范围
-                $inDateRange = true;
-                if ($rule->start_date && $rule->end_date) {
-                    $dateCarbon = Carbon::parse($date)->startOfDay();
-                    $startDate = Carbon::parse($rule->start_date)->startOfDay();
-                    $endDate = Carbon::parse($rule->end_date)->startOfDay();
-                    $inDateRange = $dateCarbon->gte($startDate) && $dateCarbon->lte($endDate);
-                }
-
-                // 检查周几（如果设置了周几）
-                $matchWeekday = true;
-                if ($rule->weekdays) {
-                    $weekday = date('N', strtotime($date));
-                    $weekdays = explode(',', $rule->weekdays);
-                    $matchWeekday = in_array($weekday, $weekdays);
-                }
-
-                // 同时满足日期范围和周几条件
-                $shouldApply = $inDateRange && $matchWeekday;
-            }
-
-            if ($shouldApply) {
+            if ($this->shouldApplyPriceRule($rule, $date)) {
                 $candidateMarketPrice = $baseMarketPrice + (float) $rule->market_price_adjustment;
                 $candidateSettlementPrice = $baseSettlementPrice + (float) $rule->settlement_price_adjustment;
                 $candidateSalePrice = $baseSalePrice + (float) $rule->sale_price_adjustment;
@@ -425,5 +501,44 @@ class ProductService
             'settlement_price' => max(0, $bestSettlementPrice),
             'sale_price' => max(0, $bestSalePrice),
         ];
+    }
+
+    private function shouldApplyPriceRule(PriceRule $rule, string $date): bool
+    {
+        $type = $rule->type instanceof \BackedEnum ? $rule->type->value : (string) $rule->type;
+
+        // 兼容旧数据：根据 type 字段判断
+        if ($type === 'weekday') {
+            $weekday = date('N', strtotime($date));
+            $weekdays = explode(',', $rule->weekdays ?? '');
+
+            return in_array($weekday, $weekdays);
+        }
+
+        if ($type === 'date_range') {
+            $dateCarbon = Carbon::parse($date)->startOfDay();
+            $startDate = Carbon::parse($rule->start_date)->startOfDay();
+            $endDate = Carbon::parse($rule->end_date)->startOfDay();
+
+            return $dateCarbon->gte($startDate) && $dateCarbon->lte($endDate);
+        }
+
+        // 新格式：统一规则（日期范围 + 周几可选）
+        $inDateRange = true;
+        if ($rule->start_date && $rule->end_date) {
+            $dateCarbon = Carbon::parse($date)->startOfDay();
+            $startDate = Carbon::parse($rule->start_date)->startOfDay();
+            $endDate = Carbon::parse($rule->end_date)->startOfDay();
+            $inDateRange = $dateCarbon->gte($startDate) && $dateCarbon->lte($endDate);
+        }
+
+        $matchWeekday = true;
+        if ($rule->weekdays) {
+            $weekday = date('N', strtotime($date));
+            $weekdays = explode(',', $rule->weekdays);
+            $matchWeekday = in_array($weekday, $weekdays);
+        }
+
+        return $inDateRange && $matchWeekday;
     }
 }
