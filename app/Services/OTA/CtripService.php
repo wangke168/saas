@@ -204,42 +204,6 @@ class CtripService
             return ['success' => false, 'message' => '没有库存数据'];
         }
 
-        // 预加载推送日期与连续入住检查日期的数据，避免循环中重复查询数据库
-        $stayDays = (int) ($product->stay_days ?: 1);
-        $pushDateSet = [];
-        foreach ($inventoryList as $inventory) {
-            $pushDateSet[$inventory->date->format('Y-m-d')] = true;
-        }
-
-        $checkDateSet = $pushDateSet;
-        if ($stayDays > 1) {
-            foreach (array_keys($pushDateSet) as $pushDate) {
-                $dateObj = \Carbon\Carbon::parse($pushDate);
-                for ($i = 1; $i < $stayDays; $i++) {
-                    $checkDateSet[$dateObj->copy()->addDays($i)->format('Y-m-d')] = true;
-                }
-            }
-        }
-
-        $allCheckDates = array_keys($checkDateSet);
-        sort($allCheckDates);
-
-        $allDateInventories = \App\Models\Inventory::query()
-            ->where('room_type_id', $roomType->id)
-            ->whereIn('date', $allCheckDates)
-            ->get()
-            ->keyBy(fn ($inventory) => $inventory->date->format('Y-m-d'));
-
-        $closedControlDates = \App\Models\ProductRoomInventoryControl::query()
-            ->where('product_id', $product->id)
-            ->where('room_type_id', $roomType->id)
-            ->whereIn('date', $allCheckDates)
-            ->where('is_closed', true)
-            ->pluck('date')
-            ->map(fn ($date) => \Carbon\Carbon::parse($date)->format('Y-m-d'))
-            ->flip()
-            ->all();
-
         // 按日期汇总库存（多个房型的库存相加）
         // 注意：如果某个房型在某个日期的 is_closed 为 true，该房型在该日期的库存贡献为 0
         // 如果所有房型都关闭，该日期的总库存就是 0
@@ -315,8 +279,8 @@ class CtripService
         }
 
         // 如果产品设置了入住天数（stay_days > 1），需要检查连续入住天数的库存
-        $stayDays = $product->stay_days;
-        if ($stayDays && $stayDays > 1) {
+        $stayDays = (int) ($product->stay_days ?: 1);
+        if ($stayDays > 1) {
             // 对于每个日期，检查从该日期开始的连续 N 天（N = stay_days）的库存
             $adjustedInventoryByDate = [];
             foreach ($inventoryByDate as $date => $data) {
@@ -735,6 +699,42 @@ class CtripService
         if ($inventoryList->isEmpty()) {
             return ['success' => false, 'message' => '没有库存数据'];
         }
+
+        // 预加载推送日期与连续入住检查所需日期的房型库存、产品维度关房（与 syncProductStock 一致）
+        $stayDays = (int) ($product->stay_days ?: 1);
+        $pushDateSet = [];
+        foreach ($inventoryList as $inventory) {
+            $pushDateSet[$inventory->date->format('Y-m-d')] = true;
+        }
+
+        $checkDateSet = $pushDateSet;
+        if ($stayDays > 1) {
+            foreach (array_keys($pushDateSet) as $pushDate) {
+                $dateObj = \Carbon\Carbon::parse($pushDate);
+                for ($i = 1; $i < $stayDays; $i++) {
+                    $checkDateSet[$dateObj->copy()->addDays($i)->format('Y-m-d')] = true;
+                }
+            }
+        }
+
+        $allCheckDates = array_keys($checkDateSet);
+        sort($allCheckDates);
+
+        $allDateInventories = \App\Models\Inventory::query()
+            ->where('room_type_id', $roomType->id)
+            ->whereIn('date', $allCheckDates)
+            ->get()
+            ->keyBy(fn ($inventory) => $inventory->date->format('Y-m-d'));
+
+        $closedControlDates = \App\Models\ProductRoomInventoryControl::query()
+            ->where('product_id', $product->id)
+            ->where('room_type_id', $roomType->id)
+            ->whereIn('date', $allCheckDates)
+            ->where('is_closed', true)
+            ->pluck('date')
+            ->map(fn ($date) => \Carbon\Carbon::parse($date)->format('Y-m-d'))
+            ->flip()
+            ->all();
 
         // 按日期汇总库存
         $inventoryByDate = [];
