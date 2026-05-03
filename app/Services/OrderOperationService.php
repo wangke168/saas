@@ -3,12 +3,13 @@
 namespace App\Services;
 
 use App\Enums\ExceptionOrderStatus;
-use App\Enums\OtaPlatform;
 use App\Enums\OrderStatus;
+use App\Enums\OtaPlatform;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Services\OTA\CtripService;
 use App\Services\OTA\NotificationFactory;
+use App\Services\OTA\Notifications\MeituanNotificationService;
 use App\Services\OTA\OtaConfigResolver;
 use App\Services\Resource\ResourceServiceFactory;
 use App\Services\Resource\ResourceServiceInterface;
@@ -25,20 +26,20 @@ class OrderOperationService
         protected OrderService $orderService,
         protected CtripService $ctripService,
         protected OtaConfigResolver $otaConfigResolver,
+        protected MeituanNotificationService $meituanNotificationService,
     ) {}
 
     /**
      * 接单（确认订单）
-     * 
+     *
      * 注意：系统直连的正常流程中，接单已在 PayPreOrder 中异步处理
      * 此方法主要用于：
      * 1. 异常订单的人工处理（接单失败/超时后，人工重新接单）
      * 2. 非系统直连的人工接单
-     * 
-     * @param Order $order 订单
-     * @param string|null $remark 备注
-     * @param int|null $operatorId 操作人ID（人工操作时）
-     * @return array
+     *
+     * @param  Order  $order  订单
+     * @param  string|null  $remark  备注
+     * @param  int|null  $operatorId  操作人ID（人工操作时）
      */
     public function confirmOrder(Order $order, ?string $remark = null, ?int $operatorId = null): array
     {
@@ -58,16 +59,18 @@ class OrderOperationService
             // 如果是库存不匹配异常，备注中说明跳过库存检查
             $finalRemark = $remark;
             if ($exceptionOrder->exception_type === \App\Enums\ExceptionOrderType::INVENTORY_MISMATCH) {
-                $finalRemark = ($remark ?? '') . '（库存不匹配异常订单，跳过库存检查）';
+                $finalRemark = ($remark ?? '').'（库存不匹配异常订单，跳过库存检查）';
             }
+
             return $this->confirmOrderManually($order, $finalRemark ?? '异常订单人工处理：接单', $operatorId, $exceptionOrder);
-        } else if ($resourceService) {
+        } elseif ($resourceService) {
             // 正常流程：系统直连时，不应该走到这里（已在 PayPreOrder 中异步处理）
             // 这里保留作为兜底逻辑，但记录警告日志
             Log::warning('OrderOperationService::confirmOrder: 系统直连订单不应该走到这里', [
                 'order_id' => $order->id,
                 'status' => $order->status->value,
             ]);
+
             return $this->confirmOrderManually($order, $remark, $operatorId);
         } else {
             // 非系统直连：人工操作
@@ -77,29 +80,28 @@ class OrderOperationService
 
     /**
      * 系统直连：接单（用于异常订单处理）
-     * 
+     *
      * @deprecated 异常订单不应该调用此方法，应该使用 confirmOrderManually()
      */
     protected function confirmOrderWithResource(
-        Order $order, 
-        ResourceServiceInterface $resourceService, 
+        Order $order,
+        ResourceServiceInterface $resourceService,
         ?string $remark,
         ?int $operatorId = null,
         ?ExceptionOrder $exceptionOrder = null
-    ): array
-    {
+    ): array {
         // 如果订单有异常订单，不允许调用资源方接口
         $pendingExceptionOrder = ExceptionOrder::where('order_id', $order->id)
             ->where('status', ExceptionOrderStatus::PENDING)
             ->where('exception_data->operation', 'confirm')
             ->first();
-        
+
         if ($pendingExceptionOrder) {
             Log::error('OrderOperationService::confirmOrderWithResource: 异常订单不允许调用资源方接口', [
                 'order_id' => $order->id,
                 'exception_order_id' => $pendingExceptionOrder->id,
             ]);
-            
+
             return [
                 'success' => false,
                 'message' => '异常订单不允许调用资源方接口，请使用人工操作',
@@ -112,8 +114,9 @@ class OrderOperationService
             // 1. 调用资源方接口确认订单
             $result = $resourceService->confirmOrder($order);
 
-            if (!($result['success'] ?? false)) {
+            if (! ($result['success'] ?? false)) {
                 DB::rollBack();
+
                 return [
                     'success' => false,
                     'message' => $result['message'] ?? '资源方接单失败',
@@ -147,14 +150,14 @@ class OrderOperationService
             // 5. 通知OTA平台
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
-            
+
             // 如果是美团订单，同步通知以确保及时性（美团对响应时间要求较高）
             // 其他平台使用异步通知
             if ($order->otaPlatform?->code === OtaPlatform::MEITUAN) {
                 Log::info('OrderOperationService::confirmOrderWithResource: 美团订单，同步通知', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 try {
                     $notification = NotificationFactory::create($order);
                     if ($notification) {
@@ -209,40 +212,40 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '接单失败：' . $e->getMessage(),
+                'message' => '接单失败：'.$e->getMessage(),
             ];
         }
     }
 
     /**
      * 人工操作：接单
-     * 
-     * @param Order $order 订单
-     * @param string|null $remark 备注
-     * @param int|null $operatorId 操作人ID
-     * @param ExceptionOrder|null $exceptionOrder 异常订单（如果存在）
+     *
+     * @param  Order  $order  订单
+     * @param  string|null  $remark  备注
+     * @param  int|null  $operatorId  操作人ID
+     * @param  ExceptionOrder|null  $exceptionOrder  异常订单（如果存在）
      */
     protected function confirmOrderManually(Order $order, ?string $remark, ?int $operatorId, ?ExceptionOrder $exceptionOrder = null): array
     {
         try {
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
-            
+
             // 1. 先通知OTA平台，等待响应成功后再更新订单状态
             Log::info('OrderOperationService::confirmOrderManually: 开始通知OTA平台', [
                 'order_id' => $order->id,
                 'ota_platform' => $order->otaPlatform?->code?->value,
             ]);
-            
+
             $notificationResult = null;
-            
+
             // 如果是美团订单，同步通知以确保及时性（美团对响应时间要求较高）
             // 其他平台（包括携程）也使用同步通知，等待响应成功后再更新状态
             if ($order->otaPlatform?->code === OtaPlatform::MEITUAN) {
                 Log::info('OrderOperationService::confirmOrderManually: 美团订单，同步通知', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 $notification = NotificationFactory::create($order);
                 if ($notification) {
                     $notification->notifyOrderConfirmed($order);
@@ -261,17 +264,17 @@ class OrderOperationService
                 Log::info('OrderOperationService::confirmOrderManually: 携程订单，同步通知', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 $notification = NotificationFactory::create($order);
                 if ($notification) {
                     try {
                         // 调用通知接口
                         $notification->notifyOrderConfirmed($order);
-                        
+
                         // 对于携程，需要检查返回值的 header.resultCode
                         // 但 notifyOrderConfirmed 如果失败会抛出异常，所以这里如果没有异常就表示成功
                         $notificationResult = ['success' => true];
-                        
+
                         Log::info('OrderOperationService::confirmOrderManually: 携程订单同步通知成功', [
                             'order_id' => $order->id,
                         ]);
@@ -290,7 +293,7 @@ class OrderOperationService
                     throw new \Exception('无法创建通知服务');
                 }
             }
-            
+
             // 2. OTA平台通知成功，开始事务更新订单状态
             DB::beginTransaction();
 
@@ -330,7 +333,7 @@ class OrderOperationService
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            
+
             Log::error('人工接单失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
@@ -339,18 +342,17 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '接单失败：' . $e->getMessage(),
+                'message' => '接单失败：'.$e->getMessage(),
             ];
         }
     }
 
     /**
      * 拒单（拒绝订单）
-     * 
-     * @param Order $order 订单
-     * @param string $reason 拒绝原因
-     * @param int|null $operatorId 操作人ID（人工操作时）
-     * @return array
+     *
+     * @param  Order  $order  订单
+     * @param  string  $reason  拒绝原因
+     * @param  int|null  $operatorId  操作人ID（人工操作时）
      */
     public function rejectOrder(Order $order, string $reason, ?int $operatorId = null): array
     {
@@ -376,8 +378,9 @@ class OrderOperationService
             // 1. 调用资源方接口拒绝订单
             $result = $resourceService->rejectOrder($order, $reason);
 
-            if (!($result['success'] ?? false)) {
+            if (! ($result['success'] ?? false)) {
                 DB::rollBack();
+
                 return [
                     'success' => false,
                     'message' => $result['message'] ?? '资源方拒单失败',
@@ -388,7 +391,7 @@ class OrderOperationService
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::REJECTED,
-                '系统直连：资源方拒单 - ' . $reason,
+                '系统直连：资源方拒单 - '.$reason,
                 null
             );
 
@@ -421,7 +424,7 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '拒单失败：' . $e->getMessage(),
+                'message' => '拒单失败：'.$e->getMessage(),
             ];
         }
     }
@@ -434,58 +437,58 @@ class OrderOperationService
         try {
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
-            
+
             // 1. 先通知OTA平台，等待响应成功后再更新订单状态
             Log::info('OrderOperationService::rejectOrderManually: 开始通知OTA平台', [
                 'order_id' => $order->id,
                 'ota_platform' => $order->otaPlatform?->code?->value,
                 'reason' => $reason,
             ]);
-            
+
             // 如果是携程订单，需要调用携程接口传递拒绝状态码
             if ($order->otaPlatform?->code === OtaPlatform::CTRIP) {
                 Log::info('OrderOperationService::rejectOrderManually: 携程订单，调用拒绝接口', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 try {
                     // 通过 CtripService 调用，但需要直接使用客户端实例
                     // 由于携程拒绝订单是通过 confirmOrder 接口传递非 0000 状态码实现的
                     // 这里我们直接创建客户端实例
                     $platform = \App\Models\OtaPlatform::where('code', OtaPlatform::CTRIP->value)->first();
                     $config = $platform?->config;
-                    
-                    if (!$config) {
+
+                    if (! $config) {
                         throw new \Exception('携程配置不存在');
                     }
-                    
+
                     $client = new \App\Http\Client\CtripClient($config);
-                    
+
                     // 构建 items 数组
                     $items = [];
-                    $itemId = $order->ctrip_item_id ?: (string)$order->id;
+                    $itemId = $order->ctrip_item_id ?: (string) $order->id;
                     $items[] = [
                         'itemId' => $itemId,
                         'isCredentialVouchers' => 0,
                     ];
-                    
+
                     // 调用 confirmOrder 接口，传递拒绝状态码（非 0000 表示失败/拒绝）
                     // 根据携程文档，可以使用其他状态码表示拒绝，这里使用 '1001' 表示拒绝
                     $result = $client->confirmOrder(
                         $order->ota_order_no,
                         $order->order_no,
                         '1001', // 拒绝状态码（非 0000）
-                        '订单已拒绝：' . $reason,
+                        '订单已拒绝：'.$reason,
                         1, // voucherSender
                         $items,
                         []
                     );
-                    
+
                     // 检查返回值
                     if (isset($result['success']) && $result['success'] === false) {
-                        throw new \Exception('携程订单拒绝通知失败：' . ($result['message'] ?? '未知错误'));
+                        throw new \Exception('携程订单拒绝通知失败：'.($result['message'] ?? '未知错误'));
                     }
-                    
+
                     // 检查业务错误码（如果是携程返回的错误，会抛出异常，所以这里如果没有异常就表示成功）
                     if (isset($result['header']['resultCode']) && $result['header']['resultCode'] !== '0000') {
                         $errorMessage = $result['header']['resultMessage'] ?? '未知错误';
@@ -497,7 +500,7 @@ class OrderOperationService
                         // 注意：携程可能对拒绝订单返回非 0000 的状态码，这可能是正常的，所以我们不抛出异常
                         // 但如果携程明确不支持拒绝，可能需要调整逻辑
                     }
-                    
+
                     Log::info('OrderOperationService::rejectOrderManually: 携程订单拒绝通知成功', [
                         'order_id' => $order->id,
                     ]);
@@ -514,7 +517,7 @@ class OrderOperationService
                 Log::info('OrderOperationService::rejectOrderManually: 美团订单，同步通知', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 $notification = NotificationFactory::create($order);
                 if ($notification) {
                     /** @var \App\Services\OTA\Notifications\MeituanNotificationService|null $notification */
@@ -537,7 +540,7 @@ class OrderOperationService
                     'ota_platform' => $order->otaPlatform?->code?->value,
                 ]);
             }
-            
+
             // 2. OTA平台通知成功，开始事务更新订单状态
             DB::beginTransaction();
 
@@ -545,7 +548,7 @@ class OrderOperationService
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::REJECTED,
-                '人工操作：拒单 - ' . $reason,
+                '人工操作：拒单 - '.$reason,
                 $operatorId
             );
 
@@ -568,7 +571,7 @@ class OrderOperationService
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            
+
             Log::error('人工拒单失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
@@ -577,18 +580,17 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '拒单失败：' . $e->getMessage(),
+                'message' => '拒单失败：'.$e->getMessage(),
             ];
         }
     }
 
     /**
      * 核销订单
-     * 
-     * @param Order $order 订单
-     * @param array $data 核销数据 ['use_start_date' => string, 'use_end_date' => string, 'use_quantity' => int, ...]
-     * @param int|null $operatorId 操作人ID（人工操作时）
-     * @return array
+     *
+     * @param  Order  $order  订单
+     * @param  array  $data  核销数据 ['use_start_date' => string, 'use_end_date' => string, 'use_quantity' => int, ...]
+     * @param  int|null  $operatorId  操作人ID（人工操作时）
      */
     public function verifyOrder(Order $order, array $data, ?int $operatorId = null): array
     {
@@ -612,7 +614,7 @@ class OrderOperationService
             // 1. 调用资源方接口核销订单
             $result = $resourceService->verifyOrder($order, $data);
 
-            if (!($result['success'] ?? false)) {
+            if (! ($result['success'] ?? false)) {
                 return [
                     'success' => false,
                     'message' => $result['message'] ?? '资源方核销失败',
@@ -627,20 +629,21 @@ class OrderOperationService
             // 2. 先通知OTA平台，等待成功后再更新订单状态
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
-            
-            if (!$order->otaPlatform) {
+
+            if (! $order->otaPlatform) {
                 Log::warning('OrderOperationService::verifyOrderWithResource: 订单没有关联OTA平台，跳过通知', [
                     'order_id' => $order->id,
                 ]);
                 // 没有OTA平台，直接更新状态（兼容旧逻辑）
                 $useQuantity = $data['use_quantity'] ?? $order->room_count;
-                $remark = '系统直连：资源方核销成功，核销数量：' . $useQuantity;
+                $remark = '系统直连：资源方核销成功，核销数量：'.$useQuantity;
                 $this->orderService->updateOrderStatus(
                     $order,
                     OrderStatus::VERIFIED,
                     $remark,
                     null
                 );
+
                 return [
                     'success' => true,
                     'message' => '核销成功',
@@ -650,11 +653,11 @@ class OrderOperationService
                     ],
                 ];
             }
-            
+
             try {
                 // 调用通知接口（会抛出异常如果失败）
                 $this->notifyOtaOrderConsumed($order, $data);
-                
+
                 Log::info('OrderOperationService::verifyOrderWithResource: OTA平台核销通知成功', [
                     'order_id' => $order->id,
                 ]);
@@ -665,7 +668,7 @@ class OrderOperationService
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString(),
                 ]);
-                
+
                 // OTA通知失败，不更新状态，抛出异常
                 throw $e;
             }
@@ -675,7 +678,7 @@ class OrderOperationService
 
             // 4. 更新订单状态（在备注中包含核销数量，便于订单查询接口提取）
             $useQuantity = $data['use_quantity'] ?? $order->room_count;
-            $remark = '系统直连：资源方核销成功，核销数量：' . $useQuantity;
+            $remark = '系统直连：资源方核销成功，核销数量：'.$useQuantity;
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::VERIFIED,
@@ -702,7 +705,7 @@ class OrderOperationService
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            
+
             Log::error('系统直连核销失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
@@ -711,7 +714,7 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '核销失败：' . $e->getMessage(),
+                'message' => '核销失败：'.$e->getMessage(),
             ];
         }
     }
@@ -724,13 +727,13 @@ class OrderOperationService
         try {
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
-            
+
             // 1. 先通知OTA平台，等待响应成功后再更新订单状态
             // 检查是否跳过美团通知（测试模式）
-            $skipMeituanNotification = env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === true 
+            $skipMeituanNotification = env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === true
                 || env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === 'true'
                 || env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === '1';
-            
+
             if ($skipMeituanNotification && $order->otaPlatform?->code === \App\Enums\OtaPlatform::MEITUAN) {
                 Log::info('OrderOperationService::verifyOrderManually: 测试模式，跳过美团核销通知', [
                     'order_id' => $order->id,
@@ -741,11 +744,11 @@ class OrderOperationService
                     'order_id' => $order->id,
                     'ota_platform' => $order->otaPlatform?->code?->value,
                 ]);
-                
+
                 try {
                     // 调用通知接口
                     $this->notifyOtaOrderConsumed($order, $data);
-                    
+
                     Log::info('OrderOperationService::verifyOrderManually: OTA平台核销通知成功', [
                         'order_id' => $order->id,
                     ]);
@@ -758,29 +761,29 @@ class OrderOperationService
                     throw $e; // 重新抛出异常，阻止后续状态更新
                 }
             }
-            
+
             // 2. OTA平台通知成功，开始事务更新订单状态
             DB::beginTransaction();
 
             // 3. 更新订单状态（在备注中包含核销数量，便于订单查询接口提取）
             $useQuantity = $data['use_quantity'] ?? $order->room_count;
-            $remark = '人工操作：核销，核销数量：' . $useQuantity;
-            
+            $remark = '人工操作：核销，核销数量：'.$useQuantity;
+
             // 如果是实名制订单，在备注中包含已核销的证件号（便于订单查询接口匹配）
-            if ($order->real_name_type === 1 && !empty($data['passengers'])) {
+            if ($order->real_name_type === 1 && ! empty($data['passengers'])) {
                 $credentialNos = [];
                 foreach ($data['passengers'] as $passenger) {
-                    if (!empty($passenger['credentialNo'])) {
+                    if (! empty($passenger['credentialNo'])) {
                         $credentialNos[] = $passenger['credentialNo'];
-                    } elseif (!empty($passenger['idCode'])) {
+                    } elseif (! empty($passenger['idCode'])) {
                         $credentialNos[] = $passenger['idCode'];
                     }
                 }
-                if (!empty($credentialNos)) {
-                    $remark .= '，已核销证件号：' . implode('、', $credentialNos);
+                if (! empty($credentialNos)) {
+                    $remark .= '，已核销证件号：'.implode('、', $credentialNos);
                 }
             }
-            
+
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::VERIFIED,
@@ -807,7 +810,7 @@ class OrderOperationService
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            
+
             Log::error('人工核销失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
@@ -816,24 +819,23 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '核销失败：' . $e->getMessage(),
+                'message' => '核销失败：'.$e->getMessage(),
             ];
         }
     }
 
     /**
      * 取消订单（只能由携程发起，在 CtripController 中处理）
-     * 
+     *
      * 注意：系统直连的正常流程中，取消已在 CancelOrder 中异步处理
      * 此方法主要用于：
      * 1. 异常订单的人工处理（取消失败/超时后，人工同意或拒绝取消）
      * 2. 非系统直连的人工取消处理
-     * 
-     * @param Order $order 订单
-     * @param string $reason 取消原因
-     * @param int|null $operatorId 操作人ID（人工操作时）
-     * @param bool $approve 是否同意取消（true=同意，false=拒绝）
-     * @return array
+     *
+     * @param  Order  $order  订单
+     * @param  string  $reason  取消原因
+     * @param  int|null  $operatorId  操作人ID（人工操作时）
+     * @param  bool  $approve  是否同意取消（true=同意，false=拒绝）
      */
     public function cancelOrder(Order $order, string $reason, ?int $operatorId = null, bool $approve = true): array
     {
@@ -852,13 +854,14 @@ class OrderOperationService
             } else {
                 return $this->rejectCancelManually($order, $reason, $operatorId, $exceptionOrder);
             }
-        } else if ($resourceService) {
+        } elseif ($resourceService) {
             // 正常流程：系统直连时，不应该走到这里（已在 CancelOrder 中异步处理）
             // 这里保留作为兜底逻辑，但记录警告日志
             Log::warning('OrderOperationService::cancelOrder: 系统直连订单不应该走到这里', [
                 'order_id' => $order->id,
                 'status' => $order->status->value,
             ]);
+
             return $this->cancelOrderManually($order, $reason, $operatorId);
         } else {
             // 非系统直连：人工操作
@@ -872,29 +875,28 @@ class OrderOperationService
 
     /**
      * 系统直连：取消订单（用于异常订单处理）
-     * 
+     *
      * @deprecated 异常订单不应该调用此方法，应该使用 cancelOrderManually()
      */
     protected function cancelOrderWithResource(
-        Order $order, 
-        ResourceServiceInterface $resourceService, 
+        Order $order,
+        ResourceServiceInterface $resourceService,
         string $reason,
         ?int $operatorId = null,
         ?ExceptionOrder $exceptionOrder = null
-    ): array
-    {
+    ): array {
         // 如果订单有异常订单，不允许调用资源方接口
         $pendingExceptionOrder = ExceptionOrder::where('order_id', $order->id)
             ->where('status', ExceptionOrderStatus::PENDING)
             ->where('exception_data->operation', 'cancel')
             ->first();
-        
+
         if ($pendingExceptionOrder) {
             Log::error('OrderOperationService::cancelOrderWithResource: 异常订单不允许调用资源方接口', [
                 'order_id' => $order->id,
                 'exception_order_id' => $pendingExceptionOrder->id,
             ]);
-            
+
             return [
                 'success' => false,
                 'message' => '异常订单不允许调用资源方接口，请使用人工操作',
@@ -907,8 +909,9 @@ class OrderOperationService
             // 1. 调用资源方接口取消订单
             $result = $resourceService->cancelOrder($order, $reason);
 
-            if (!($result['success'] ?? false)) {
+            if (! ($result['success'] ?? false)) {
                 DB::rollBack();
+
                 return [
                     'success' => false,
                     'message' => $result['message'] ?? '资源方取消订单失败',
@@ -919,7 +922,7 @@ class OrderOperationService
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::CANCEL_APPROVED,
-                '异常订单人工处理：资源方取消订单 - ' . $reason,
+                '异常订单人工处理：资源方取消订单 - '.$reason,
                 $operatorId
             );
 
@@ -981,37 +984,37 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '取消订单失败：' . $e->getMessage(),
+                'message' => '取消订单失败：'.$e->getMessage(),
             ];
         }
     }
 
     /**
      * 人工操作：同意取消订单
-     * 
-     * @param Order $order 订单
-     * @param string $reason 取消原因
-     * @param int|null $operatorId 操作人ID
-     * @param ExceptionOrder|null $exceptionOrder 异常订单（如果存在）
+     *
+     * @param  Order  $order  订单
+     * @param  string  $reason  取消原因
+     * @param  int|null  $operatorId  操作人ID
+     * @param  ExceptionOrder|null  $exceptionOrder  异常订单（如果存在）
      */
     protected function cancelOrderManually(Order $order, string $reason, ?int $operatorId = null, ?ExceptionOrder $exceptionOrder = null): array
     {
         try {
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
-            
+
             // 1. 先通知OTA平台，等待响应成功后再更新订单状态
             Log::info('OrderOperationService::cancelOrderManually: 开始通知OTA平台', [
                 'order_id' => $order->id,
                 'ota_platform' => $order->otaPlatform?->code?->value,
                 'reason' => $reason,
             ]);
-            
+
             if ($order->otaPlatform?->code === OtaPlatform::MEITUAN) {
                 Log::info('OrderOperationService::cancelOrderManually: 美团订单，同步通知', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 $notification = NotificationFactory::create($order);
                 if ($notification) {
                     $notification->notifyOrderRefunded($order);
@@ -1029,13 +1032,13 @@ class OrderOperationService
                 Log::info('OrderOperationService::cancelOrderManually: 携程订单，同步通知', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 $notification = NotificationFactory::create($order);
                 if ($notification) {
                     try {
                         // 调用通知接口
                         $notification->notifyOrderRefunded($order);
-                        
+
                         Log::info('OrderOperationService::cancelOrderManually: 携程订单同步通知成功', [
                             'order_id' => $order->id,
                         ]);
@@ -1054,7 +1057,7 @@ class OrderOperationService
                     throw new \Exception('无法创建通知服务');
                 }
             }
-            
+
             // 2. OTA平台通知成功，开始事务更新订单状态
             DB::beginTransaction();
 
@@ -1062,7 +1065,7 @@ class OrderOperationService
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::CANCEL_APPROVED,
-                '人工操作：同意取消订单 - ' . $reason,
+                '人工操作：同意取消订单 - '.$reason,
                 $operatorId
             );
 
@@ -1113,7 +1116,7 @@ class OrderOperationService
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            
+
             Log::error('人工取消订单失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
@@ -1122,7 +1125,7 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '取消订单失败：' . $e->getMessage(),
+                'message' => '取消订单失败：'.$e->getMessage(),
             ];
         }
     }
@@ -1131,62 +1134,61 @@ class OrderOperationService
      * 人工操作：拒绝取消订单
      */
     protected function rejectCancelManually(
-        Order $order, 
-        string $reason, 
+        Order $order,
+        string $reason,
         ?int $operatorId = null,
         ?ExceptionOrder $exceptionOrder = null
-    ): array
-    {
+    ): array {
         try {
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
-            
+
             // 1. 先通知OTA平台，等待响应成功后再更新订单状态
             Log::info('OrderOperationService::rejectCancelManually: 开始通知OTA平台', [
                 'order_id' => $order->id,
                 'ota_platform' => $order->otaPlatform?->code?->value,
                 'reason' => $reason,
             ]);
-            
+
             // 如果是携程订单，需要调用 confirmCancelOrder 接口传递拒绝状态码
             if ($order->otaPlatform?->code === OtaPlatform::CTRIP) {
                 Log::info('OrderOperationService::rejectCancelManually: 携程订单，调用拒绝取消接口', [
                     'order_id' => $order->id,
                 ]);
-                
+
                 try {
                     // 通过 CtripService 调用，但需要直接使用客户端实例
                     $platform = \App\Models\OtaPlatform::where('code', OtaPlatform::CTRIP->value)->first();
                     $config = $platform?->config;
-                    
-                    if (!$config) {
+
+                    if (! $config) {
                         throw new \Exception('携程配置不存在');
                     }
-                    
+
                     $client = new \App\Http\Client\CtripClient($config);
-                    
+
                     // 构建 items 数组
                     $items = [];
-                    $itemId = $order->ctrip_item_id ?: (string)$order->id;
+                    $itemId = $order->ctrip_item_id ?: (string) $order->id;
                     $items[] = [
                         'itemId' => $itemId,
                     ];
-                    
+
                     // 调用 confirmCancelOrder 接口，传递拒绝状态码（非 0000 表示拒绝）
                     // 根据携程文档，可以使用其他状态码表示拒绝，这里使用 '2001' 表示拒绝取消
                     $result = $client->confirmCancelOrder(
                         $order->ota_order_no,
                         $order->order_no,
                         '2001', // 拒绝状态码（非 0000）
-                        '拒绝取消订单：' . $reason,
+                        '拒绝取消订单：'.$reason,
                         $items
                     );
-                    
+
                     // 检查返回值
                     if (isset($result['success']) && $result['success'] === false) {
-                        throw new \Exception('携程订单取消拒绝通知失败：' . ($result['message'] ?? '未知错误'));
+                        throw new \Exception('携程订单取消拒绝通知失败：'.($result['message'] ?? '未知错误'));
                     }
-                    
+
                     // 检查业务错误码
                     if (isset($result['header']['resultCode']) && $result['header']['resultCode'] !== '0000') {
                         $errorMessage = $result['header']['resultMessage'] ?? '未知错误';
@@ -1197,7 +1199,7 @@ class OrderOperationService
                         ]);
                         // 注意：携程可能对拒绝取消返回非 0000 的状态码，这可能是正常的
                     }
-                    
+
                     Log::info('OrderOperationService::rejectCancelManually: 携程订单取消拒绝通知成功', [
                         'order_id' => $order->id,
                     ]);
@@ -1231,7 +1233,7 @@ class OrderOperationService
                     'ota_platform' => $order->otaPlatform?->code?->value,
                 ]);
             }
-            
+
             // 2. OTA平台通知成功，开始事务更新订单状态
             DB::beginTransaction();
 
@@ -1239,7 +1241,7 @@ class OrderOperationService
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::CANCEL_REJECTED,
-                '人工操作：拒绝取消订单 - ' . $reason,
+                '人工操作：拒绝取消订单 - '.$reason,
                 $operatorId
             );
 
@@ -1271,7 +1273,7 @@ class OrderOperationService
             if (DB::transactionLevel() > 0) {
                 DB::rollBack();
             }
-            
+
             Log::error('人工拒绝取消订单失败', [
                 'order_id' => $order->id,
                 'error' => $e->getMessage(),
@@ -1280,7 +1282,7 @@ class OrderOperationService
 
             return [
                 'success' => false,
-                'message' => '拒绝取消订单失败：' . $e->getMessage(),
+                'message' => '拒绝取消订单失败：'.$e->getMessage(),
             ];
         }
     }
@@ -1291,7 +1293,7 @@ class OrderOperationService
     protected function notifyOtaOrderConsumed(Order $order, array $data): void
     {
         $platform = $order->otaPlatform;
-        if (!$platform) {
+        if (! $platform) {
             return;
         }
 
@@ -1316,7 +1318,7 @@ class OrderOperationService
         $passengers = $data['passengers'] ?? [];
         $vouchers = $data['vouchers'] ?? [];
 
-        $itemId = $order->ctrip_item_id ?: (string)$order->id;
+        $itemId = $order->ctrip_item_id ?: (string) $order->id;
 
         try {
             $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
@@ -1345,172 +1347,11 @@ class OrderOperationService
 
     /**
      * 通知美团订单消费（核销）
+     *
+     * 与异步 NotifyOtaOrderStatusJob、查单核销共用 MeituanNotificationService 实现
      */
     protected function notifyMeituanOrderConsumed(Order $order, array $data): void
     {
-try {
-            $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
-            $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
-            if (!$config) {
-                Log::error('NotifyMeituanOrderConsumed: 美团配置不存在');
-                return;
-            }
-            $client = new \App\Http\Client\MeituanClient($config);
-
-            $useStartDate = $data['use_start_date'] ?? $order->check_in_date->format('Y-m-d');
-            $useEndDate = $data['use_end_date'] ?? $order->check_out_date->format('Y-m-d');
-            $useQuantity = $data['use_quantity'] ?? $order->room_count;
-
-            // 使用 client->getPartnerId() 获取 partnerId，确保使用正确的配置（环境变量优先）
-            // 注意：订单消费通知接口只在订单核销时调用，此时订单应该没有退款，所以 refundedQuantity 传递 0
-            $requestData = [
-                'partnerId' => $client->getPartnerId(),
-                'body' => [
-                    'orderId' => intval($order->ota_order_no),
-                    'partnerOrderId' => $order->order_no,
-                    'useStartDate' => $useStartDate,
-                    'useEndDate' => $useEndDate,
-                    'quantity' => $order->room_count,
-                    'usedQuantity' => $useQuantity,
-                    'refundedQuantity' => 0,  // 必填字段：订单已退款门票总数量（消费通知时订单没有退款，传递0）
-                ],
-            ];
-
-            // 核销时间（格式：YYYY-MM-DD HH:MM:SS）
-            $voucherInvalidTime = now()->format('Y-m-d H:i:s');
-            
-            // 收集已核销的凭证码（用于构建 voucherList）
-            $usedVouchers = [];
-            $usedCredentials = [];
-            
-            // 如果是实名制订单，传credentialList和voucherList
-            if ($order->real_name_type === 1 && !empty($order->credential_list)) {
-                $credentialList = $order->credential_list;
-                
-                // 处理部分核销场景：只传递已核销的凭证码和证件信息
-                // 如果 useQuantity < quantity，只取前 useQuantity 个凭证码和证件信息
-                $credentialListToUse = array_slice($credentialList, 0, $useQuantity);
-                
-                $requestData['body']['credentialList'] = [];
-                foreach ($credentialListToUse as $credential) {
-                    $voucher = $credential['voucher'] ?? '';
-                    
-                    // 如果凭证码为空，尝试生成（兼容旧数据）
-                    if (empty($voucher)) {
-                        // 根据订单号和索引生成凭证码
-                        $index = count($usedVouchers);
-                        $roomCount = $order->room_count ?? 1;
-                        if ($roomCount === 1) {
-                            $voucher = strtoupper($order->order_no);
-                        } else {
-                            $voucher = strtoupper($order->order_no) . '-' . ($index + 1);
-                        }
-                    }
-                    
-                    // 收集已核销的凭证码
-                    if (!empty($voucher) && !in_array($voucher, $usedVouchers)) {
-                        $usedVouchers[] = $voucher;
-                    }
-                    
-                    // 构建credentialList（必须包含status字段）
-                    $requestData['body']['credentialList'][] = [
-                        'credentialType' => $credential['credentialType'] ?? 0,
-                        'credentialNo' => $credential['credentialNo'] ?? '',
-                        'voucher' => $voucher,
-                        'status' => 1,  // 1=已使用（核销时必填）
-                    ];
-                    
-                    $usedCredentials[] = [
-                        'voucher' => $voucher,
-                        'credentialNo' => $credential['credentialNo'] ?? '',
-                    ];
-                }
-            } else {
-                // 非实名制订单，也需要构建voucherList（如果需要码核销）
-                // 从订单的credential_list中提取凭证码，或根据订单号生成
-                if (!empty($order->credential_list)) {
-                    // 如果有credential_list，提取凭证码
-                    $credentialList = $order->credential_list;
-                    $credentialListToUse = array_slice($credentialList, 0, $useQuantity);
-                    
-                    foreach ($credentialListToUse as $credential) {
-                        $voucher = $credential['voucher'] ?? '';
-                        if (!empty($voucher) && !in_array($voucher, $usedVouchers)) {
-                            $usedVouchers[] = $voucher;
-                        }
-                    }
-                }
-                
-                // 如果还是没有凭证码，根据订单号生成（兼容旧数据）
-                if (empty($usedVouchers)) {
-                    $roomCount = $order->room_count ?? 1;
-                    if ($roomCount === 1) {
-                        $usedVouchers[] = strtoupper($order->order_no);
-                    } else {
-                        // 部分核销时，只生成已核销数量的凭证码
-                        for ($i = 0; $i < $useQuantity; $i++) {
-                            $usedVouchers[] = strtoupper($order->order_no) . '-' . ($i + 1);
-                        }
-                    }
-                }
-            }
-            
-            // 构建voucherList（需要码核销的订单必传）
-            // 根据文档，需要码核销的订单必须传入voucherList
-            if (!empty($usedVouchers)) {
-                $requestData['body']['voucherList'] = [];
-                
-                // 计算每个凭证码对应的数量
-                // 如果是一码一验，每个凭证码对应1张票
-                // 如果是一码多验，可能需要合并相同凭证码
-                $voucherQuantityMap = [];
-                foreach ($usedVouchers as $voucher) {
-                    $voucherQuantityMap[$voucher] = ($voucherQuantityMap[$voucher] ?? 0) + 1;
-                }
-                
-                // 生成凭证码图片链接（可选）
-                $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
-                
-                foreach ($voucherQuantityMap as $voucher => $quantity) {
-                    $voucherItem = [
-                        'voucher' => $voucher,
-                        'voucherInvalidTime' => $voucherInvalidTime,  // 必填：核销时间
-                        'quantity' => $quantity,  // 必填：该凭证码对应的数量
-                        'status' => 1,  // 必填：1=已使用
-                    ];
-                    
-                    // voucherPics 可选，如果有凭证码图片链接则添加
-                    $voucherPic = $baseUrl . '/vouchers/' . urlencode($voucher) . '.png';
-                    $voucherItem['voucherPics'] = $voucherPic;
-                    
-                    $requestData['body']['voucherList'][] = $voucherItem;
-                }
-            }
-
-            $result = $client->notifyOrderConsume($requestData);
-
-            if (isset($result['code']) && $result['code'] == 200) {
-                Log::info('通知美团订单消费成功', [
-                    'order_id' => $order->id,
-                ]);
-            } else {
-                $errorMessage = $result['describe'] ?? ($result['message'] ?? '未知错误');
-                Log::error('通知美团订单消费失败', [
-                    'order_id' => $order->id,
-                    'result' => $result,
-                    'error_message' => $errorMessage,
-                ]);
-                // 抛出异常，让调用方处理
-                throw new \Exception('美团订单核销通知失败：' . $errorMessage);
-            }
-        } catch (\Exception $e) {
-            Log::error('通知美团订单消费异常', [
-                'order_id' => $order->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            // 重新抛出异常，让调用方处理
-            throw $e;
-        }
+        $this->meituanNotificationService->notifyOrderConsumed($order, $data);
     }
 }

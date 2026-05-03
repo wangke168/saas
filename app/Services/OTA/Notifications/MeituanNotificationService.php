@@ -23,9 +23,10 @@ class MeituanNotificationService implements OtaNotificationInterface
     protected function getClient(?int $scenicSpotId = null): MeituanClient
     {
         $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
-        if (!$config) {
+        if (! $config) {
             throw new \Exception('美团配置不存在，请检查 .env 文件中的环境变量配置');
         }
+
         return new MeituanClient($config);
     }
 
@@ -49,7 +50,7 @@ class MeituanNotificationService implements OtaNotificationInterface
             // 注意：body 中不应该包含 code 和 describe（这些是响应字段）
             // 使用客户端方法获取 partnerId，确保使用正确的配置
             $realNameType = $order->real_name_type ?? 0;
-            
+
             $requestData = [
                 'partnerId' => $client->getPartnerId(),
                 'issueType' => 1,  // 1=出票成功, 2=出票失败
@@ -66,12 +67,12 @@ class MeituanNotificationService implements OtaNotificationInterface
             // 根据文档第1165行：realNameType=1时，credentialList中的voucher字段是必传的（不管voucherType）
             // credentialList的数量应该与订单数量（room_count）一致
             // 注意：使用上面确定的realNameType，而不是直接从订单读取（因为可能订单中real_name_type=0但实际有credential_list）
-            if ($realNameType === 1 && !empty($order->credential_list)) {
+            if ($realNameType === 1 && ! empty($order->credential_list)) {
                 $requestData['body']['credentialList'] = [];
                 $vouchers = [];  // 收集所有凭证码
                 $roomCount = $order->room_count ?? 1;
                 $credentialList = $order->credential_list;
-                
+
                 // 确保credentialList的数量与订单数量一致
                 // 如果credentialList数量少于订单数量，记录警告但继续处理（使用已有的证件信息）
                 // 如果credentialList数量多于订单数量，只取前roomCount个
@@ -83,13 +84,13 @@ class MeituanNotificationService implements OtaNotificationInterface
                         'credential_list_count' => $credentialListCount,
                     ]);
                 }
-                
+
                 for ($i = 0; $i < $roomCount; $i++) {
                     // 优先使用对应索引的证件信息，如果不存在则使用第一个（但记录警告）
                     $credential = null;
                     if (isset($credentialList[$i])) {
                         $credential = $credentialList[$i];
-                    } elseif (!empty($credentialList[0])) {
+                    } elseif (! empty($credentialList[0])) {
                         // 如果对应索引不存在，使用第一个（但这不是理想情况）
                         $credential = $credentialList[0];
                         Log::warning('MeituanNotificationService: 使用第一个证件信息填充', [
@@ -98,23 +99,23 @@ class MeituanNotificationService implements OtaNotificationInterface
                             'credential_no' => $credentialList[0]['credentialNo'] ?? '',
                         ]);
                     }
-                    
+
                     if ($credential) {
                         // 生成或获取凭证码
                         // 如果credential中没有voucher字段或voucher为空字符串，则生成一个
-                        $voucher = !empty($credential['voucher']) ? $credential['voucher'] : $this->generateVoucher($order, $i);
-                        
+                        $voucher = ! empty($credential['voucher']) ? $credential['voucher'] : $this->generateVoucher($order, $i);
+
                         // 确保凭证码不为空
                         if (empty($voucher)) {
                             $voucher = $this->generateVoucher($order, $i);
                         }
-                        
+
                         $credentialItem = [
                             'credentialType' => $credential['credentialType'] ?? 0,
                             'credentialNo' => $credential['credentialNo'] ?? '',
                             'voucher' => $voucher,  // realNameType=1时必传（文档第1165行），且不能为空
                         ];
-                        
+
                         $requestData['body']['credentialList'][] = $credentialItem;
                         $vouchers[] = $voucher;
                     } else {
@@ -127,14 +128,14 @@ class MeituanNotificationService implements OtaNotificationInterface
                         ]);
                     }
                 }
-                
+
                 // 添加vouchers数组（出票成功时必传字段）
                 $requestData['body']['vouchers'] = $vouchers;
-                
+
                 // 添加voucherPics数组（出票成功时必传字段）
                 // 生成凭证码图片链接，顺序必须与vouchers数组一致
                 $requestData['body']['voucherPics'] = $this->generateVoucherPics($vouchers, $order);
-                
+
                 Log::info('MeituanNotificationService: 构建credentialList和凭证码', [
                     'order_id' => $order->id,
                     'room_count' => $roomCount,
@@ -167,9 +168,9 @@ class MeituanNotificationService implements OtaNotificationInterface
                 // 其他 code 视为失败
                 $errorMessage = '美团订单出票通知失败';
                 if (isset($result['describe'])) {
-                    $errorMessage .= '：' . $result['describe'];
+                    $errorMessage .= '：'.$result['describe'];
                 } elseif (isset($result['message'])) {
-                    $errorMessage .= '：' . $result['message'];
+                    $errorMessage .= '：'.$result['message'];
                 } else {
                     $errorMessage .= '：未知错误';
                 }
@@ -208,7 +209,7 @@ class MeituanNotificationService implements OtaNotificationInterface
 
             // 获取退款流水号（refundId）
             $refundId = $order->refund_serial_no;
-            
+
             // 如果订单没有退款流水号，可能是订单关闭（不是退款申请）
             // 根据文档，订单退款通知接口用于"美团发起合作方退款申请且商家审核退款通过后"通知美团
             // 订单关闭是美团主动发起的，美团已经知道订单关闭，不需要退款通知
@@ -218,6 +219,7 @@ class MeituanNotificationService implements OtaNotificationInterface
                     'order_status' => $order->status->value,
                     'reason' => '订单关闭或非退款申请场景，无需通知美团（美团已知道订单关闭）',
                 ]);
+
                 // 订单关闭不需要退款通知（美团已经知道订单关闭）
                 return;
             }
@@ -249,13 +251,13 @@ class MeituanNotificationService implements OtaNotificationInterface
                 // 构建详细的错误信息
                 $errorMessage = '美团订单退款通知失败';
                 if (isset($result['describe'])) {
-                    $errorMessage .= '：' . $result['describe'];
+                    $errorMessage .= '：'.$result['describe'];
                 } elseif (isset($result['message'])) {
-                    $errorMessage .= '：' . $result['message'];
+                    $errorMessage .= '：'.$result['message'];
                 } else {
                     $errorMessage .= '：未知错误';
                 }
-                
+
                 Log::error('MeituanNotificationService: 美团订单退款通知失败', [
                     'order_id' => $order->id,
                     'refund_id' => $refundId,
@@ -329,9 +331,9 @@ class MeituanNotificationService implements OtaNotificationInterface
             } else {
                 $errorMessage = '美团订单退款被拒绝通知失败';
                 if (isset($result['describe'])) {
-                    $errorMessage .= '：' . $result['describe'];
+                    $errorMessage .= '：'.$result['describe'];
                 } elseif (isset($result['message'])) {
-                    $errorMessage .= '：' . $result['message'];
+                    $errorMessage .= '：'.$result['message'];
                 } else {
                     $errorMessage .= '：未知错误';
                 }
@@ -391,7 +393,7 @@ class MeituanNotificationService implements OtaNotificationInterface
             $result = $client->notifyOrderPay($requestData);
 
             // 美团返回：200成功，300失败/处理中（沿用现有 pay notice 的兼容逻辑）
-            $code = isset($result['code']) ? (int)$result['code'] : null;
+            $code = isset($result['code']) ? (int) $result['code'] : null;
             if ($code === 200) {
                 Log::info('MeituanNotificationService: 美团订单拒单通知成功', [
                     'order_id' => $order->id,
@@ -405,9 +407,9 @@ class MeituanNotificationService implements OtaNotificationInterface
             } else {
                 $errorMessage = '美团订单拒单通知失败';
                 if (isset($result['describe'])) {
-                    $errorMessage .= '：' . $result['describe'];
+                    $errorMessage .= '：'.$result['describe'];
                 } elseif (isset($result['message'])) {
-                    $errorMessage .= '：' . $result['message'];
+                    $errorMessage .= '：'.$result['message'];
                 } else {
                     $errorMessage .= '：未知错误';
                 }
@@ -431,22 +433,159 @@ class MeituanNotificationService implements OtaNotificationInterface
 
     /**
      * 通知订单核销（已使用）
-     * 注意：美团可能不支持订单核销通知，这里先留空
+     *
+     * 与订单管理「核销」按钮共用：调用美团订单消费通知接口（/rhone/mtp/api/order/consume/notice）。
+     * 查单核销、Webhook 核销通过 NotifyOtaOrderStatusJob 调用本方法；无额外字段时用订单入住/离店与 room_count 兜底。
      */
     public function notifyOrderConsumed(Order $order, array $data = []): void
     {
-        Log::info('MeituanNotificationService: 美团暂不支持订单核销通知', [
-            'order_id' => $order->id,
-        ]);
-        // 美团可能不支持订单核销通知，这里先留空
-        // 如果后续需要实现，可以在这里添加逻辑
+        $skip = filter_var(env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false), FILTER_VALIDATE_BOOLEAN);
+        if ($skip) {
+            Log::info('MeituanNotificationService::notifyOrderConsumed: 已配置跳过美团核销通知', [
+                'order_id' => $order->id,
+            ]);
+
+            return;
+        }
+
+        $order->loadMissing(['product', 'hotel', 'otaPlatform']);
+
+        try {
+            $scenicSpotId = $order->product?->scenic_spot_id ?? $order->hotel?->scenic_spot_id;
+            $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
+            if (! $config) {
+                Log::error('MeituanNotificationService::notifyOrderConsumed: 美团配置不存在', [
+                    'order_id' => $order->id,
+                    'scenic_spot_id' => $scenicSpotId,
+                ]);
+
+                return;
+            }
+            $client = new MeituanClient($config);
+
+            $useStartDate = $data['use_start_date'] ?? $order->check_in_date->format('Y-m-d');
+            $useEndDate = $data['use_end_date'] ?? $order->check_out_date->format('Y-m-d');
+            $useQuantity = $data['use_quantity'] ?? $order->room_count;
+
+            $requestData = [
+                'partnerId' => $client->getPartnerId(),
+                'body' => [
+                    'orderId' => intval($order->ota_order_no),
+                    'partnerOrderId' => $order->order_no,
+                    'useStartDate' => $useStartDate,
+                    'useEndDate' => $useEndDate,
+                    'quantity' => $order->room_count,
+                    'usedQuantity' => $useQuantity,
+                    'refundedQuantity' => 0,
+                ],
+            ];
+
+            $voucherInvalidTime = now()->format('Y-m-d H:i:s');
+            $usedVouchers = [];
+
+            if ($order->real_name_type === 1 && ! empty($order->credential_list)) {
+                $credentialList = $order->credential_list;
+                $credentialListToUse = array_slice($credentialList, 0, $useQuantity);
+
+                $requestData['body']['credentialList'] = [];
+                foreach ($credentialListToUse as $credential) {
+                    $voucher = $credential['voucher'] ?? '';
+
+                    if (empty($voucher)) {
+                        $index = count($usedVouchers);
+                        $roomCount = $order->room_count ?? 1;
+                        if ($roomCount === 1) {
+                            $voucher = strtoupper($order->order_no);
+                        } else {
+                            $voucher = strtoupper($order->order_no).'-'.($index + 1);
+                        }
+                    }
+
+                    if (! empty($voucher) && ! in_array($voucher, $usedVouchers)) {
+                        $usedVouchers[] = $voucher;
+                    }
+
+                    $requestData['body']['credentialList'][] = [
+                        'credentialType' => $credential['credentialType'] ?? 0,
+                        'credentialNo' => $credential['credentialNo'] ?? '',
+                        'voucher' => $voucher,
+                        'status' => 1,
+                    ];
+                }
+            } else {
+                if (! empty($order->credential_list)) {
+                    $credentialListToUse = array_slice($order->credential_list, 0, $useQuantity);
+                    foreach ($credentialListToUse as $credential) {
+                        $voucher = $credential['voucher'] ?? '';
+                        if (! empty($voucher) && ! in_array($voucher, $usedVouchers)) {
+                            $usedVouchers[] = $voucher;
+                        }
+                    }
+                }
+
+                if (empty($usedVouchers)) {
+                    $roomCount = $order->room_count ?? 1;
+                    if ($roomCount === 1) {
+                        $usedVouchers[] = strtoupper($order->order_no);
+                    } else {
+                        for ($i = 0; $i < $useQuantity; $i++) {
+                            $usedVouchers[] = strtoupper($order->order_no).'-'.($i + 1);
+                        }
+                    }
+                }
+            }
+
+            if (! empty($usedVouchers)) {
+                $requestData['body']['voucherList'] = [];
+                $voucherQuantityMap = [];
+                foreach ($usedVouchers as $voucher) {
+                    $voucherQuantityMap[$voucher] = ($voucherQuantityMap[$voucher] ?? 0) + 1;
+                }
+
+                $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
+
+                foreach ($voucherQuantityMap as $voucher => $quantity) {
+                    $voucherItem = [
+                        'voucher' => $voucher,
+                        'voucherInvalidTime' => $voucherInvalidTime,
+                        'quantity' => $quantity,
+                        'status' => 1,
+                    ];
+                    $voucherItem['voucherPics'] = $baseUrl.'/vouchers/'.urlencode($voucher).'.png';
+                    $requestData['body']['voucherList'][] = $voucherItem;
+                }
+            }
+
+            $result = $client->notifyOrderConsume($requestData);
+
+            if (isset($result['code']) && $result['code'] == 200) {
+                Log::info('MeituanNotificationService: 美团订单消费通知成功', [
+                    'order_id' => $order->id,
+                ]);
+            } else {
+                $errorMessage = $result['describe'] ?? ($result['message'] ?? '未知错误');
+                Log::error('MeituanNotificationService: 美团订单消费通知失败', [
+                    'order_id' => $order->id,
+                    'result' => $result,
+                    'error_message' => $errorMessage,
+                ]);
+                throw new \Exception('美团订单核销通知失败：'.$errorMessage);
+            }
+        } catch (\Exception $e) {
+            Log::error('MeituanNotificationService: 美团订单消费通知异常', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
     }
 
     /**
      * 生成凭证码
-     * 
-     * @param Order $order 订单
-     * @param int $index 凭证码索引（从0开始）
+     *
+     * @param  Order  $order  订单
+     * @param  int  $index  凭证码索引（从0开始）
      * @return string 凭证码
      */
     protected function generateVoucher(Order $order, int $index): string
@@ -454,38 +593,38 @@ class MeituanNotificationService implements OtaNotificationInterface
         // 凭证码格式：订单号 + 序号（例如：ORD2026010818374262886-1）
         // 如果订单只有1张票，可以只使用订单号
         $roomCount = $order->room_count ?? 1;
-        
+
         if ($roomCount === 1) {
             // 单张票，使用订单号作为凭证码
             return strtoupper($order->order_no);
         } else {
             // 多张票，使用订单号 + 序号
-            return strtoupper($order->order_no) . '-' . ($index + 1);
+            return strtoupper($order->order_no).'-'.($index + 1);
         }
     }
 
     /**
      * 生成凭证码图片链接
-     * 
-     * @param array $vouchers 凭证码数组
-     * @param Order $order 订单
+     *
+     * @param  array  $vouchers  凭证码数组
+     * @param  Order  $order  订单
      * @return array 凭证码图片链接数组
      */
     protected function generateVoucherPics(array $vouchers, Order $order): array
     {
         $voucherPics = [];
-        
+
         // 生成凭证码图片链接
         // 这里使用占位链接，实际应该生成真实的图片链接
         // 图片链接格式可以是：https://your-domain.com/vouchers/{voucher}.png
         $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
-        
+
         foreach ($vouchers as $voucher) {
             // 生成图片链接（可以是占位链接，或实际生成图片）
             // 注意：图片链接必须可访问，且顺序必须与vouchers数组一致
-            $voucherPics[] = $baseUrl . '/vouchers/' . urlencode($voucher) . '.png';
+            $voucherPics[] = $baseUrl.'/vouchers/'.urlencode($voucher).'.png';
         }
-        
+
         return $voucherPics;
     }
 }
