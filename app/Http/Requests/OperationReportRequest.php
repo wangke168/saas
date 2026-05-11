@@ -17,6 +17,7 @@ class OperationReportRequest extends FormRequest
             'period' => ['nullable', 'in:realtime,day,week,month,custom'],
             'date_type' => ['nullable', 'in:booking,arrival'],
             'scenic_spot_id' => ['nullable', 'integer', 'exists:scenic_spots,id'],
+            'ota_platform_id' => ['nullable', 'integer', 'exists:ota_platforms,id'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
         ];

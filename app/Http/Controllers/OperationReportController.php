@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\OrderStatus;
 use App\Enums\PkgOrderStatus;
 use App\Http\Requests\OperationReportRequest;
+use App\Models\OtaPlatform;
 use App\Models\Order;
 use App\Models\Pkg\PkgOrder;
 use App\Models\ScenicSpot;
@@ -25,6 +26,7 @@ class OperationReportController extends Controller
         $dateType = $request->input('date_type', 'booking'); // booking(预定日期), arrival(预达日期)
         $dateColumn = $dateType === 'arrival' ? 'check_in_date' : 'created_at';
         $selectedScenicSpotId = $request->input('scenic_spot_id');
+        $selectedOtaPlatformId = $request->input('ota_platform_id');
 
         // 计算时间范围
         $startDate = match($period) {
@@ -88,6 +90,9 @@ class OperationReportController extends Controller
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
             });
         }
+        if (!empty($selectedOtaPlatformId)) {
+            $orderQuery->where('ota_platform_id', (int)$selectedOtaPlatformId);
+        }
 
         // 统计打包订单
         $pkgOrderQuery = PkgOrder::query();
@@ -96,6 +101,9 @@ class OperationReportController extends Controller
             $pkgOrderQuery->whereHas('product', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
             });
+        }
+        if (!empty($selectedOtaPlatformId)) {
+            $pkgOrderQuery->where('ota_platform_id', (int)$selectedOtaPlatformId);
         }
 
         // 基础统计数据
@@ -107,6 +115,7 @@ class OperationReportController extends Controller
             'total_orders' => $orderStats['total_orders'] + $pkgOrderStats['total_orders'],
             'total_amount' => (float)$orderStats['total_amount'] + (float)$pkgOrderStats['total_amount'],
             'total_settlement_amount' => (float)$orderStats['total_settlement_amount'] + (float)$pkgOrderStats['total_settlement_amount'],
+            'verified_total_amount' => (float)$orderStats['verified_total_amount'],
             'confirmed_orders' => $orderStats['confirmed_orders'] + $pkgOrderStats['confirmed_orders'],
             'verified_orders' => $orderStats['verified_orders'],
             'cancelled_orders' => $orderStats['cancelled_orders'] + $pkgOrderStats['cancelled_orders'],
@@ -128,9 +137,11 @@ class OperationReportController extends Controller
             'period' => $period,
             'date_type' => $dateType,
             'scenic_spot_id' => $selectedScenicSpotId,
+            'ota_platform_id' => !empty($selectedOtaPlatformId) ? (int)$selectedOtaPlatformId : null,
             'start_date' => $startDate->format('Y-m-d H:i:s'),
             'end_date' => $endDate->format('Y-m-d H:i:s'),
             'available_scenic_spots' => $availableScenicSpots,
+            'available_channels' => $this->getAvailableChannels(),
             'stats' => $totalStats,
             'order_stats' => $orderStats,
             'pkg_order_stats' => $pkgOrderStats,
@@ -150,10 +161,25 @@ class OperationReportController extends Controller
             'total_orders' => (clone $query)->count(),
             'total_amount' => (float)(clone $query)->sum('total_amount') ?? 0,
             'total_settlement_amount' => (float)(clone $query)->sum('settlement_amount') ?? 0,
+            'verified_total_amount' => (float)(clone $query)
+                ->where('status', OrderStatus::VERIFIED->value)
+                ->sum('total_amount') ?? 0,
             'confirmed_orders' => (clone $query)->where('status', OrderStatus::CONFIRMED->value)->count(),
             'verified_orders' => (clone $query)->where('status', OrderStatus::VERIFIED->value)->count(),
             'cancelled_orders' => (clone $query)->where('status', OrderStatus::CANCEL_APPROVED->value)->count(),
         ];
+    }
+
+    /**
+     * 获取可选渠道列表（启用的OTA平台）
+     */
+    private function getAvailableChannels()
+    {
+        return OtaPlatform::query()
+            ->where('is_active', true)
+            ->select('id', 'name')
+            ->orderBy('name')
+            ->get();
     }
 
     /**

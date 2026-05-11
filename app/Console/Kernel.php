@@ -25,25 +25,25 @@ class Kernel extends ConsoleKernel
         $schedule->command('meituan:sync-price-stock')->everyThirtyMinutes();
         
         // 每天清理过期订单（30天前）
-        $schedule->call(function () {
+    /*    $schedule->call(function () {
             \App\Models\Order::where('created_at', '<', now()->subDays(30))
                 ->whereIn('status', ['rejected', 'cancel_approved'])
                 ->delete();
-        })->daily();
+        })->daily();*/
         
         // 每天更新打包产品价格日历（确保未来60天都有价格）
-        $schedule->call(function () {
+   /*     $schedule->call(function () {
             $products = \App\Models\Pkg\PkgProduct::where('status', 1)->get();
             foreach ($products as $product) {
                 \App\Jobs\Pkg\UpdatePkgProductPriceJob::dispatch($product->id);
             }
-        })->dailyAt('02:00'); // 每天凌晨2点执行
+        })->dailyAt('02:00');*/ // 每天凌晨2点执行
 
         // 每天凌晨2点查询订单核销状态
         $schedule->command('order:query-verification-status')->dailyAt('02:00');
         
         // 每5分钟同步飞猪订单状态
-        $schedule->command('fliggy:sync-order-status')->everyFiveMinutes();
+     //   $schedule->command('fliggy:sync-order-status')->everyFiveMinutes();
     }
 
     /**

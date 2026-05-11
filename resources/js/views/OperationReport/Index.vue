@@ -19,6 +19,22 @@
                     />
                 </el-select>
 
+                <el-select
+                    v-model="selectedChannelId"
+                    placeholder="选择渠道（默认全部）"
+                    clearable
+                    filterable
+                    style="width: 220px"
+                    @change="handleFilterChange"
+                >
+                    <el-option
+                        v-for="channel in channelOptions"
+                        :key="channel.id"
+                        :label="channel.name"
+                        :value="channel.id"
+                    />
+                </el-select>
+
                 <el-radio-group v-model="dateType" @change="handleFilterChange">
                     <el-radio-button label="booking">预定日期</el-radio-button>
                     <el-radio-button label="arrival">预达日期</el-radio-button>
@@ -103,6 +119,21 @@
                         </el-statistic>
                         <div class="stat-detail">
                             <span>结算总额</span>
+                        </div>
+                    </el-card>
+
+                    <el-card class="stat-card">
+                        <el-statistic
+                            title="核销总金额"
+                            :value="reportData.stats?.verified_total_amount || 0"
+                            :precision="2"
+                        >
+                            <template #prefix>
+                                <span class="stat-unit">¥</span>
+                            </template>
+                        </el-statistic>
+                        <div class="stat-detail">
+                            <span>核销总额</span>
                         </div>
                     </el-card>
 
@@ -278,15 +309,19 @@ const loading = ref(false);
 const selectedPeriod = ref('realtime');
 const customDateRange = ref(null);
 const selectedScenicSpotId = ref(null);
+const selectedChannelId = ref(null);
 const scenicSpotOptions = ref([]);
+const channelOptions = ref([]);
 const dateType = ref('booking');
 const reportData = ref({
     period: 'day',
     date_type: 'booking',
     scenic_spot_id: null,
+    ota_platform_id: null,
     start_date: '',
     end_date: '',
     available_scenic_spots: [],
+    available_channels: [],
     stats: {},
     order_stats: {},
     pkg_order_stats: {},
@@ -307,6 +342,9 @@ const fetchReport = async () => {
         if (selectedScenicSpotId.value) {
             params.scenic_spot_id = selectedScenicSpotId.value;
         }
+        if (selectedChannelId.value) {
+            params.ota_platform_id = selectedChannelId.value;
+        }
         
         // 如果是自定义日期范围，传递日期参数
         if (selectedPeriod.value === 'custom' && customDateRange.value && customDateRange.value.length === 2) {
@@ -317,6 +355,7 @@ const fetchReport = async () => {
         const response = await axios.get('/operation-report', { params });
         reportData.value = response.data;
         scenicSpotOptions.value = response.data.available_scenic_spots || [];
+        channelOptions.value = response.data.available_channels || [];
     } catch (error) {
         console.error('获取运营快报数据失败:', error);
         ElMessage.error('获取运营快报数据失败');
