@@ -17,8 +17,7 @@ class DingTalkNotificationService
 
     public function __construct()
     {
-        $this->defaultWebhookUrl = config('services.dingtalk.webhook_url')
-            ?? env('DINGTALK_WEBHOOK_URL');
+        $this->defaultWebhookUrl = config('services.dingtalk.webhook_url');
     }
 
     /**
@@ -26,11 +25,11 @@ class DingTalkNotificationService
      */
     public function isEnabled(): bool
     {
-        $enabled = env('DINGTALK_NOTIFICATION_ENABLED', true);
-        if (!$enabled) {
+        $enabled = (bool) config('services.dingtalk.notification_enabled', true);
+        if (! $enabled) {
             Log::info('钉钉通知：已禁用', [
-                'config_key' => 'DINGTALK_NOTIFICATION_ENABLED',
-                'config_value' => env('DINGTALK_NOTIFICATION_ENABLED'),
+                'config_key' => 'services.dingtalk.notification_enabled',
+                'config_value' => config('services.dingtalk.notification_enabled'),
             ]);
             return false;
         }

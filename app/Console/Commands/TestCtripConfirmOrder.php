@@ -220,13 +220,16 @@ class TestCtripConfirmOrder extends Command
     {
         $this->info("[配置信息]");
         
-        $url = env('CTRIP_ORDER_API_URL');
-        if (!$url) {
+        $url = config('services.ctrip.order_api_url');
+        if (! $url) {
             $url = 'https://ttdopen.ctrip.com/api/CreateOrderConfirm.do';
         }
         $this->line("  API URL: {$url}");
         
-        $accountId = env('CTRIP_ACCOUNT_ID', '(未设置)');
+        $accountId = config('services.ctrip.account_id', '(未设置)');
+        if ($accountId === null || $accountId === '') {
+            $accountId = '(未设置)';
+        }
         $this->line("  Account ID: {$accountId}");
         $this->line("  Service Name: CreateOrderConfirm");
         $this->newLine();

@@ -38,7 +38,7 @@ class FliggyDistributionProductTest extends TestCase
             'code' => 'FLIGGY_DISTRIBUTION',
             'description' => '飞猪分销系统',
             'api_type' => 'fliggy_distribution',
-            'api_url' => env('FLIGGY_DISTRIBUTION_API_URL', 'https://pre-api.alitrip.alibaba.com'), // 默认使用测试环境
+            'api_url' => config('services.fliggy_distribution.api_url', 'https://pre-api.alitrip.alibaba.com'), // 默认使用测试环境
             'is_active' => true,
         ]);
         
@@ -52,18 +52,17 @@ class FliggyDistributionProductTest extends TestCase
         // 关联服务商到景区
         $this->scenicSpot->softwareProviders()->attach($this->softwareProvider->id);
         
-        // 创建资源配置
-        // 注意：需要在 .env 中配置以下变量，或直接在这里设置测试值
+        // 注意：凭证来自 config/services.php（.env 经 config:cache 后仍可读）
         $this->config = ResourceConfig::create([
             'software_provider_id' => $this->softwareProvider->id,
             'scenic_spot_id' => $this->scenicSpot->id,
-            'username' => env('FLIGGY_DISTRIBUTION_USERNAME', ''),
-            'password' => env('FLIGGY_DISTRIBUTION_PASSWORD', ''),
+            'username' => config('services.fliggy_distribution.username', ''),
+            'password' => config('services.fliggy_distribution.password', ''),
             'environment' => 'production',
             'is_active' => true,
             'extra_config' => [
-                'distributor_id' => env('FLIGGY_DISTRIBUTION_ID', ''),
-                'private_key' => env('FLIGGY_DISTRIBUTION_PRIVATE_KEY', ''),
+                'distributor_id' => config('services.fliggy_distribution.id', ''),
+                'private_key' => config('services.fliggy_distribution.private_key', ''),
                 'sync_mode' => [
                     'inventory' => 'manual',
                     'price' => 'manual',
@@ -123,8 +122,8 @@ class FliggyDistributionProductTest extends TestCase
         
         // 需要先获取一些产品ID（可以从测试1的结果中获取，或使用已知的产品ID）
         $productIds = [
-            env('FLIGGY_TEST_PRODUCT_ID', 'TEST_PRODUCT_ID_1'),
-            env('FLIGGY_TEST_PRODUCT_ID_2', 'TEST_PRODUCT_ID_2'),
+            config('services.fliggy_distribution.test_product_id', 'TEST_PRODUCT_ID_1'),
+            config('services.fliggy_distribution.test_product_id_2', 'TEST_PRODUCT_ID_2'),
         ];
         
         // 过滤掉空值
@@ -170,7 +169,7 @@ class FliggyDistributionProductTest extends TestCase
     {
         $this->markTestSkipped('需要配置飞猪分销系统参数后才能测试');
         
-        $productId = env('FLIGGY_TEST_PRODUCT_ID', '');
+        $productId = (string) config('services.fliggy_distribution.test_product_id', '');
         
         if (empty($productId)) {
             $this->markTestSkipped('需要配置测试产品ID（FLIGGY_TEST_PRODUCT_ID）');
@@ -217,7 +216,7 @@ class FliggyDistributionProductTest extends TestCase
     {
         $this->markTestSkipped('需要配置飞猪分销系统参数后才能测试');
         
-        $productId = env('FLIGGY_TEST_PRODUCT_ID', '');
+        $productId = (string) config('services.fliggy_distribution.test_product_id', '');
         
         if (empty($productId)) {
             $this->markTestSkipped('需要配置测试产品ID（FLIGGY_TEST_PRODUCT_ID）');

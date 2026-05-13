@@ -24,7 +24,9 @@ class MeituanNotificationService implements OtaNotificationInterface
     {
         $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
         if (! $config) {
-            throw new \Exception('美团平台级配置缺失：请在 .env 设置 MEITUAN_APP_KEY、MEITUAN_APP_SECRET 后执行 php artisan config:cache（或先 config:clear 再重载）');
+            throw new \Exception(
+                '美团平台级配置缺失：MEITUAN_APP_KEY/MEITUAN_APP_SECRET 未载入。请在服务器上执行 php artisan config:clear && php artisan config:cache（禁止在无密钥的 CI 里预生成 config 缓存后部署）。'
+            );
         }
 
         return new MeituanClient($config);
@@ -542,7 +544,7 @@ class MeituanNotificationService implements OtaNotificationInterface
                     $voucherQuantityMap[$voucher] = ($voucherQuantityMap[$voucher] ?? 0) + 1;
                 }
 
-                $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
+                $baseUrl = rtrim((string) (config('app.url') ?: 'https://www.laidoulaile.online'), '/');
 
                 foreach ($voucherQuantityMap as $voucher => $quantity) {
                     $voucherItem = [
@@ -617,7 +619,7 @@ class MeituanNotificationService implements OtaNotificationInterface
         // 生成凭证码图片链接
         // 这里使用占位链接，实际应该生成真实的图片链接
         // 图片链接格式可以是：https://your-domain.com/vouchers/{voucher}.png
-        $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
+        $baseUrl = rtrim((string) (config('app.url') ?: 'https://www.laidoulaile.online'), '/');
 
         foreach ($vouchers as $voucher) {
             // 生成图片链接（可以是占位链接，或实际生成图片）

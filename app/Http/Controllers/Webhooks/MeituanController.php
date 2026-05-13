@@ -2943,7 +2943,7 @@ class MeituanController extends Controller
         // 生成凭证码图片链接
         // 这里使用占位链接，实际应该生成真实的图片链接
         // 图片链接格式可以是：https://your-domain.com/vouchers/{voucher}.png
-        $baseUrl = env('APP_URL', 'https://www.laidoulaile.online');
+        $baseUrl = rtrim((string) (config('app.url') ?: 'https://www.laidoulaile.online'), '/');
         
         foreach ($vouchers as $voucher) {
             // 生成图片链接（可以是占位链接，或实际生成图片）

@@ -233,7 +233,7 @@ class ResourceConfigController extends Controller
 
         // 如果某些字段为空，从.env读取默认值（api_url已移除，从服务商获取）
         if (empty($validated['username'])) {
-            $validated['username'] = env('HENGDIAN_USERNAME', '');
+            $validated['username'] = (string) config('services.hengdian.username', '');
         }
         // 密码处理：如果未提供或为空，从现有配置中获取
         if (!isset($validated['password']) || empty($validated['password'])) {
@@ -242,7 +242,7 @@ class ResourceConfigController extends Controller
             if ($existingConfig && $existingConfig->password) {
                 $validated['password'] = $existingConfig->password; // 保持原密码
             } else {
-                $validated['password'] = env('HENGDIAN_PASSWORD', '');
+                $validated['password'] = (string) config('services.hengdian.password', '');
             }
         }
         if (empty($validated['environment'])) {
@@ -434,8 +434,8 @@ class ResourceConfigController extends Controller
      */
     protected function doSubscribeInventory(ScenicSpot $scenicSpot, ResourceConfig $config): void
     {
-        $notifyUrl = env('HENGDIAN_WEBHOOK_URL');
-        if (!$notifyUrl) {
+        $notifyUrl = config('services.hengdian.webhook_url');
+        if (! $notifyUrl) {
             throw new \Exception('Webhook URL未配置，请在.env中设置HENGDIAN_WEBHOOK_URL。示例：https://your-domain.com/api/webhooks/resource/hengdian/inventory');
         }
 

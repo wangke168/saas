@@ -37,6 +37,22 @@ return [
 
     'dingtalk' => [
         'webhook_url' => env('DINGTALK_WEBHOOK_URL'),
+        'notification_enabled' => filter_var(env('DINGTALK_NOTIFICATION_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | 飞猪分销（测试命令等使用）
+    |--------------------------------------------------------------------------
+    */
+    'fliggy_distribution' => [
+        'id' => env('FLIGGY_DISTRIBUTION_ID'),
+        'private_key' => env('FLIGGY_DISTRIBUTION_PRIVATE_KEY'),
+        'api_url' => env('FLIGGY_DISTRIBUTION_API_URL', 'https://pre-api.alitrip.alibaba.com'),
+        'username' => env('FLIGGY_DISTRIBUTION_USERNAME', ''),
+        'password' => env('FLIGGY_DISTRIBUTION_PASSWORD', ''),
+        'test_product_id' => env('FLIGGY_TEST_PRODUCT_ID', ''),
+        'test_product_id_2' => env('FLIGGY_TEST_PRODUCT_ID_2', ''),
     ],
 
     /*
@@ -73,6 +89,28 @@ return [
         'test_scenic_closed' => filter_var(env('MEITUAN_TEST_SCENIC_CLOSED', false), FILTER_VALIDATE_BOOLEAN),
         'auto_accept_when_sufficient' => filter_var(env('MEITUAN_AUTO_ACCEPT_WHEN_SUFFICIENT', true), FILTER_VALIDATE_BOOLEAN),
         'auto_accept_stock_buffer' => (int) env('MEITUAN_AUTO_ACCEPT_STOCK_BUFFER', 5),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | 横店资源（PMS）对接
+    |--------------------------------------------------------------------------
+    |
+    | 业务代码仅使用 config()，以便 config:cache 后仍能读取 .env 中的值。
+    |
+    */
+    'hengdian' => [
+        'api_url' => env('HENGDIAN_API_URL'),
+        'username' => env('HENGDIAN_USERNAME'),
+        'password' => env('HENGDIAN_PASSWORD'),
+        'webhook_url' => env('HENGDIAN_WEBHOOK_URL'),
+        'book_amount_unit' => env('HENGDIAN_BOOK_AMOUNT_UNIT', 'yuan'),
+        'ctrip_username' => env('HENGDIAN_CTRIP_USERNAME', ''),
+        'ctrip_password' => env('HENGDIAN_CTRIP_PASSWORD', ''),
+        'meituan_username' => env('HENGDIAN_MEITUAN_USERNAME', ''),
+        'meituan_password' => env('HENGDIAN_MEITUAN_PASSWORD', ''),
+        'fliggy_username' => env('HENGDIAN_FLIGGY_USERNAME', ''),
+        'fliggy_password' => env('HENGDIAN_FLIGGY_PASSWORD', ''),
     ],
 
 ];

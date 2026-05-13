@@ -6,6 +6,7 @@ use App\Enums\OtaPlatform as OtaPlatformEnum;
 use App\Models\OtaConfig;
 use App\Models\OtaPlatform as OtaPlatformModel;
 use App\Models\ScenicSpotOtaAccount;
+use Illuminate\Support\Facades\Log;
 
 /**
  * OTA 配置解析：平台级共用配置 + 景区级账号配置
@@ -50,6 +51,13 @@ class OtaConfigResolver
         $appKey = config('services.meituan.app_key');
         $appSecret = config('services.meituan.app_secret');
         if (! $appKey || ! $appSecret) {
+            Log::warning('OtaConfigResolver: 美团平台级密钥未载入（config/services.meituan 为空或不完整）', [
+                'has_app_key' => $appKey !== null && $appKey !== '',
+                'has_app_secret' => $appSecret !== null && $appSecret !== '',
+                'configuration_is_cached' => app()->configurationIsCached(),
+                'hint' => '须在部署机上存在有效 .env 后执行 php artisan config:clear && php artisan config:cache；不要在无 MEITUAN_* 的 CI 环境中生成 config 缓存再上传 bootstrap/cache/config.php',
+            ]);
+
             return null;
         }
         $config = new OtaConfig();

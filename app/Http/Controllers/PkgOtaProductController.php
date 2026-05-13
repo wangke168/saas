@@ -93,7 +93,7 @@ class PkgOtaProductController extends Controller
     {
         try {
             // 检查是否启用异步处理
-            $useAsync = env('ENABLE_PRODUCT_PUSH_ASYNC', false);
+            $useAsync = config('ota_catalog.enable_product_push_async', false);
 
             if ($useAsync) {
                 return $this->pushAsync($pkgOtaProduct);

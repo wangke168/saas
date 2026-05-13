@@ -123,9 +123,9 @@ class TestHengdianApi extends Command
 
     protected function getResourceConfig(): ?ResourceConfig
     {
-        $url = env('HENGDIAN_API_URL');
-        $user = env('HENGDIAN_USERNAME');
-        $pass = env('HENGDIAN_PASSWORD');
+        $url = config('services.hengdian.api_url');
+        $user = config('services.hengdian.username');
+        $pass = config('services.hengdian.password');
 
         if ($url && $user && $pass) {
             $config = new ResourceConfig;
@@ -222,7 +222,7 @@ class TestHengdianApi extends Command
     {
         $this->info('=== SubscribeRoomStatusRQ 房态订阅 ===');
 
-        $notifyUrl = $this->option('notify-url') ?: env('HENGDIAN_WEBHOOK_URL', '');
+        $notifyUrl = $this->option('notify-url') ?: (string) config('services.hengdian.webhook_url', '');
         $unsubscribe = (bool) $this->option('unsubscribe');
 
         if (!$unsubscribe && $notifyUrl === '') {

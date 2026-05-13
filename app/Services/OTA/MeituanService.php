@@ -39,8 +39,10 @@ class MeituanService
         $cacheKey = $scenicSpotId ?? 'default';
         if (!isset($this->clientByScenicSpot[$cacheKey])) {
             $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
-            if (!$config) {
-                throw new \Exception('美团配置不存在，请检查 .env 文件中的环境变量配置');
+            if (! $config) {
+                throw new \Exception(
+                    '美团平台级配置缺失：MEITUAN_APP_KEY/MEITUAN_APP_SECRET 未载入。请在服务器上执行 php artisan config:clear && php artisan config:cache（禁止在无密钥的 CI 里预生成 config 缓存后部署）。'
+                );
             }
             $this->clientByScenicSpot[$cacheKey] = new MeituanClient($config);
         }

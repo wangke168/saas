@@ -46,13 +46,13 @@ class InventoryObserver
         }
 
         // 检查环境变量是否启用自动推送（全局开关）
-        if (!env('ENABLE_AUTO_PUSH_INVENTORY_TO_OTA', true)) {
+        if (! config('inventory.enable_auto_push_inventory_to_ota', true)) {
             return;
         }
 
         // 检查环境变量是否启用人工操作库存的自动推送（默认禁用）
         // 资源方推送的库存仍然自动推送（在 ResourceController 中处理）
-        if (!env('ENABLE_AUTO_PUSH_MANUAL_INVENTORY_TO_OTA', false)) {
+        if (! config('inventory.enable_auto_push_manual_inventory_to_ota', false)) {
             return;
         }
 
@@ -90,7 +90,7 @@ class InventoryObserver
                 return;
             }
 
-            $pushDelay = (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5);
+            $pushDelay = (int) config('inventory.push_delay_seconds', 5);
             $threshold = OtaInventoryHelper::getZeroThreshold();
 
             // 判断本次变更是否「变紧」或「恢复」，用于是否推美团

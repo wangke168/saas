@@ -184,18 +184,21 @@ class HengdianService implements ResourceServiceInterface
      */
     protected function createConfigFromEnv(): ?ResourceConfig
     {
-        if (!env('HENGDIAN_API_URL') || !env('HENGDIAN_USERNAME') || !env('HENGDIAN_PASSWORD')) {
+        $apiUrl = config('services.hengdian.api_url');
+        $username = config('services.hengdian.username');
+        $password = config('services.hengdian.password');
+        if (! $apiUrl || ! $username || ! $password) {
             return null;
         }
 
         $config = new ResourceConfig();
         // 临时配置：将api_url存储在extra_config中（因为临时配置没有softwareProvider）
-        $config->username = env('HENGDIAN_USERNAME');
-        $config->password = env('HENGDIAN_PASSWORD');
+        $config->username = $username;
+        $config->password = $password;
         $config->environment = 'production';
         $config->is_active = true;
         $config->extra_config = [
-            'api_url_override' => env('HENGDIAN_API_URL'), // 临时配置的API地址
+            'api_url_override' => $apiUrl, // 临时配置的API地址
             'sync_mode' => [
                 'inventory' => 'manual',
                 'price' => 'manual',
@@ -203,16 +206,16 @@ class HengdianService implements ResourceServiceInterface
             ],
             'credentials' => [
                 'ctrip' => [
-                    'username' => env('HENGDIAN_CTRIP_USERNAME', ''),
-                    'password' => env('HENGDIAN_CTRIP_PASSWORD', ''),
+                    'username' => config('services.hengdian.ctrip_username', ''),
+                    'password' => config('services.hengdian.ctrip_password', ''),
                 ],
                 'meituan' => [
-                    'username' => env('HENGDIAN_MEITUAN_USERNAME', ''),
-                    'password' => env('HENGDIAN_MEITUAN_PASSWORD', ''),
+                    'username' => config('services.hengdian.meituan_username', ''),
+                    'password' => config('services.hengdian.meituan_password', ''),
                 ],
                 'fliggy' => [
-                    'username' => env('HENGDIAN_FLIGGY_USERNAME', ''),
-                    'password' => env('HENGDIAN_FLIGGY_PASSWORD', ''),
+                    'username' => config('services.hengdian.fliggy_username', ''),
+                    'password' => config('services.hengdian.fliggy_password', ''),
                 ],
             ],
         ];
@@ -243,7 +246,7 @@ class HengdianService implements ResourceServiceInterface
      */
     protected function buildBookAmount(float $amountYuan): int|string
     {
-        $amountUnit = env('HENGDIAN_BOOK_AMOUNT_UNIT', 'yuan');
+        $amountUnit = strtolower(trim((string) config('services.hengdian.book_amount_unit', 'yuan')));
 
         if ($amountUnit === 'fen') {
             return $this->convertYuanToFen($amountYuan);

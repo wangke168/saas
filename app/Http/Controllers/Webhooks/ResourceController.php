@@ -94,7 +94,7 @@ class ResourceController extends Controller
             }
 
             // 检查是否启用异步处理（新功能）
-            $useAsync = env('ENABLE_INVENTORY_PUSH_ASYNC', false);
+            $useAsync = config('inventory.enable_inventory_push_async', false);
             
             if ($useAsync) {
                 // 使用新的异步处理方式，传递软件服务商ID
@@ -464,7 +464,7 @@ class ResourceController extends Controller
                             $changedDates[] = $date;
 
                             // 更新 Redis 指纹（先更新，避免并发问题）
-                            $fingerprintTtl = (int) env('INVENTORY_FINGERPRINT_TTL_DAYS', 30) * 86400; // 默认30天
+                            $fingerprintTtl = (int) config('inventory.fingerprint_ttl_days', 30) * 86400; // 默认30天
                             Redis::setex($fingerprintKey, $fingerprintTtl, $newQuota);
                         } catch (ConnectionException $e) {
                             // Redis 故障降级：记录所有库存为脏数据
@@ -574,7 +574,7 @@ class ResourceController extends Controller
                             }
 
                             // 触发推送到 OTA（如果启用自动推送）
-                            if (!empty($changedDates) && env('ENABLE_AUTO_PUSH_INVENTORY_TO_OTA', true)) {
+                            if (!empty($changedDates) && config('inventory.enable_auto_push_inventory_to_ota', true)) {
                                 $pushToMeituan = $this->computePushToMeituanForResource(
                                     $dirtyInventories,
                                     $existingInventories
@@ -689,7 +689,7 @@ class ResourceController extends Controller
     protected function triggerOtaPushForRoomType(RoomType $roomType, array $dates, bool $pushToMeituan = true): void
     {
         try {
-            $pushDelay = (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5);
+            $pushDelay = (int) config('inventory.push_delay_seconds', 5);
             PushChangedInventoryToOtaJob::dispatch(
                 $roomType->id,
                 $dates,

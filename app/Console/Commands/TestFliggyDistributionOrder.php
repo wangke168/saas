@@ -148,10 +148,10 @@ class TestFliggyDistributionOrder extends Command
      */
     protected function getConfig(): ?ResourceConfig
     {
-        // 从环境变量获取配置
-        $distributorId = env('FLIGGY_DISTRIBUTION_ID');
-        $privateKey = env('FLIGGY_DISTRIBUTION_PRIVATE_KEY');
-        $apiUrl = env('FLIGGY_DISTRIBUTION_API_URL', 'https://pre-api.alitrip.alibaba.com');
+        // 从配置（.env 经 config:cache）获取
+        $distributorId = config('services.fliggy_distribution.id');
+        $privateKey = config('services.fliggy_distribution.private_key');
+        $apiUrl = config('services.fliggy_distribution.api_url', 'https://pre-api.alitrip.alibaba.com');
 
         if (empty($distributorId) || empty($privateKey)) {
             $this->warn('环境变量未配置，尝试从数据库获取配置...');
