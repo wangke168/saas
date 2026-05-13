@@ -730,9 +730,7 @@ class OrderOperationService
 
             // 1. 先通知OTA平台，等待响应成功后再更新订单状态
             // 检查是否跳过美团通知（测试模式）
-            $skipMeituanNotification = env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === true
-                || env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === 'true'
-                || env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false) === '1';
+            $skipMeituanNotification = (bool) config('services.meituan.skip_verify_notification', false);
 
             if ($skipMeituanNotification && $order->otaPlatform?->code === \App\Enums\OtaPlatform::MEITUAN) {
                 Log::info('OrderOperationService::verifyOrderManually: 测试模式，跳过美团核销通知', [

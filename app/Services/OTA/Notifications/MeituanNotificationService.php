@@ -24,7 +24,7 @@ class MeituanNotificationService implements OtaNotificationInterface
     {
         $config = $this->otaConfigResolver->getMeituanConfigForScenicSpot($scenicSpotId);
         if (! $config) {
-            throw new \Exception('美团配置不存在，请检查 .env 文件中的环境变量配置');
+            throw new \Exception('美团平台级配置缺失：请在 .env 设置 MEITUAN_APP_KEY、MEITUAN_APP_SECRET 后执行 php artisan config:cache（或先 config:clear 再重载）');
         }
 
         return new MeituanClient($config);
@@ -439,7 +439,7 @@ class MeituanNotificationService implements OtaNotificationInterface
      */
     public function notifyOrderConsumed(Order $order, array $data = []): void
     {
-        $skip = filter_var(env('MEITUAN_SKIP_VERIFY_NOTIFICATION', false), FILTER_VALIDATE_BOOLEAN);
+        $skip = (bool) config('services.meituan.skip_verify_notification', false);
         if ($skip) {
             Log::info('MeituanNotificationService::notifyOrderConsumed: 已配置跳过美团核销通知', [
                 'order_id' => $order->id,

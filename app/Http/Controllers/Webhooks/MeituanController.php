@@ -472,8 +472,8 @@ class MeituanController extends Controller
             //   "partnerId": 26465
             // }
             // 注意：订单创建V2接口是全局加密的，响应需要加密（Base64字符串）
-            $testScenicClosed = env('MEITUAN_TEST_SCENIC_CLOSED', false);
-            if ($testScenicClosed === true || $testScenicClosed === 'true' || $testScenicClosed === '1') {
+            $testScenicClosed = (bool) config('services.meituan.test_scenic_closed', false);
+            if ($testScenicClosed) {
                 DB::rollBack();
                 Log::info('美团订单创建V2：测试场景-景区闭园', [
                     'order_id' => $orderId,

@@ -23,8 +23,8 @@ class OtaAutoAcceptConfigService
         $code = $platform instanceof OtaPlatformEnum ? $platform->value : $platform;
 
         return match ($code) {
-            OtaPlatformEnum::MEITUAN->value => filter_var(env('MEITUAN_AUTO_ACCEPT_WHEN_SUFFICIENT', true), FILTER_VALIDATE_BOOLEAN),
-            OtaPlatformEnum::CTRIP->value => filter_var(env('CTRIP_AUTO_ACCEPT_WHEN_SUFFICIENT', true), FILTER_VALIDATE_BOOLEAN),
+            OtaPlatformEnum::MEITUAN->value => (bool) config('services.meituan.auto_accept_when_sufficient', true),
+            OtaPlatformEnum::CTRIP->value => (bool) config('services.ctrip.auto_accept_when_sufficient', true),
             default => true,
         };
     }
@@ -43,8 +43,8 @@ class OtaAutoAcceptConfigService
         $code = $platform instanceof OtaPlatformEnum ? $platform->value : $platform;
 
         return match ($code) {
-            OtaPlatformEnum::MEITUAN->value => (int) env('MEITUAN_AUTO_ACCEPT_STOCK_BUFFER', 5),
-            OtaPlatformEnum::CTRIP->value => (int) env('CTRIP_AUTO_ACCEPT_STOCK_BUFFER', 5),
+            OtaPlatformEnum::MEITUAN->value => (int) config('services.meituan.auto_accept_stock_buffer', 5),
+            OtaPlatformEnum::CTRIP->value => (int) config('services.ctrip.auto_accept_stock_buffer', 5),
             default => 5,
         };
     }

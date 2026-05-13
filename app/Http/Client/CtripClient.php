@@ -244,11 +244,11 @@ class CtripClient
      */
     public function syncPrice(array $bodyData): array
     {
-        // 优先使用环境变量中的价格API URL
-        $url = env('CTRIP_PRICE_API_URL');
-        
-        // 如果环境变量不存在，使用默认URL
-        if (!$url) {
+        // 优先使用配置中的价格 API URL（config:cache 后不可用 env()）
+        $url = config('services.ctrip.price_api_url');
+
+        // 如果未配置，使用默认 URL（与历史 env 未设置时行为一致）
+        if (! $url) {
             $url = 'https://ttdopen.ctrip.com/api/product/DatePriceModify.do';
         }
 
@@ -301,11 +301,9 @@ class CtripClient
      */
     public function syncStock(array $bodyData): array
     {
-        // 优先使用环境变量中的库存API URL
-        $url = env('CTRIP_STOCK_API_URL');
-        
-        // 如果环境变量不存在，使用默认URL
-        if (!$url) {
+        $url = config('services.ctrip.stock_api_url');
+
+        if (! $url) {
             $url = 'https://ttdopen.ctrip.com/api/product/DateInventoryModify.do';
         }
 
@@ -373,14 +371,12 @@ class CtripClient
         array $items = [],
         array $vouchers = []
     ): array {
-        // 直接使用环境变量中的订单API URL（完整URL）
-        $url = env('CTRIP_ORDER_API_URL');
-        
-        // 如果环境变量不存在，使用默认URL
-        if (!$url) {
+        $url = config('services.ctrip.order_api_url');
+
+        if (! $url) {
             $url = 'https://ttdentry.ctrip.com/ttd-connect-orderentryapi/supplier/order/notice.do';
         }
-        
+
         Log::info('携程订单确认接口调用', [
             'url' => $url,
             'ota_order_id' => $otaOrderId,
@@ -508,14 +504,12 @@ class CtripClient
         string $confirmResultMessage = '确认成功',
         array $items = []
     ): array {
-        // 直接使用环境变量中的订单API URL（完整URL）
-        $url = env('CTRIP_ORDER_API_URL');
-        
-        // 如果环境变量不存在，使用默认URL
-        if (!$url) {
+        $url = config('services.ctrip.order_api_url');
+
+        if (! $url) {
             $url = 'https://ttdentry.ctrip.com/ttd-connect-orderentryapi/supplier/order/notice.do';
         }
-        
+
         Log::info('携程订单取消确认接口调用', [
             'url' => $url,
             'ota_order_id' => $otaOrderId,
@@ -615,14 +609,12 @@ class CtripClient
         // 接口路径：/OrderConsumedNotice.do（根据携程文档）
         // 接口名称：OrderConsumedNotice
         
-        // 直接使用环境变量中的订单API URL（完整URL）
-        $url = env('CTRIP_ORDER_API_URL');
-        
-        // 如果环境变量不存在，使用默认URL
-        if (!$url) {
+        $url = config('services.ctrip.order_api_url');
+
+        if (! $url) {
             $url = 'https://ttdopen.ctrip.com/api/OrderConsumedNotice.do';
         }
-        
+
         Log::info('携程核销通知请求', [
             'url' => $url,
             'otaOrderId' => $otaOrderId,

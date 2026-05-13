@@ -14,7 +14,7 @@ class OtaConfigResolver
 {
     protected function isCtripScenicCredentialsRequired(): bool
     {
-        return (bool) env('CTRIP_SCENIC_CREDENTIALS_REQUIRED', false);
+        return (bool) config('services.ctrip.scenic_credentials_required', false);
     }
 
     /**
@@ -22,16 +22,19 @@ class OtaConfigResolver
      */
     public function getPlatformConfigForCtrip(): ?OtaConfig
     {
-        if (!env('CTRIP_ACCOUNT_ID') || !env('CTRIP_SECRET_KEY')) {
+        $accountId = config('services.ctrip.account_id');
+        $secretKey = config('services.ctrip.secret_key');
+        if (! $accountId || ! $secretKey) {
             return null;
         }
         $config = new OtaConfig();
-        $config->account = env('CTRIP_ACCOUNT_ID');
-        $config->secret_key = env('CTRIP_SECRET_KEY');
-        $config->aes_key = env('CTRIP_ENCRYPT_KEY', '');
-        $config->aes_iv = env('CTRIP_ENCRYPT_IV', '');
-        $config->api_url = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
-        $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
+        $config->account = $accountId;
+        $config->secret_key = $secretKey;
+        $config->aes_key = config('services.ctrip.encrypt_key', '');
+        $config->aes_iv = config('services.ctrip.encrypt_iv', '');
+        $config->api_url = config('services.ctrip.price_api_url')
+            ?: 'https://ttdopen.ctrip.com/api/product/price.do';
+        $config->callback_url = config('services.ctrip.webhook_url', '');
         $config->environment = 'production';
         $config->is_active = true;
         return $config;
@@ -44,17 +47,19 @@ class OtaConfigResolver
     {
         // 注意：PartnerId 是景区级概念，不强依赖平台级 .env 配置；
         // 平台级配置主要用于 Webhook 验签/加解密（密钥级别共用）。
-        if (!env('MEITUAN_APP_KEY') || !env('MEITUAN_APP_SECRET')) {
+        $appKey = config('services.meituan.app_key');
+        $appSecret = config('services.meituan.app_secret');
+        if (! $appKey || ! $appSecret) {
             return null;
         }
         $config = new OtaConfig();
         // 若未配置平台级 PartnerId，则置为 0；实际业务 PartnerId 以景区映射/请求为准
-        $config->account = env('MEITUAN_PARTNER_ID', 0);
-        $config->secret_key = env('MEITUAN_APP_KEY');
-        $config->aes_key = env('MEITUAN_APP_SECRET');
-        $config->aes_iv = env('MEITUAN_AES_KEY', '');
-        $config->api_url = env('MEITUAN_API_URL', 'https://connectivity-adapter.meituan.com');
-        $config->callback_url = env('MEITUAN_WEBHOOK_URL', '');
+        $config->account = config('services.meituan.partner_id', 0);
+        $config->secret_key = $appKey;
+        $config->aes_key = $appSecret;
+        $config->aes_iv = config('services.meituan.aes_key', '');
+        $config->api_url = config('services.meituan.api_url', 'https://connectivity-adapter.meituan.com');
+        $config->callback_url = config('services.meituan.webhook_url', '');
         $config->environment = 'production';
         $config->is_active = true;
         return $config;
@@ -76,8 +81,9 @@ class OtaConfigResolver
         $config->secret_key = $accountConfig->secret_key;
         $config->aes_key = $accountConfig->aes_key;
         $config->aes_iv = $accountConfig->aes_iv;
-        $config->api_url = env('CTRIP_PRICE_API_URL', 'https://ttdopen.ctrip.com/api/product/price.do');
-        $config->callback_url = env('CTRIP_WEBHOOK_URL', '');
+        $config->api_url = config('services.ctrip.price_api_url')
+            ?: 'https://ttdopen.ctrip.com/api/product/price.do';
+        $config->callback_url = config('services.ctrip.webhook_url', '');
         $config->environment = 'production';
         $config->is_active = true;
 
