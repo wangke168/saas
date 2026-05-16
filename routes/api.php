@@ -380,4 +380,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [\App\Http\Controllers\Admin\ScenicSpotOtaAutoAcceptConfigController::class, 'save']);
         Route::delete('/{config}', [\App\Http\Controllers\Admin\ScenicSpotOtaAutoAcceptConfigController::class, 'destroy']);
     });
+
+    // 景区-OTA-库存推送缓冲配置（仅超级管理员）
+    Route::prefix('admin/scenic-spot-ota-inventory-push')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\ScenicSpotOtaInventoryPushConfigController::class, 'index']);
+        Route::post('/', [\App\Http\Controllers\Admin\ScenicSpotOtaInventoryPushConfigController::class, 'save']);
+        Route::delete('/{config}', [\App\Http\Controllers\Admin\ScenicSpotOtaInventoryPushConfigController::class, 'destroy']);
+    });
 });

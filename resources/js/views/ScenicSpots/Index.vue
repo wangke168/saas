@@ -41,13 +41,28 @@
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="420" fixed="right">
+                <el-table-column label="操作" width="280" fixed="right">
                     <template #default="{ row }">
-                        <el-button size="small" @click="handleEdit(row)">编辑</el-button>
-                        <el-button size="small" type="info" @click="handleConfigResource(row)">配置资源方</el-button>
-                        <el-button size="small" type="warning" @click="handleConfigOtaAccount(row)">OTA账号</el-button>
-                        <el-button size="small" type="success" @click="handleConfigAutoAccept(row)">自动接单</el-button>
-                        <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+                            <el-button size="small" @click="handleEdit(row)">编辑</el-button>
+                            <el-dropdown trigger="click" @command="(cmd) => handleScenicMoreCommand(cmd, row)">
+                                <el-button size="small" type="primary">
+                                    更多配置
+                                    <el-icon class="scenic-op-dropdown-icon"><ArrowDown /></el-icon>
+                                </el-button>
+                                <template #dropdown>
+                                    <el-dropdown-menu>
+                                        <el-dropdown-item command="resource">配置资源方</el-dropdown-item>
+                                        <el-dropdown-item command="ota">OTA 账号</el-dropdown-item>
+                                        <el-dropdown-item command="autoAccept">自动接单</el-dropdown-item>
+                                        <el-dropdown-item command="inventoryPush" divided>
+                                            库存推送（OTA 缓冲）
+                                        </el-dropdown-item>
+                                    </el-dropdown-menu>
+                                </template>
+                            </el-dropdown>
+                            <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+                        </div>
                     </template>
                 </el-table-column>
             </el-table>
@@ -431,10 +446,12 @@
                     </template>
                 </el-table-column>
                 <el-table-column prop="account" label="账号" />
-                <el-table-column label="操作" width="120" fixed="right">
+                <el-table-column label="操作" width="168" fixed="right">
                     <template #default="{ row }">
-                        <el-button size="small" link type="primary" @click="handleEditOtaAccount(row)">编辑</el-button>
-                        <el-button size="small" link type="danger" @click="handleDeleteOtaAccount(row)">删除</el-button>
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                            <el-button size="small" type="primary" @click="handleEditOtaAccount(row)">编辑</el-button>
+                            <el-button size="small" type="danger" @click="handleDeleteOtaAccount(row)">删除</el-button>
+                        </div>
                     </template>
                 </el-table-column>
             </el-table>
@@ -546,10 +563,12 @@
                         </el-tag>
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="120" fixed="right">
+                <el-table-column label="操作" width="168" fixed="right">
                     <template #default="{ row }">
-                        <el-button size="small" link type="primary" @click="handleEditAutoAccept(row)">编辑</el-button>
-                        <el-button size="small" link type="danger" @click="handleDeleteAutoAccept(row)">删除</el-button>
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                            <el-button size="small" type="primary" @click="handleEditAutoAccept(row)">编辑</el-button>
+                            <el-button size="small" type="danger" @click="handleDeleteAutoAccept(row)">删除</el-button>
+                        </div>
                     </template>
                 </el-table-column>
             </el-table>
@@ -601,6 +620,91 @@
                 </el-form-item>
             </el-form>
         </el-dialog>
+
+        <!-- 库存推送缓冲配置（真实库存≤阈值时向携程/美团推0） -->
+        <el-dialog
+            v-model="inventoryPushDialogVisible"
+            :title="`库存推送配置 - ${currentInventoryPushScenicSpot?.name || ''}`"
+            width="600px"
+            @close="closeInventoryPushDialog"
+        >
+            <el-alert
+                type="info"
+                :closable="false"
+                style="margin-bottom: 16px;"
+                title="说明：按景区与平台单独设置「推送缓冲值」。真实可售库存 ≤ 此值时，推送到携程/美团的库存为 0；未配置的平台使用系统全局默认（默认 0，可由环境变量 INVENTORY_OTA_PUSH_ZERO_THRESHOLD 覆盖）。"
+            />
+            <el-table :data="inventoryPushList" v-loading="inventoryPushLoading" border size="small">
+                <el-table-column prop="ota_platform" label="平台" width="100">
+                    <template #default="{ row }">
+                        {{ row.ota_platform?.name || row.ota_platform?.code || '-' }}
+                    </template>
+                </el-table-column>
+                <el-table-column prop="push_zero_threshold" label="推送缓冲值" width="110">
+                    <template #default="{ row }">
+                        {{ row.push_zero_threshold ?? 0 }}
+                    </template>
+                </el-table-column>
+                <el-table-column prop="is_active" label="状态" width="80">
+                    <template #default="{ row }">
+                        <el-tag :type="row.is_active ? 'success' : 'danger'">
+                            {{ row.is_active ? '激活' : '未激活' }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column label="操作" width="168" fixed="right">
+                    <template #default="{ row }">
+                        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                            <el-button size="small" type="primary" @click="handleEditInventoryPush(row)">编辑</el-button>
+                            <el-button size="small" type="danger" @click="handleDeleteInventoryPush(row)">删除</el-button>
+                        </div>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <div style="margin-top: 12px;">
+                <el-button size="small" type="primary" @click="showAddInventoryPushForm">添加配置</el-button>
+            </div>
+            <el-form
+                v-if="inventoryPushFormVisible"
+                ref="inventoryPushFormRef"
+                :model="inventoryPushForm"
+                :rules="inventoryPushFormRules"
+                label-width="110px"
+                style="margin-top: 16px; padding: 12px; background: var(--el-fill-color-light); border-radius: 4px;"
+            >
+                <el-form-item label="平台" prop="ota_platform_id">
+                    <el-select
+                        v-model="inventoryPushForm.ota_platform_id"
+                        placeholder="请选择平台"
+                        style="width: 100%"
+                        :disabled="!!inventoryPushEditingId"
+                    >
+                        <el-option
+                            v-for="p in otaPlatformsForInventoryPush"
+                            :key="p.id"
+                            :label="p.name"
+                            :value="p.id"
+                        />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="推送缓冲值" prop="push_zero_threshold">
+                    <el-input-number
+                        v-model="inventoryPushForm.push_zero_threshold"
+                        :min="0"
+                        :max="9999"
+                        placeholder="真实库存≤此值时推0"
+                    />
+                    <span style="margin-left: 8px; color: #909399; font-size: 12px;">真实库存 ≤ 此值时，推送到 OTA 为 0</span>
+                </el-form-item>
+                <el-form-item label="是否激活" prop="is_active">
+                    <el-switch v-model="inventoryPushForm.is_active" />
+                </el-form-item>
+                <el-form-item>
+                    <el-button size="small" @click="cancelInventoryPushForm">取消</el-button>
+                    <el-button size="small" type="primary" @click="submitInventoryPushForm" :loading="inventoryPushSubmitting">保存</el-button>
+                </el-form-item>
+            </el-form>
+        </el-dialog>
     </div>
 </template>
 
@@ -608,7 +712,7 @@
 import { ref, onMounted, computed } from 'vue';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Search } from '@element-plus/icons-vue';
+import { Search, ArrowDown } from '@element-plus/icons-vue';
 
 const scenicSpots = ref([]);
 const softwareProviders = ref([]);
@@ -893,6 +997,28 @@ const handleDelete = async (row) => {
             ElMessage.error('删除失败');
             console.error(error);
         }
+    }
+};
+
+/**
+ * 操作列「更多配置」下拉：资源方、OTA、自动接单、库存推送
+ */
+const handleScenicMoreCommand = (command, row) => {
+    switch (command) {
+        case 'resource':
+            handleConfigResource(row);
+            break;
+        case 'ota':
+            handleConfigOtaAccount(row);
+            break;
+        case 'autoAccept':
+            handleConfigAutoAccept(row);
+            break;
+        case 'inventoryPush':
+            handleConfigInventoryPush(row);
+            break;
+        default:
+            break;
     }
 };
 
@@ -1460,6 +1586,126 @@ const closeAutoAcceptDialog = () => {
     autoAcceptFormRef.value?.resetFields();
 };
 
+// ---------- 库存推送缓冲（OTA 推 0 阈值）----------
+const inventoryPushDialogVisible = ref(false);
+const currentInventoryPushScenicSpot = ref(null);
+const inventoryPushList = ref([]);
+const inventoryPushLoading = ref(false);
+const inventoryPushFormVisible = ref(false);
+const inventoryPushFormRef = ref(null);
+const inventoryPushSubmitting = ref(false);
+const inventoryPushEditingId = ref(null);
+const inventoryPushForm = ref({
+    ota_platform_id: null,
+    push_zero_threshold: 0,
+    is_active: true,
+});
+const inventoryPushFormRules = {
+    ota_platform_id: [{ required: true, message: '请选择平台', trigger: 'change' }],
+    push_zero_threshold: [{ required: true, message: '请输入缓冲值', trigger: 'blur' }],
+};
+
+const otaPlatformsForInventoryPush = computed(() => {
+    const configuredIds = inventoryPushList.value.map((item) => item.ota_platform_id);
+    return (otaPlatforms.value || []).filter((p) => !configuredIds.includes(p.id));
+});
+
+const handleConfigInventoryPush = async (row) => {
+    currentInventoryPushScenicSpot.value = row;
+    inventoryPushDialogVisible.value = true;
+    inventoryPushFormVisible.value = false;
+    inventoryPushEditingId.value = null;
+    await fetchInventoryPushList();
+};
+
+const fetchInventoryPushList = async () => {
+    if (!currentInventoryPushScenicSpot.value?.id) return;
+    inventoryPushLoading.value = true;
+    try {
+        const res = await axios.get('/admin/scenic-spot-ota-inventory-push', {
+            params: { scenic_spot_id: currentInventoryPushScenicSpot.value.id },
+        });
+        inventoryPushList.value = res.data.data || [];
+    } catch (e) {
+        ElMessage.error('获取库存推送配置失败');
+        console.error(e);
+    } finally {
+        inventoryPushLoading.value = false;
+    }
+};
+
+const showAddInventoryPushForm = () => {
+    inventoryPushEditingId.value = null;
+    inventoryPushForm.value = {
+        ota_platform_id: null,
+        push_zero_threshold: 0,
+        is_active: true,
+    };
+    inventoryPushFormVisible.value = true;
+};
+
+const handleEditInventoryPush = (row) => {
+    inventoryPushEditingId.value = row.id;
+    inventoryPushForm.value = {
+        ota_platform_id: row.ota_platform_id,
+        push_zero_threshold: row.push_zero_threshold ?? 0,
+        is_active: row.is_active,
+    };
+    inventoryPushFormVisible.value = true;
+};
+
+const cancelInventoryPushForm = () => {
+    inventoryPushFormVisible.value = false;
+    inventoryPushFormRef.value?.resetFields();
+};
+
+const submitInventoryPushForm = async () => {
+    if (!inventoryPushFormRef.value) return;
+    await inventoryPushFormRef.value.validate(async (valid) => {
+        if (!valid) return;
+        inventoryPushSubmitting.value = true;
+        try {
+            await axios.post('/admin/scenic-spot-ota-inventory-push', {
+                scenic_spot_id: currentInventoryPushScenicSpot.value.id,
+                ota_platform_id: inventoryPushForm.value.ota_platform_id,
+                push_zero_threshold: inventoryPushForm.value.push_zero_threshold,
+                is_active: inventoryPushForm.value.is_active,
+            });
+            ElMessage.success(inventoryPushEditingId.value ? '更新成功' : '添加成功');
+            inventoryPushFormVisible.value = false;
+            await fetchInventoryPushList();
+        } catch (e) {
+            ElMessage.error(e.response?.data?.message || '操作失败');
+        } finally {
+            inventoryPushSubmitting.value = false;
+        }
+    });
+};
+
+const handleDeleteInventoryPush = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            `确定删除该景区在「${row.ota_platform?.name || row.ota_platform?.code}」的库存推送配置？`,
+            '提示',
+            { type: 'warning' }
+        );
+        await axios.delete(`/admin/scenic-spot-ota-inventory-push/${row.id}`);
+        ElMessage.success('已删除');
+        await fetchInventoryPushList();
+    } catch (e) {
+        if (e !== 'cancel') {
+            ElMessage.error(e.response?.data?.message || '删除失败');
+        }
+    }
+};
+
+const closeInventoryPushDialog = () => {
+    currentInventoryPushScenicSpot.value = null;
+    inventoryPushList.value = [];
+    inventoryPushFormVisible.value = false;
+    inventoryPushFormRef.value?.resetFields();
+};
+
 onMounted(() => {
     fetchScenicSpots();
     fetchSoftwareProviders();
@@ -1470,5 +1716,10 @@ onMounted(() => {
 <style scoped>
 h2 {
     margin-bottom: 20px;
+}
+
+.scenic-op-dropdown-icon {
+    margin-left: 4px;
+    vertical-align: middle;
 }
 </style>

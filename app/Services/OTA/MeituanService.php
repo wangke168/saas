@@ -176,7 +176,7 @@ class MeituanService
                     
                     // 检查该日期是否关闭或按 OTA 规则视为无库存（<= 阈值会被推 0）
                     $checkData = $inventoryByDate[$checkDate];
-                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity']);
+                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity'], $product->scenic_spot_id, OtaPlatform::MEITUAN);
                     if ($checkData['is_closed'] || $otaQuantity <= 0) {
                         $canAccommodate = false;
                         break;
@@ -239,7 +239,7 @@ class MeituanService
                 'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
                 'mtPrice' => round(floatval($priceData['sale_price']), 2),
                 'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
-                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock), // 真实库存≤2时推0
+                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock, $product->scenic_spot_id, OtaPlatform::MEITUAN),
                 'attr' => null,
             ];
         }
@@ -352,7 +352,7 @@ class MeituanService
                     
                     // 检查该日期是否关闭或按 OTA 规则视为无库存（<= 阈值会被推 0）
                     $checkData = $inventoryByDate[$checkDate];
-                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity']);
+                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity'], $product->scenic_spot_id, OtaPlatform::MEITUAN);
                     if ($checkData['is_closed'] || $otaQuantity <= 0) {
                         $canAccommodate = false;
                         break;
@@ -415,7 +415,7 @@ class MeituanService
                 'marketPrice' => round(floatval($priceData['market_price'] ?? $priceData['sale_price']), 2),
                 'mtPrice' => round(floatval($priceData['sale_price']), 2),
                 'settlementPrice' => round(floatval($priceData['settlement_price']), 2),
-                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock), // 真实库存≤2时推0
+                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock, $product->scenic_spot_id, OtaPlatform::MEITUAN),
                 'attr' => null,
             ];
         }
@@ -502,7 +502,7 @@ class MeituanService
                     
                     // 检查该日期是否关闭或按 OTA 规则视为无库存（<= 阈值会被推 0）
                     $checkData = $inventoryByDate[$checkDate];
-                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity']);
+                    $otaQuantity = OtaInventoryHelper::adjustQuantityForOta((int) $checkData['quantity'], $product->scenic_spot_id, OtaPlatform::MEITUAN);
                     if ($checkData['is_closed'] || $otaQuantity <= 0) {
                         $canAccommodate = false;
                         break;
@@ -578,7 +578,7 @@ class MeituanService
                 'marketPrice' => $marketPriceInYuan,
                 'mtPrice' => $salePriceInYuan,
                 'settlementPrice' => $settlementPriceInYuan,
-                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock), // 真实库存≤2时推0
+                'stock' => OtaInventoryHelper::adjustQuantityForOta((int) $stock, $product->scenic_spot_id, OtaPlatform::MEITUAN),
                 'attr' => null,
             ];
         }

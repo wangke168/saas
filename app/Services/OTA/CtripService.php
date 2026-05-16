@@ -349,7 +349,7 @@ class CtripService
             }
 
             $bodyData['inventorys'][] = [
-                'quantity' => OtaInventoryHelper::adjustQuantityForOta($totalQuantity), // 真实库存≤2时推0
+                'quantity' => OtaInventoryHelper::adjustQuantityForOta($totalQuantity, $product->scenic_spot_id, OtaPlatform::CTRIP),
                 // 注意：非指定日期模式不包含 date 字段
             ];
         } else {
@@ -366,7 +366,7 @@ class CtripService
                 }
 
                 $inventoryItem = [
-                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt), // 真实库存≤2时推0
+                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt, $product->scenic_spot_id, OtaPlatform::CTRIP),
                     'date' => $date,
                 ];
 
@@ -991,7 +991,7 @@ class CtripService
             }
 
             $bodyData['inventorys'][] = [
-                'quantity' => OtaInventoryHelper::adjustQuantityForOta($totalQuantity), // 真实库存≤2时推0
+                'quantity' => OtaInventoryHelper::adjustQuantityForOta($totalQuantity, $product->scenic_spot_id, OtaPlatform::CTRIP),
             ];
         } else {
             foreach ($inventoryByDate as $date => $quantity) {
@@ -1004,7 +1004,7 @@ class CtripService
                 }
 
                 $bodyData['inventorys'][] = [
-                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt), // 真实库存≤2时推0
+                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt, $product->scenic_spot_id, OtaPlatform::CTRIP),
                     'date' => $date,
                 ];
             }

@@ -498,7 +498,7 @@ class PkgProductOtaSyncService
                 $quantityInt = max(0, (int) $quantity);
                 
                 $bodyData['inventorys'][] = [
-                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt),
+                    'quantity' => OtaInventoryHelper::adjustQuantityForOta($quantityInt, $product->scenic_spot_id, OtaPlatform::CTRIP),
                     'date' => $date,
                 ];
             }

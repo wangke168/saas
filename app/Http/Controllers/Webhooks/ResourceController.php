@@ -577,7 +577,8 @@ class ResourceController extends Controller
                             if (!empty($changedDates) && config('inventory.enable_auto_push_inventory_to_ota', true)) {
                                 $pushToMeituan = $this->computePushToMeituanForResource(
                                     $dirtyInventories,
-                                    $existingInventories
+                                    $existingInventories,
+                                    $hotel->scenic_spot_id ?? null
                                 );
                                 if (!$pushToMeituan) {
                                     Log::info('资源方库存推送：本次变更未满足美团推送条件（无库存跨越阈值），不推美团', [
@@ -648,15 +649,15 @@ class ResourceController extends Controller
     }
 
     /**
-     * 根据本批变更计算是否推送到美团：仅当存在「变紧」(→≤2) 或「恢复」(≤2→>2) 时为 true
+     * 根据本批变更计算是否推送到美团：仅当存在「变紧」(→≤阈值) 或「恢复」(≤阈值→>阈值) 时为 true
      *
      * @param array $dirtyInventories 本批要写入的新数据（含 date、available_quantity）
      * @param \Illuminate\Support\Collection $existingInventories 变更前已存在的库存，key 为 Y-m-d
      * @return bool
      */
-    protected function computePushToMeituanForResource(array $dirtyInventories, $existingInventories): bool
+    protected function computePushToMeituanForResource(array $dirtyInventories, $existingInventories, ?int $scenicSpotId = null): bool
     {
-        $threshold = OtaInventoryHelper::getZeroThreshold();
+        $threshold = OtaInventoryHelper::getZeroThreshold($scenicSpotId, OtaPlatformEnum::MEITUAN);
 
         foreach ($dirtyInventories as $item) {
             $dateStr = isset($item['date']) ? (\Carbon\Carbon::parse($item['date'])->format('Y-m-d')) : null;

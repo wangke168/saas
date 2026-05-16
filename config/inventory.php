@@ -18,4 +18,6 @@ return [
 
     'push_delay_seconds' => (int) env('INVENTORY_PUSH_DELAY_SECONDS', 5),
 
+    'ota_push_zero_threshold' => (int) env('INVENTORY_OTA_PUSH_ZERO_THRESHOLD', 0),
+
 ];

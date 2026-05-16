@@ -5,7 +5,7 @@ namespace App\Observers;
 use App\Models\Inventory;
 use App\Enums\PriceSource;
 use App\Jobs\PushChangedInventoryToOtaJob;
-use App\Models\OtaPlatform as OtaPlatformModel;
+use App\Enums\OtaPlatform;
 use App\Services\OTA\OtaInventoryHelper;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -81,7 +81,7 @@ class InventoryObserver
     protected function scheduleOtaPush(Inventory $inventory): void
     {
         try {
-            $roomType = $inventory->roomType;
+            $roomType = $inventory->roomType()->with('hotel:id,scenic_spot_id')->first();
             if (!$roomType) {
                 Log::warning('InventoryObserver：房型不存在', [
                     'inventory_id' => $inventory->id,
@@ -90,8 +90,9 @@ class InventoryObserver
                 return;
             }
 
+            $scenicSpotId = $roomType->hotel?->scenic_spot_id;
             $pushDelay = (int) config('inventory.push_delay_seconds', 5);
-            $threshold = OtaInventoryHelper::getZeroThreshold();
+            $threshold = OtaInventoryHelper::getZeroThreshold($scenicSpotId, OtaPlatform::MEITUAN);
 
             // 判断本次变更是否「变紧」或「恢复」，用于是否推美团
             $oldQty = Cache::pull("inventory_old_avail:{$inventory->id}");

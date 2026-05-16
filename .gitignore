@@ -24,6 +24,6 @@ Thumbs.db
 /storage/docs
 .cursorrules
 *.md
-/database/migrations
+
 sail_image.tar
 *.sh
