@@ -108,6 +108,7 @@
                     />
                     <el-button @click="handleFilter">筛选</el-button>
                     <el-button @click="resetFilter">重置</el-button>
+                    <el-button type="success" :loading="exporting" @click="openExportDialog">导出</el-button>
                 </div>
             </div>
 
@@ -151,14 +152,14 @@
                         <!-- 第二列：产品名称及景区标签 -->
                         <div class="body-col col-product">
                             <div class="product-name">{{ order.product?.name || '-' }}</div>
-                        <el-tag
+                            <el-tag
                                 v-if="order.product?.scenic_spot?.name"
-                            size="small"
+                                size="small"
                                 type="info"
                                 class="scenic-tag"
-                        >
+                            >
                                 {{ order.product.scenic_spot.name }}
-                        </el-tag>
+                            </el-tag>
                         </div>
 
                         <!-- 第三列：酒店信息 -->
@@ -169,7 +170,7 @@
                                 <div class="date-range">
                                     <template v-if="order.check_in_date || order.check_out_date">
                                         {{ formatDateRange(order.check_in_date, order.check_out_date, order.room_count) }}
-                    </template>
+                                    </template>
                                     <template v-else>-</template>
                                 </div>
                             </div>
@@ -312,6 +313,43 @@
                 :layout="paginationLayout"
             />
         </el-card>
+
+        <el-dialog
+            v-model="exportDialogVisible"
+            title="导出订单"
+            width="480px"
+            append-to-body
+            destroy-on-close
+        >
+            <p class="export-hint">
+                请在筛选区选择入住日期或预定日期范围（至少一种，各不超过3个月）。
+                两种日期范围为「或」关系，可与上方其他筛选条件组合。
+            </p>
+            <el-form label-width="90px">
+                <el-form-item label="订单状态">
+                    <el-select
+                        v-model="exportStatuses"
+                        multiple
+                        clearable
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="不选则导出全部状态"
+                        style="width: 100%;"
+                    >
+                        <el-option
+                            v-for="opt in orderStatusOptions"
+                            :key="opt.value"
+                            :label="opt.label"
+                            :value="opt.value"
+                        />
+                    </el-select>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="exportDialogVisible = false">取消</el-button>
+                <el-button type="primary" :loading="exporting" @click="handleExport">确认导出</el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
@@ -340,6 +378,20 @@ const operating = ref({});
 const selectedOrders = ref([]);
 const otaPlatforms = ref([]);
 const scenicSpots = ref([]);
+const exporting = ref(false);
+const exportDialogVisible = ref(false);
+const exportStatuses = ref([]);
+
+const orderStatusOptions = [
+    { value: 'paid_pending', label: '已支付/待确认' },
+    { value: 'confirming', label: '确认中' },
+    { value: 'confirmed', label: '预订成功' },
+    { value: 'rejected', label: '预订失败/拒单' },
+    { value: 'cancel_requested', label: '申请取消中' },
+    { value: 'cancel_rejected', label: '取消拒绝' },
+    { value: 'cancel_approved', label: '取消通过' },
+    { value: 'verified', label: '核销订单' },
+];
 
 // 响应式分页布局
 const paginationLayout = ref('total, sizes, prev, pager, next, jumper');
@@ -448,6 +500,141 @@ const resetFilter = () => {
         created_at_range: null,
     };
     handleFilter();
+};
+
+const isWithinThreeMonths = (start, end) => {
+    const startDate = new Date(`${start}T00:00:00`);
+    const endDate = new Date(`${end}T00:00:00`);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
+        return false;
+    }
+    const maxDate = new Date(startDate);
+    maxDate.setMonth(maxDate.getMonth() + 3);
+    return endDate <= maxDate;
+};
+
+const validateExportDateRanges = () => {
+    const checkIn = filters.value.check_in_date_range;
+    const created = filters.value.created_at_range;
+    const hasCheckIn = Array.isArray(checkIn) && checkIn.length === 2 && checkIn[0] && checkIn[1];
+    const hasCreated = Array.isArray(created) && created.length === 2 && created[0] && created[1];
+
+    if (!hasCheckIn && !hasCreated) {
+        ElMessage.warning('请至少选择入住日期范围或预定日期范围');
+        return false;
+    }
+
+    if (hasCheckIn && !isWithinThreeMonths(checkIn[0], checkIn[1])) {
+        ElMessage.warning('入住日期范围最长不能超过3个月');
+        return false;
+    }
+
+    if (hasCreated && !isWithinThreeMonths(created[0], created[1])) {
+        ElMessage.warning('预定日期范围最长不能超过3个月');
+        return false;
+    }
+
+    return true;
+};
+
+const buildExportParams = () => {
+    const params = {};
+
+    if (filters.value.order_no) {
+        params.order_no = filters.value.order_no;
+    }
+    if (filters.value.ota_order_no) {
+        params.ota_order_no = filters.value.ota_order_no;
+    }
+    if (filters.value.contact_name) {
+        params.contact_name = filters.value.contact_name;
+    }
+    const contactPhone = filters.value.contact_phone?.trim();
+    if (contactPhone) {
+        params.contact_phone = contactPhone;
+    }
+    if (filters.value.ota_platform_id) {
+        params.ota_platform_id = filters.value.ota_platform_id;
+    }
+    if (filters.value.scenic_spot_id) {
+        params.scenic_spot_id = filters.value.scenic_spot_id;
+    }
+    if (filters.value.check_in_date_range?.length === 2) {
+        params.check_in_date_start = filters.value.check_in_date_range[0];
+        params.check_in_date_end = filters.value.check_in_date_range[1];
+    }
+    if (filters.value.created_at_range?.length === 2) {
+        params.created_at_start = filters.value.created_at_range[0];
+        params.created_at_end = filters.value.created_at_range[1];
+    }
+    if (exportStatuses.value.length > 0) {
+        params.status = exportStatuses.value;
+    }
+
+    return params;
+};
+
+const openExportDialog = () => {
+    if (!validateExportDateRanges()) {
+        return;
+    }
+    exportDialogVisible.value = true;
+};
+
+const handleExport = async () => {
+    if (!validateExportDateRanges()) {
+        return;
+    }
+
+    exporting.value = true;
+    try {
+        const response = await axios.get('/orders/export', {
+            params: buildExportParams(),
+            responseType: 'blob',
+            validateStatus: (status) => status < 500,
+        });
+
+        const contentType = response.headers['content-type'] || '';
+
+        if (contentType.includes('application/json') || response.status >= 400) {
+            const text = await response.data.text();
+            let errorMessage = '导出失败';
+            try {
+                const errorData = JSON.parse(text);
+                errorMessage = errorData.message || errorData.errors?.date_range?.[0] || errorMessage;
+                if (errorData.errors) {
+                    const firstError = Object.values(errorData.errors).flat()[0];
+                    if (firstError) {
+                        errorMessage = firstError;
+                    }
+                }
+            } catch {
+                errorMessage = text || errorMessage;
+            }
+            ElMessage.error(errorMessage);
+            return;
+        }
+
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `orders_export_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+
+        ElMessage.success('导出成功');
+        exportDialogVisible.value = false;
+    } catch (error) {
+        let message = '导出失败';
+        if (error.response?.data?.message) {
+            message = error.response.data.message;
+        }
+        ElMessage.error(message);
+    } finally {
+        exporting.value = false;
+    }
 };
 
 const formatPrice = (price) => {
@@ -1294,6 +1481,13 @@ onUnmounted(() => {
         flex: 0 0 auto;
         min-width: calc(50% - 6px);
     }
+}
+
+.export-hint {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: #606266;
+    line-height: 1.6;
 }
 
 /* 筛选条件区域 */

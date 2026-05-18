@@ -221,6 +221,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // 订单管理
     Route::prefix('orders')->group(function () {
         Route::get('/', [\App\Http\Controllers\OrderController::class, 'index']);
+        Route::get('/export', [\App\Http\Controllers\OrderController::class, 'export']);
         Route::get('/{order}', [\App\Http\Controllers\OrderController::class, 'show']);
         Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
         // 订单操作

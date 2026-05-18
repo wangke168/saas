@@ -3,11 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Enums\OrderStatus;
+use App\Http\Requests\OrderExportRequest;
 use App\Models\Order;
+use App\Services\OrderExportService;
 use App\Services\OrderOperationService;
 use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class OrderController extends Controller
 {
@@ -100,6 +103,16 @@ class OrderController extends Controller
             ->paginate($request->get('per_page', 15));
 
         return response()->json($orders);
+    }
+
+    /**
+     * 导出订单（对账）
+     */
+    public function export(OrderExportRequest $request, OrderExportService $orderExportService): Response
+    {
+        $this->authorize('viewAny', Order::class);
+
+        return $orderExportService->export($request);
     }
 
     /**
