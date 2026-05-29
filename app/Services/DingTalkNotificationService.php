@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\OrderStatus;
 use App\Enums\UserRole;
 use App\Models\ExceptionOrder;
 use App\Models\Order;
@@ -337,8 +338,59 @@ class DingTalkNotificationService
     }
 
     /**
+     * 美团强制取消/已退款/关单（未经 cancel_requested）通知
+     */
+    public function sendMeituanForceCancelledNotification(
+        Order $order,
+        string $source,
+        string $reason,
+        OrderStatus $previousStatus,
+        ?int $refundMessageType = null,
+        ?int $closeType = null,
+    ): bool {
+        Log::info('DingTalkNotificationService: 开始发送美团强制取消通知', [
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+            'source' => $source,
+            'previous_status' => $previousStatus->value,
+        ]);
+
+        if (! $this->isEnabled()) {
+            return false;
+        }
+
+        $order->load([
+            'otaPlatform',
+            'product.scenicSpot',
+            'hotel',
+            'roomType',
+        ]);
+
+        $users = $this->getUsersToNotify($order);
+
+        if ($users->isEmpty()) {
+            Log::warning('钉钉通知：美团强制取消未找到需要通知的用户', [
+                'order_id' => $order->id,
+            ]);
+
+            return false;
+        }
+
+        $message = $this->buildMeituanForceCancelledMessage(
+            $order,
+            $source,
+            $reason,
+            $previousStatus,
+            $refundMessageType,
+            $closeType,
+        );
+
+        return $this->sendMessageForOrder($order, $message, '🚨 美团强制取消');
+    }
+
+    /**
      * 获取需要通知的用户
-     * 
+     *
      * @return \Illuminate\Support\Collection
      */
     protected function getUsersToNotify(Order $order)
@@ -651,6 +703,62 @@ class DingTalkNotificationService
         $message .= "**订单状态：** {$statusLabel}\n\n";
         $message .= "---\n";
         $message .= "⏰ 确认时间：{$order->updated_at}";
+
+        return $message;
+    }
+
+    /**
+     * 构建美团强制取消通知消息
+     */
+    protected function buildMeituanForceCancelledMessage(
+        Order $order,
+        string $source,
+        string $reason,
+        OrderStatus $previousStatus,
+        ?int $refundMessageType = null,
+        ?int $closeType = null,
+    ): string {
+        $scenicSpotName = $order->product->scenicSpot->name ?? '未知景区';
+        $productName = $order->product->name ?? '未知产品';
+        $otaPlatformName = $order->otaPlatform->name ?? '未知平台';
+        $totalAmount = $order->total_amount ? number_format((float) $order->total_amount, 2) : '0.00';
+        $cancelledAt = $order->cancelled_at ?? $order->updated_at;
+        $sourceLabel = $source === 'close' ? '订单关闭' : '已退款消息';
+        $previousStatusLabel = $previousStatus->label();
+
+        $message = "[知会]\n\n";
+        $message .= "# 🚨 美团强制取消（{$sourceLabel}）\n\n";
+        $message .= "**订单号：** {$order->order_no}\n";
+        $message .= "**OTA平台：** {$otaPlatformName}\n\n";
+        $message .= "**OTA订单号：** {$order->ota_order_no}\n\n";
+        $message .= "**景区：** {$scenicSpotName}\n\n";
+        $message .= "**产品：** {$productName}\n\n";
+        $message .= "**变更前状态：** {$previousStatusLabel}\n\n";
+        $message .= "**当前状态：** 取消通过\n\n";
+
+        if ($refundMessageType !== null) {
+            $message .= "**退款消息类型(refundMessageType)：** {$refundMessageType}\n\n";
+        }
+        if ($closeType !== null) {
+            $message .= "**关闭类型(closeType)：** {$closeType}\n\n";
+        }
+        if ($reason !== '') {
+            $message .= "**原因：** {$reason}\n\n";
+        }
+
+        if ($previousStatus === OrderStatus::CONFIRMED) {
+            $message .= "**⚠️ 提示：** 本地曾为「预订成功」，请核对是否与美团侧状态一致。\n\n";
+        }
+
+        $message .= "**取消时间：** {$cancelledAt}\n\n";
+        $message .= "**原订单信息：**\n";
+        $message .= "- 联系人：{$order->contact_name}\n";
+        $message .= "- 入住日期：{$order->check_in_date->format('Y-m-d')}\n";
+        $message .= "- 离店日期：{$order->check_out_date->format('Y-m-d')}\n";
+        $message .= "- 房间数：{$order->room_count}\n";
+        $message .= "- 订单金额：¥{$totalAmount}元\n\n";
+        $message .= "---\n";
+        $message .= "⏰ 通知时间：".now()->toDateTimeString();
 
         return $message;
     }

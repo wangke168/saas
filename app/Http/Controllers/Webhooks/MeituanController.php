@@ -24,6 +24,7 @@ use App\Services\OTA\OtaAutoAcceptConfigService;
 use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use App\Services\Resource\ResourceServiceFactory;
+use App\Jobs\NotifyMeituanOrderForceCancelledJob;
 use App\Services\OTA\MeituanService;
 use App\Services\OTA\NotificationFactory;
 use App\Services\ProductUnavailableNightService;
@@ -1969,6 +1970,8 @@ class MeituanController extends Controller
                 'remark' => $remark,
             ]);
 
+            $statusBeforeUpdate = $order->status;
+
             // 更新订单状态为CANCEL_APPROVED
             try {
                 $this->orderService->updateOrderStatus(
@@ -2028,6 +2031,16 @@ class MeituanController extends Controller
                 ]);
                 // 库存释放失败不影响主流程，继续执行
             }
+
+            $order->refresh();
+            $this->dispatchMeituanForceCancelledDingTalkIfNeeded(
+                $order,
+                $statusBeforeUpdate,
+                'refunded',
+                $remark,
+                (int) $refundMessageType,
+                null,
+            );
 
             Log::info('美团已退款消息：处理成功', [
                 'order_id' => $order->id,
@@ -2130,18 +2143,21 @@ class MeituanController extends Controller
                 }
             }
 
+            $statusBeforeUpdate = $order->status;
+            $closeRemark = $closeReason.'，closeType='.$closeType;
+
             $this->orderService->updateOrderStatus(
                 $order,
                 OrderStatus::CANCEL_APPROVED,
-                $closeReason . '，closeType=' . $closeType
+                $closeRemark
             );
 
             // 记录closeType到订单日志
             \App\Models\OrderLog::create([
                 'order_id' => $order->id,
-                'from_status' => $order->status->value,
+                'from_status' => $statusBeforeUpdate->value,
                 'to_status' => OrderStatus::CANCEL_APPROVED->value,
-                'remark' => $closeReason . '，closeType=' . $closeType,
+                'remark' => $closeRemark,
             ]);
 
             // 释放库存
@@ -2152,6 +2168,16 @@ class MeituanController extends Controller
                     'error' => $releaseResult['message'],
                 ]);
             }
+
+            $order->refresh();
+            $this->dispatchMeituanForceCancelledDingTalkIfNeeded(
+                $order,
+                $statusBeforeUpdate,
+                'close',
+                $closeRemark,
+                null,
+                $closeType,
+            );
 
             // 订单关闭接口响应格式：{code, describe, partnerId}，不包含body字段
             return $this->successResponse(
@@ -2174,6 +2200,62 @@ class MeituanController extends Controller
             // 根据请求加密状态决定响应是否加密
             $encryptResponse = $request->header('X-Encryption-Status') === 'encrypted';
             return $this->errorResponse(599, '系统处理异常', $partnerId, $encryptResponse);
+        }
+    }
+
+    /**
+     * 美团强制关单/已退款：是否需发送钉钉（跳过 cancel_requested 正常审批流及幂等）
+     */
+    protected function shouldDispatchMeituanForceCancelledDingTalk(OrderStatus $statusBeforeUpdate): bool
+    {
+        return ! in_array($statusBeforeUpdate, [
+            OrderStatus::CANCEL_APPROVED,
+            OrderStatus::CANCEL_REQUESTED,
+        ], true);
+    }
+
+    /**
+     * 派发美团强制取消钉钉通知
+     */
+    protected function dispatchMeituanForceCancelledDingTalkIfNeeded(
+        Order $order,
+        OrderStatus $statusBeforeUpdate,
+        string $source,
+        string $reason,
+        ?int $refundMessageType = null,
+        ?int $closeType = null,
+    ): void {
+        if (! $this->shouldDispatchMeituanForceCancelledDingTalk($statusBeforeUpdate)) {
+            Log::info('美团强制取消：跳过钉钉通知', [
+                'order_id' => $order->id,
+                'previous_status' => $statusBeforeUpdate->value,
+                'source' => $source,
+            ]);
+
+            return;
+        }
+
+        try {
+            NotifyMeituanOrderForceCancelledJob::dispatch(
+                $order,
+                $source,
+                $reason,
+                $statusBeforeUpdate,
+                $refundMessageType,
+                $closeType,
+            );
+
+            Log::info('美团强制取消：已派发钉钉通知任务', [
+                'order_id' => $order->id,
+                'source' => $source,
+                'previous_status' => $statusBeforeUpdate->value,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('美团强制取消：派发钉钉通知任务失败', [
+                'order_id' => $order->id,
+                'source' => $source,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
