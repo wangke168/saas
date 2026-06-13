@@ -5,11 +5,11 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
+/**
+ * 补全 orders 拆单字段（兼容生产库已执行旧迁移但缺列的情况）。
+ */
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         if (! Schema::hasColumn('orders', 'parent_order_id')) {
@@ -19,7 +19,7 @@ return new class extends Migration
                     ->after('id')
                     ->constrained('orders')
                     ->nullOnDelete()
-                    ->comment('父订单ID（打包订单的子订单使用）');
+                    ->comment('父订单ID');
             });
         }
 
@@ -27,8 +27,8 @@ return new class extends Migration
             Schema::table('orders', function (Blueprint $table): void {
                 $table->enum('order_type', ['main', 'ticket', 'hotel'])
                     ->default('main')
-                    ->after('parent_order_id')
-                    ->comment('订单类型: main=主订单, ticket=门票子订单, hotel=酒店子订单');
+                    ->after(Schema::hasColumn('orders', 'parent_order_id') ? 'parent_order_id' : 'id')
+                    ->comment('订单类型: main/ticket/hotel');
             });
         }
 
@@ -39,7 +39,7 @@ return new class extends Migration
                     ->after('order_type')
                     ->constrained('products')
                     ->nullOnDelete()
-                    ->comment('门票产品ID（主订单和门票子订单使用）');
+                    ->comment('门票产品ID');
             });
         }
 
@@ -50,63 +50,8 @@ return new class extends Migration
                     ->after('ticket_product_id')
                     ->constrained('orders')
                     ->nullOnDelete()
-                    ->comment('关联订单ID（门票订单关联酒店订单，反之亦然）');
+                    ->comment('关联订单ID');
             });
-        }
-
-        $this->ensureIndex('orders', 'orders_parent_order_id_index', ['parent_order_id']);
-        $this->ensureIndex('orders', 'orders_order_type_index', ['order_type']);
-        $this->ensureIndex('orders', 'orders_related_order_id_index', ['related_order_id']);
-
-        $this->backfillOrderTypes();
-    }
-
-    /**
-     * Reverse the migrations.
-     */
-    public function down(): void
-    {
-        Schema::table('orders', function (Blueprint $table): void {
-            if (Schema::hasColumn('orders', 'related_order_id')) {
-                $table->dropForeign(['related_order_id']);
-                $table->dropIndex(['related_order_id']);
-                $table->dropColumn('related_order_id');
-            }
-
-            if (Schema::hasColumn('orders', 'ticket_product_id')) {
-                $table->dropForeign(['ticket_product_id']);
-                $table->dropColumn('ticket_product_id');
-            }
-
-            if (Schema::hasColumn('orders', 'order_type')) {
-                $table->dropIndex(['order_type']);
-                $table->dropColumn('order_type');
-            }
-
-            if (Schema::hasColumn('orders', 'parent_order_id')) {
-                $table->dropForeign(['parent_order_id']);
-                $table->dropIndex(['parent_order_id']);
-                $table->dropColumn('parent_order_id');
-            }
-        });
-    }
-
-    private function ensureIndex(string $table, string $indexName, array $columns): void
-    {
-        $exists = collect(DB::select('SHOW INDEX FROM `'.$table.'` WHERE Key_name = ?', [$indexName]))->isNotEmpty();
-        if ($exists) {
-            return;
-        }
-
-        Schema::table($table, function (Blueprint $blueprint) use ($columns): void {
-            $blueprint->index($columns);
-        });
-    }
-
-    private function backfillOrderTypes(): void
-    {
-        if (! Schema::hasColumn('orders', 'order_type')) {
-            return;
         }
 
         if (Schema::hasTable('order_bookings') && Schema::hasColumn('order_bookings', 'fulfilled_order_id')) {
@@ -132,6 +77,12 @@ return new class extends Migration
 
         DB::table('orders')
             ->whereNull('parent_order_id')
+            ->where('order_type', 'main')
             ->update(['order_type' => 'main']);
+    }
+
+    public function down(): void
+    {
+        // 生产补列迁移不回滚
     }
 };

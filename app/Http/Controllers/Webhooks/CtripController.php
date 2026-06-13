@@ -503,15 +503,23 @@ class CtripController extends Controller
                     return $this->errorResponse('1002', '供应商PLU不存在/错误');
                 }
 
-                $regionMessage = ProductIdRegionRestriction::validateOrMessage(
-                    $product,
-                    ProductIdRegionRestriction::extractIdCardsFromCtripPassengers(is_array($passengers) ? $passengers : [])
-                );
+                $extractedIdCards = ProductIdRegionRestriction::extractIdCardsFromCtripPassengers(is_array($passengers) ? $passengers : []);
+                $regionMessage = ProductIdRegionRestriction::validateOrMessage($product, $extractedIdCards);
                 if ($regionMessage !== null) {
                     DB::rollBack();
+                    $diagnosis = ProductIdRegionRestriction::diagnoseFailure($product, $extractedIdCards);
                     Log::warning('携程预下单：地区限制校验未通过', [
                         'product_id' => $product->id,
+                        'product_code' => $product->code,
                         'ctrip_order_id' => $ctripOrderId,
+                        'restriction_enabled' => (bool) $product->id_region_restriction_enabled,
+                        'configured_prefixes' => ProductIdRegionRestriction::resolvedPrefixes($product),
+                        'extracted_id_card_count' => count($extractedIdCards),
+                        'extracted_id_card_suffixes' => array_map(
+                            static fn (string $id): string => strlen($id) >= 4 ? ('***'.substr($id, -4)) : '***',
+                            $extractedIdCards
+                        ),
+                        'failure_reason' => $diagnosis['reason'] ?? 'unknown',
                     ]);
 
                     return $this->errorResponse('1006', $regionMessage);

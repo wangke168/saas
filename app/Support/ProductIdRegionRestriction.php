@@ -123,17 +123,58 @@ final class ProductIdRegionRestriction
                 continue;
             }
 
-            if (! self::isCtripIdCardCredentialType($passenger['cardType'] ?? $passenger['card_type'] ?? null)) {
+            $cardType = $passenger['cardType'] ?? $passenger['card_type'] ?? null;
+            $cardNo = strtoupper(trim((string) ($passenger['cardNo'] ?? $passenger['card_no'] ?? '')));
+            if ($cardNo === '') {
                 continue;
             }
 
-            $cardNo = strtoupper(trim((string) ($passenger['cardNo'] ?? $passenger['card_no'] ?? '')));
-            if ($cardNo !== '') {
-                $result[] = $cardNo;
+            // 携程 cardType：1=身份证, 2=护照；非身份证明确跳过
+            if (self::isCtripPassportCredentialType($cardType)) {
+                continue;
             }
+
+            if (! self::isCtripIdCardCredentialType($cardType) && ! self::looksLikeMainlandIdCard($cardNo)) {
+                continue;
+            }
+
+            $result[] = $cardNo;
         }
 
         return array_values(array_unique($result));
+    }
+
+    /**
+     * @return array{reason: string, id_cards: list<string>, prefixes: list<string>}|null
+     */
+    public static function diagnoseFailure(Product $product, array $idCards): ?array
+    {
+        if (! self::isEnabled($product)) {
+            return null;
+        }
+
+        $idCards = self::normalizeIdCards($idCards);
+        $prefixes = self::resolvedPrefixes($product);
+
+        if ($idCards === []) {
+            return [
+                'reason' => 'missing_id_card',
+                'id_cards' => [],
+                'prefixes' => $prefixes,
+            ];
+        }
+
+        foreach ($idCards as $idCard) {
+            if (! self::idCardMatchesAnyPrefix($idCard, $prefixes)) {
+                return [
+                    'reason' => 'prefix_mismatch',
+                    'id_cards' => $idCards,
+                    'prefixes' => $prefixes,
+                ];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -222,10 +263,24 @@ final class ProductIdRegionRestriction
     private static function isCtripIdCardCredentialType(mixed $type): bool
     {
         if ($type === null || $type === '') {
-            return true;
+            return false;
         }
 
-        return (string) $type === '1';
+        return (string) $type === '1' || intval($type) === 1;
+    }
+
+    private static function isCtripPassportCredentialType(mixed $type): bool
+    {
+        if ($type === null || $type === '') {
+            return false;
+        }
+
+        return (string) $type === '2' || intval($type) === 2;
+    }
+
+    private static function looksLikeMainlandIdCard(string $cardNo): bool
+    {
+        return (bool) preg_match('/^\d{17}[\dX]$/', $cardNo);
     }
 
     /**

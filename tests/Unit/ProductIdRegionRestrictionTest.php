@@ -23,6 +23,20 @@ class ProductIdRegionRestrictionTest extends TestCase
         $this->assertSame(['530627200211154118'], $idCards);
     }
 
+    public function test_ctrip_integer_card_type_one_is_treated_as_id_card(): void
+    {
+        $passengers = [
+            [
+                'cardType' => 1,
+                'cardNo' => '530627200211154118',
+            ],
+        ];
+
+        $idCards = ProductIdRegionRestriction::extractIdCardsFromCtripPassengers($passengers);
+
+        $this->assertSame(['530627200211154118'], $idCards);
+    }
+
     public function test_ctrip_passport_is_skipped(): void
     {
         $passengers = [
