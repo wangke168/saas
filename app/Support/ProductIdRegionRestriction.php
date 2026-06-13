@@ -123,7 +123,7 @@ final class ProductIdRegionRestriction
                 continue;
             }
 
-            if (! self::isIdCardCredentialType($passenger['cardType'] ?? $passenger['card_type'] ?? null)) {
+            if (! self::isCtripIdCardCredentialType($passenger['cardType'] ?? $passenger['card_type'] ?? null)) {
                 continue;
             }
 
@@ -171,7 +171,7 @@ final class ProductIdRegionRestriction
             }
 
             foreach ($credentials as $type => $no) {
-                if (! self::isIdCardCredentialType($type)) {
+                if (! self::isMeituanIdCardCredentialType($type)) {
                     continue;
                 }
 
@@ -216,7 +216,22 @@ final class ProductIdRegionRestriction
         return false;
     }
 
-    private static function isIdCardCredentialType(mixed $type): bool
+    /**
+     * 携程 cardType：1=身份证, 2=护照, 0/null=无需证件（与美团 credentialType 不同）
+     */
+    private static function isCtripIdCardCredentialType(mixed $type): bool
+    {
+        if ($type === null || $type === '') {
+            return true;
+        }
+
+        return (string) $type === '1';
+    }
+
+    /**
+     * 美团 credentialType：0=身份证, 1=护照
+     */
+    private static function isMeituanIdCardCredentialType(mixed $type): bool
     {
         if ($type === null || $type === '') {
             return true;
