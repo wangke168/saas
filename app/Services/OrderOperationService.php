@@ -13,6 +13,7 @@ use App\Services\OTA\Notifications\MeituanNotificationService;
 use App\Services\OTA\OtaConfigResolver;
 use App\Services\Resource\ResourceServiceFactory;
 use App\Services\Resource\ResourceServiceInterface;
+use App\Support\ManualResourceOrderNo;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -40,9 +41,14 @@ class OrderOperationService
      * @param  Order  $order  订单
      * @param  string|null  $remark  备注
      * @param  int|null  $operatorId  操作人ID（人工操作时）
+     * @param  string|null  $resourceOrderNo  资源方订单号（手工接单时填写）
      */
-    public function confirmOrder(Order $order, ?string $remark = null, ?int $operatorId = null): array
-    {
+    public function confirmOrder(
+        Order $order,
+        ?string $remark = null,
+        ?int $operatorId = null,
+        ?string $resourceOrderNo = null,
+    ): array {
         // 检查是否是异常订单（包括库存不匹配异常）
         $exceptionOrder = ExceptionOrder::where('order_id', $order->id)
             ->where('status', ExceptionOrderStatus::PENDING)
@@ -62,7 +68,7 @@ class OrderOperationService
                 $finalRemark = ($remark ?? '').'（库存不匹配异常订单，跳过库存检查）';
             }
 
-            return $this->confirmOrderManually($order, $finalRemark ?? '异常订单人工处理：接单', $operatorId, $exceptionOrder);
+            return $this->confirmOrderManually($order, $finalRemark ?? '异常订单人工处理：接单', $operatorId, $exceptionOrder, $resourceOrderNo);
         } elseif ($resourceService) {
             // 正常流程：系统直连时，不应该走到这里（已在 PayPreOrder 中异步处理）
             // 这里保留作为兜底逻辑，但记录警告日志
@@ -71,10 +77,10 @@ class OrderOperationService
                 'status' => $order->status->value,
             ]);
 
-            return $this->confirmOrderManually($order, $remark, $operatorId);
+            return $this->confirmOrderManually($order, $remark, $operatorId, null, $resourceOrderNo);
         } else {
             // 非系统直连：人工操作
-            return $this->confirmOrderManually($order, $remark, $operatorId);
+            return $this->confirmOrderManually($order, $remark, $operatorId, null, $resourceOrderNo);
         }
     }
 
@@ -225,9 +231,22 @@ class OrderOperationService
      * @param  int|null  $operatorId  操作人ID
      * @param  ExceptionOrder|null  $exceptionOrder  异常订单（如果存在）
      */
-    protected function confirmOrderManually(Order $order, ?string $remark, ?int $operatorId, ?ExceptionOrder $exceptionOrder = null): array
-    {
+    protected function confirmOrderManually(
+        Order $order,
+        ?string $remark,
+        ?int $operatorId,
+        ?ExceptionOrder $exceptionOrder = null,
+        ?string $resourceOrderNo = null,
+    ): array {
         try {
+            if ($resourceOrderNo !== null && $resourceOrderNo !== '') {
+                $trimmedNo = trim($resourceOrderNo);
+                if (! ManualResourceOrderNo::isPlaceholder($order->resource_order_no) && $order->resource_order_no) {
+                    throw new \Exception('订单已有资源方订单号，不可覆盖');
+                }
+                $order->update(['resource_order_no' => $trimmedNo]);
+            }
+
             // 重新加载订单关联数据，确保 otaPlatform 已加载
             $order->load(['otaPlatform']);
 
@@ -343,6 +362,73 @@ class OrderOperationService
             return [
                 'success' => false,
                 'message' => '接单失败：'.$e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * 补录资源方订单号（已接单后补填，不通知 OTA）
+     */
+    public function backfillResourceOrderNo(Order $order, string $resourceOrderNo, ?int $operatorId = null): array
+    {
+        $trimmedNo = trim($resourceOrderNo);
+
+        if ($trimmedNo === '') {
+            return [
+                'success' => false,
+                'message' => '请填写资源方订单号',
+            ];
+        }
+
+        if (! ManualResourceOrderNo::canBackfillResourceOrderNo($order)) {
+            return [
+                'success' => false,
+                'message' => '当前订单不允许补录资源方订单号',
+            ];
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $order->update(['resource_order_no' => $trimmedNo]);
+
+            \App\Models\OrderLog::create([
+                'order_id' => $order->id,
+                'from_status' => $order->status->value,
+                'to_status' => $order->status->value,
+                'remark' => '补录资源方订单号：'.$trimmedNo,
+                'operator_id' => $operatorId,
+            ]);
+
+            DB::commit();
+
+            Log::info('OrderOperationService::backfillResourceOrderNo: 补录成功', [
+                'order_id' => $order->id,
+                'resource_order_no' => $trimmedNo,
+                'operator_id' => $operatorId,
+            ]);
+
+            return [
+                'success' => true,
+                'message' => '资源方订单号补录成功',
+                'data' => [
+                    'order_id' => $order->id,
+                    'resource_order_no' => $trimmedNo,
+                ],
+            ];
+        } catch (\Exception $e) {
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
+
+            Log::error('OrderOperationService::backfillResourceOrderNo: 补录失败', [
+                'order_id' => $order->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => '补录失败：'.$e->getMessage(),
             ];
         }
     }

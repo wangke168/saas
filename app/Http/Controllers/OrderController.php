@@ -7,9 +7,10 @@ use App\Http\Requests\OrderExportRequest;
 use App\Models\Order;
 use App\Models\OrderBooking;
 use App\Services\OrderExportService;
-use App\Services\Presale\PresaleFulfillmentOrderService;
 use App\Services\OrderOperationService;
 use App\Services\OrderService;
+use App\Services\Presale\PresaleFulfillmentOrderService;
+use App\Support\ManualResourceOrderNo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -115,6 +116,10 @@ class OrderController extends Controller
             $flags = PresaleFulfillmentOrderService::presaleDisplayFlags($order);
             $order->setAttribute('is_presale_parent', $flags['is_presale_parent']);
             $order->setAttribute('is_presale_fulfillment_child', $flags['is_presale_fulfillment_child']);
+            $order->setAttribute(
+                'requires_resource_order_no_input',
+                ManualResourceOrderNo::needsResourceOrderNoOnConfirm($order)
+            );
 
             return $order;
         });
@@ -229,6 +234,8 @@ class OrderController extends Controller
                 ->all();
         }
 
+        $payload['can_backfill_resource_order_no'] = ManualResourceOrderNo::canBackfillResourceOrderNo($order);
+
         return response()->json($payload);
     }
 
@@ -277,12 +284,31 @@ class OrderController extends Controller
 
         $validated = $request->validate([
             'remark' => 'nullable|string|max:500',
+            'resource_order_no' => 'nullable|string|max:100',
         ]);
+
+        if (ManualResourceOrderNo::needsResourceOrderNoOnConfirm($order)
+            && empty(trim((string) ($validated['resource_order_no'] ?? '')))) {
+            return response()->json([
+                'success' => false,
+                'message' => '请填写资源方订单号',
+            ], 422);
+        }
+
+        if (! empty($validated['resource_order_no'])
+            && ! ManualResourceOrderNo::isPlaceholder($order->resource_order_no)
+            && $order->resource_order_no) {
+            return response()->json([
+                'success' => false,
+                'message' => '订单已有资源方订单号，不可覆盖',
+            ], 422);
+        }
 
         $result = $this->orderOperationService->confirmOrder(
             $order,
             $validated['remark'] ?? null,
-            $request->user()->id
+            $request->user()->id,
+            isset($validated['resource_order_no']) ? trim($validated['resource_order_no']) : null,
         );
 
         if ($result['success']) {
@@ -300,6 +326,40 @@ class OrderController extends Controller
             'success' => false,
             'message' => $result['message'],
         ], 400);
+    }
+
+    /**
+     * 补录资源方订单号
+     */
+    public function backfillResourceOrderNo(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('updateStatus', $order);
+
+        $validated = $request->validate([
+            'resource_order_no' => 'required|string|max:100',
+        ]);
+
+        $result = $this->orderOperationService->backfillResourceOrderNo(
+            $order,
+            trim($validated['resource_order_no']),
+            $request->user()->id,
+        );
+
+        if ($result['success']) {
+            $order->refresh();
+            $order->load(['logs']);
+
+            return response()->json([
+                'success' => true,
+                'message' => $result['message'],
+                'data' => $order,
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => $result['message'],
+        ], 422);
     }
 
     /**

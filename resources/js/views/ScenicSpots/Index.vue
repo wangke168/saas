@@ -368,6 +368,16 @@
                     </div>
                 </el-form-item>
 
+                <el-form-item
+                    v-if="resourceConfigForm.sync_mode.order === 'manual'"
+                    label="接单需填资源方单号"
+                >
+                    <el-switch v-model="resourceConfigForm.requires_resource_order_no" />
+                    <div style="font-size: 12px; color: #909399; margin-top: 5px;">
+                        开启后，人工接单时必须填写资源方订单号（如乌镇景区）
+                    </div>
+                </el-form-item>
+
                 <el-form-item 
                     label="订单下发服务商" 
                     prop="order_provider"
@@ -769,6 +779,7 @@ const resourceConfigForm = ref({
         price: 'manual',
         order: 'manual',
     },
+    requires_resource_order_no: false,
     order_provider: null,
     credentials: {
         ctrip: { username: '', password: '' },
@@ -1113,6 +1124,7 @@ const loadResourceConfig = async (providerId) => {
                     price: 'manual',
                     order: 'manual',
                 },
+                requires_resource_order_no: config.extra_config?.requires_resource_order_no ?? false,
                 order_provider: config.extra_config?.order_provider || null,
                 // 确保 credentials 正确初始化，保留现有的用户名（即使密码被隐藏）
                 credentials: {
@@ -1232,6 +1244,7 @@ const handleSubmitResourceConfig = async () => {
                     environment: resourceConfigForm.value.environment,
                     is_active: resourceConfigForm.value.is_active,
                     sync_mode: resourceConfigForm.value.sync_mode,
+                    requires_resource_order_no: resourceConfigForm.value.requires_resource_order_no,
                     order_provider: resourceConfigForm.value.order_provider || null,
                     // 即使 credentials 为空对象，也要发送，确保后端知道要保留现有值
                     credentials: Object.keys(credentials).length > 0 ? credentials : {},
@@ -1274,6 +1287,7 @@ const resetResourceConfigForm = () => {
             price: '', // 改为空，让用户必须选择
             order: '', // 改为空，让用户必须选择
         },
+        requires_resource_order_no: false,
         order_provider: null,
         credentials: {
             ctrip: { username: '', password: '' },

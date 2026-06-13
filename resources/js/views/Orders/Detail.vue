@@ -43,7 +43,20 @@
                     <el-descriptions-item label="房间数">{{ order.room_count || 1 }} 间</el-descriptions-item>
                     <el-descriptions-item label="订单金额">¥{{ formatPrice(order.total_amount) }}</el-descriptions-item>
                     <el-descriptions-item label="结算金额">¥{{ formatPrice(order.settlement_amount) }}</el-descriptions-item>
-                    <el-descriptions-item label="资源方订单号">{{ order.resource_order_no || '-' }}</el-descriptions-item>
+                    <el-descriptions-item label="资源方订单号">
+                        <span>{{ order.resource_order_no || '-' }}</span>
+                        <el-button
+                            v-if="canBackfillResourceOrderNo"
+                            type="primary"
+                            link
+                            size="small"
+                            style="margin-left: 8px;"
+                            :loading="backfilling"
+                            @click="handleBackfillResourceOrderNo"
+                        >
+                            补录
+                        </el-button>
+                    </el-descriptions-item>
                     <el-descriptions-item label="创建时间">{{ formatDateTime(order.created_at) }}</el-descriptions-item>
                     <el-descriptions-item label="支付时间">{{ order.paid_at ? formatDateTime(order.paid_at) : '-' }}</el-descriptions-item>
                 </el-descriptions>
@@ -187,7 +200,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import axios from '../../utils/axios';
 
 const route = useRoute();
@@ -195,6 +208,7 @@ const router = useRouter();
 
 const order = ref({});
 const loading = ref(false);
+const backfilling = ref(false);
 
 const orderId = computed(() => route.params.id);
 
@@ -206,6 +220,8 @@ const statusValue = computed(() => {
 const exceptionOrders = computed(() => order.value.exception_order ?? order.value.exceptionOrder ?? []);
 
 const presaleEntitlements = computed(() => order.value.presale_entitlements ?? []);
+
+const canBackfillResourceOrderNo = computed(() => order.value.can_backfill_resource_order_no === true);
 
 const guestList = computed(() => {
     const raw = order.value.guest_info;
@@ -231,6 +247,47 @@ const fetchOrder = async () => {
 };
 
 const goBack = () => router.push('/orders');
+
+const handleBackfillResourceOrderNo = async () => {
+    try {
+        const { value } = await ElMessageBox.prompt(
+            '请输入资源方订单号（补录后不会重新通知 OTA）',
+            '补录资源方订单号',
+            {
+                confirmButtonText: '保存',
+                cancelButtonText: '取消',
+                inputPlaceholder: '请输入资源方订单号',
+                inputValidator: (val) => {
+                    if (!val || val.trim().length === 0) {
+                        return '资源方订单号不能为空';
+                    }
+                    if (val.trim().length > 100) {
+                        return '资源方订单号不能超过100个字符';
+                    }
+                    return true;
+                },
+            }
+        );
+
+        backfilling.value = true;
+        const response = await axios.patch(`/orders/${orderId.value}/resource-order-no`, {
+            resource_order_no: value.trim(),
+        });
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '补录成功');
+            await fetchOrder();
+        } else {
+            ElMessage.error(response.data.message || '补录失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            ElMessage.error(error.response?.data?.message || '补录失败');
+        }
+    } finally {
+        backfilling.value = false;
+    }
+};
 
 const getStatusLabel = (status) => {
     const labels = {

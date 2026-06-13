@@ -109,6 +109,7 @@
 import { ref, onMounted } from 'vue';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { promptConfirmOrder } from '../../utils/orderConfirm';
 
 const exceptions = ref([]);
 const loading = ref(false);
@@ -204,20 +205,13 @@ const formatDate = (date) => {
 // 处理接单
 const handleConfirmOrder = async (row) => {
     try {
-        await ElMessageBox.confirm(
-            '确定要接单吗？系统将直接通知OTA平台确认订单（不再调用景区方接口）。',
-            '接单确认',
-            {
-                type: 'info',
-                confirmButtonText: '确定',
-                cancelButtonText: '取消',
-            }
-        );
+        const payload = await promptConfirmOrder(row.order);
+        if (!payload) {
+            return;
+        }
 
         processing.value[row.id] = 'confirm';
-        const response = await axios.post(`/orders/${row.order_id}/confirm`, {
-            remark: '异常订单人工处理：接单',
-        });
+        const response = await axios.post(`/orders/${row.order_id}/confirm`, payload);
 
         if (response.data.success) {
             ElMessage.success(response.data.message || '接单成功');

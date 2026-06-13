@@ -389,6 +389,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { promptConfirmOrder } from '../../utils/orderConfirm';
 import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
@@ -848,22 +849,13 @@ const viewDetail = (row) => {
 
 const handleConfirmOrder = async (row) => {
     try {
-        await ElMessageBox.confirm(
-            row.hotel?.scenic_spot?.is_system_connected
-                ? '确定要接单吗？系统将自动调用资源方接口确认订单。'
-                : '确定要接单吗？',
-            '接单确认',
-            {
-                type: 'info',
-                confirmButtonText: '确定',
-                cancelButtonText: '取消',
-            }
-        );
+        const payload = await promptConfirmOrder(row);
+        if (!payload) {
+            return;
+        }
 
         operating.value[row.id] = 'confirm';
-        const response = await axios.post(`/orders/${row.id}/confirm`, {
-            remark: '',
-        });
+        const response = await axios.post(`/orders/${row.id}/confirm`, payload);
 
         if (response.data.success) {
             ElMessage.success(response.data.message || '接单成功');

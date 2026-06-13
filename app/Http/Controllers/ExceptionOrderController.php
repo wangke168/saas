@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\ExceptionOrderStatus;
 use App\Models\ExceptionOrder;
+use App\Support\ManualResourceOrderNo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,15 +17,15 @@ class ExceptionOrderController extends Controller
     {
         $this->authorize('viewAny', ExceptionOrder::class);
 
-        $query = ExceptionOrder::with(['order.product', 'order.hotel', 'order.otaPlatform', 'handler']);
+        $query = ExceptionOrder::with(['order.product.scenicSpot', 'order.hotel.scenicSpot', 'order.otaPlatform', 'handler']);
 
         // 权限过滤：非管理员只能查看所属资源方下的所有景区下的异常订单
-        if (!$request->user()->isAdmin()) {
+        if (! $request->user()->isAdmin()) {
             $resourceProviderIds = $request->user()->resourceProviders->pluck('id');
             $scenicSpotIds = \App\Models\ScenicSpot::whereHas('resourceProviders', function ($query) use ($resourceProviderIds) {
                 $query->whereIn('resource_providers.id', $resourceProviderIds);
             })->pluck('id');
-            
+
             // 通过订单的产品关联找到景区进行过滤
             $query->whereHas('order.product', function ($q) use ($scenicSpotIds) {
                 $q->whereIn('scenic_spot_id', $scenicSpotIds);
@@ -40,12 +41,23 @@ class ExceptionOrderController extends Controller
         }
 
         // 默认只显示待处理和处理中的异常订单
-        if (!$request->has('status')) {
+        if (! $request->has('status')) {
             $query->whereIn('status', [ExceptionOrderStatus::PENDING->value, ExceptionOrderStatus::PROCESSING->value]);
         }
 
         $exceptions = $query->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 15));
+
+        $exceptions->getCollection()->transform(function (ExceptionOrder $exceptionOrder): ExceptionOrder {
+            if ($exceptionOrder->order) {
+                $exceptionOrder->order->setAttribute(
+                    'requires_resource_order_no_input',
+                    ManualResourceOrderNo::needsResourceOrderNoOnConfirm($exceptionOrder->order)
+                );
+            }
+
+            return $exceptionOrder;
+        });
 
         return response()->json($exceptions);
     }

@@ -1,13 +1,13 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\Mp\AuthController as MpAuthController;
+use App\Http\Controllers\Mp\BookingController as MpBookingController;
+use App\Http\Controllers\Mp\EntitlementController as MpEntitlementController;
+use App\Http\Controllers\Mp\ProductController as MpProductController;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Mp\AuthController as MpAuthController;
-use App\Http\Controllers\Mp\EntitlementController as MpEntitlementController;
-use App\Http\Controllers\Mp\ProductController as MpProductController;
-use App\Http\Controllers\Mp\BookingController as MpBookingController;
 
 // Webhooks路由（无需认证）
 Route::prefix('webhooks')->group(function () {
@@ -262,6 +262,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
         // 订单操作
         Route::post('/{order}/confirm', [\App\Http\Controllers\OrderController::class, 'confirmOrder']);
+        Route::patch('/{order}/resource-order-no', [\App\Http\Controllers\OrderController::class, 'backfillResourceOrderNo']);
         Route::post('/{order}/reject', [\App\Http\Controllers\OrderController::class, 'rejectOrder']);
         Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);
         Route::post('/{order}/approve-cancel', [\App\Http\Controllers\OrderController::class, 'approveCancel']);
