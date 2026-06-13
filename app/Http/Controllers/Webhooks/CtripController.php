@@ -26,6 +26,9 @@ use App\Services\OrderProcessorService;
 use App\Services\OrderService;
 use App\Services\Resource\ResourceServiceFactory;
 use App\Services\ProductUnavailableNightService;
+use App\Services\Presale\PresaleOtaConsumeService;
+use App\Services\Presale\PresaleOrderService;
+use App\Support\ProductIdRegionRestriction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +46,8 @@ class CtripController extends Controller
         protected InventoryService $inventoryService,
         protected OtaConfigResolver $otaConfigResolver,
         protected OtaAutoAcceptConfigService $otaAutoAcceptConfigService,
+        protected PresaleOrderService $presaleOrderService,
+        protected PresaleOtaConsumeService $presaleOtaConsumeService,
     ) {}
 
     /**
@@ -497,6 +502,83 @@ class CtripController extends Controller
                     ]);
                     return $this->errorResponse('1002', '供应商PLU不存在/错误');
                 }
+
+                $regionMessage = ProductIdRegionRestriction::validateOrMessage(
+                    $product,
+                    ProductIdRegionRestriction::extractIdCardsFromCtripPassengers(is_array($passengers) ? $passengers : [])
+                );
+                if ($regionMessage !== null) {
+                    DB::rollBack();
+                    Log::warning('携程预下单：地区限制校验未通过', [
+                        'product_id' => $product->id,
+                        'ctrip_order_id' => $ctripOrderId,
+                    ]);
+
+                    return $this->errorResponse('1006', $regionMessage);
+                }
+
+                // deferred 预售：落单仅建权益，不占库存、不走酒店房型价格校验
+                if (PresaleOrderService::isDeferredProduct($product)) {
+                    $existingOrder = Order::where('ota_order_no', $ctripOrderId)
+                        ->where('ota_platform_id', $otaPlatform->id)
+                        ->first();
+
+                    if ($existingOrder) {
+                        DB::rollBack();
+                        Log::info('携程预下单：deferred 订单已存在，返回成功', [
+                            'ctrip_order_id' => $ctripOrderId,
+                            'order_no' => $existingOrder->order_no,
+                            'product_id' => $product->id,
+                        ]);
+
+                        return $this->successResponse([
+                            'otaOrderId' => $ctripOrderId,
+                            'orderId' => $existingOrder->order_no,
+                            'supplierOrderId' => $existingOrder->order_no,
+                        ]);
+                    }
+
+                    $cardNo = null;
+                    if (!empty($passengers) && is_array($passengers)) {
+                        $firstPassenger = $passengers[0] ?? [];
+                        $cardNo = $firstPassenger['cardNo'] ?? $firstPassenger['card_no'] ?? null;
+                    }
+
+                    $order = $this->presaleOrderService->createOtaPreOrder(
+                        $product,
+                        $otaPlatform->id,
+                        $ctripOrderId,
+                        $useStartDate,
+                        $useEndDate,
+                        $quantity,
+                        $salePrice,
+                        $costPrice,
+                        is_array($passengers) ? $passengers : [],
+                        is_array($contactInfo) ? $contactInfo : [],
+                        $cardNo,
+                        fn (): string => $this->generateOrderNo(),
+                        [
+                            'ota_platform' => OtaPlatform::CTRIP->value,
+                            'ota_date_mode' => 'window',
+                        ],
+                    );
+
+                    DB::commit();
+
+                    Log::info('携程预下单：deferred 创建成功（非指定日期按有效期窗口）', [
+                        'ctrip_order_id' => $ctripOrderId,
+                        'order_no' => $order->order_no,
+                        'product_id' => $product->id,
+                        'use_start_date' => $useStartDate,
+                        'use_end_date' => $useEndDate,
+                    ]);
+
+                    return $this->successResponse([
+                        'otaOrderId' => $ctripOrderId,
+                        'orderId' => $order->order_no,
+                        'supplierOrderId' => $order->order_no,
+                    ]);
+                }
             
             // 如果PLU中包含了酒店编码和房型编码，需要验证组合是否正确
             if ($hotelCode && $roomTypeCode) {
@@ -749,6 +831,31 @@ class CtripController extends Controller
                 
                 // ========== 打包订单支付处理逻辑 ==========
                 return $this->handlePkgOrderPay($pkgOrder, $data, $ctripOrderId, $items);
+            }
+
+            // deferred 预售：支付即确认，不触发资源方调用
+            if (PresaleOrderService::shouldSkipResourceProcessing($order)) {
+                $ctripItemId = null;
+                if (!empty($items) && isset($items[0]['itemId'])) {
+                    $ctripItemId = (string) $items[0]['itemId'];
+                }
+
+                $this->presaleOrderService->markOtaPaid($order, $ctripItemId);
+                $order->refresh();
+
+                Log::info('携程预下单支付：deferred 同步确认成功（跳过资源处理）', [
+                    'order_id' => $order->id,
+                    'ota_order_no' => $ctripOrderId,
+                    'ctrip_item_id' => $ctripItemId,
+                ]);
+
+                return $this->successResponse([
+                    'supplierConfirmType' => 1,
+                    'otaOrderId' => $ctripOrderId,
+                    'supplierOrderId' => $order->order_no,
+                    'voucherSender' => 1,
+                    'items' => $this->buildResponseItems($items, $order),
+                ]);
             }
 
             // ========== 常规订单支付处理逻辑（原有逻辑） ==========
@@ -2317,12 +2424,23 @@ class CtripController extends Controller
                 $orderStatus = 14; // 预下单取消成功
             }
 
-            // 计算已使用和已取消数量
-            $useQuantity = ($order->status === OrderStatus::VERIFIED) ? $order->room_count : 0;
+            $orderQuantity = (int) $order->room_count;
+
+            // 计算已使用和已取消数量（预售父单与 order_entitlements.booked 对齐）
+            if (PresaleOtaConsumeService::isPresaleParentOrder($order)) {
+                $orderQuantity = PresaleOtaConsumeService::resolveTotalQuantity($order);
+                $presaleQuery = $this->presaleOtaConsumeService->resolveCtripQueryPayload($order);
+                $useQuantity = $presaleQuery['use_quantity'];
+                if (! ($order->status === OrderStatus::CANCEL_APPROVED && $order->paid_at === null)) {
+                    $orderStatus = $presaleQuery['order_status'];
+                }
+            } else {
+                $useQuantity = ($order->status === OrderStatus::VERIFIED) ? $order->room_count : 0;
+            }
             $cancelQuantity = in_array($order->status, [
                 OrderStatus::CANCEL_APPROVED,
                 OrderStatus::CANCEL_REQUESTED,
-            ]) ? $order->room_count : 0;
+            ]) ? $orderQuantity : 0;
 
             // 构建响应数据（按照文档格式）
             $responseData = [
@@ -2332,7 +2450,7 @@ class CtripController extends Controller
                     [
                         'itemId' => $itemId,
                         'orderStatus' => $orderStatus,
-                        'quantity' => $order->room_count, // 订单总份数
+                        'quantity' => $orderQuantity, // 订单总份数
                         'useQuantity' => $useQuantity, // 实际使用总份数
                         'cancelQuantity' => $cancelQuantity, // 实际取消总份数
                         'useStartDate' => $order->check_in_date->format('Y-m-d'),

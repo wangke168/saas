@@ -7,6 +7,7 @@ use App\Http\Requests\Product\DuplicateProductRequest;
 use App\Models\Product;
 use App\Services\OTA\CtripService;
 use App\Services\ProductService;
+use App\Support\ProductMpPayload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -50,6 +51,10 @@ class ProductController extends Controller
 
         if ($request->has('is_active')) {
             $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        if ($request->filled('fulfillment_mode')) {
+            $query->where('fulfillment_mode', $request->input('fulfillment_mode'));
         }
 
         // 排序
@@ -128,7 +133,7 @@ class ProductController extends Controller
         }
 
         return response()->json([
-            'data' => $product,
+            'data' => array_merge($product->toArray(), ProductMpPayload::forAdmin($product)),
         ]);
     }
 
@@ -217,10 +222,17 @@ class ProductController extends Controller
             'code' => 'nullable|string|max:255|unique:products,code', // 改为可空，自动生成
             'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
             'description' => 'nullable|string',
+            'cover_image' => 'nullable|string|max:500',
+            'booking_rules' => 'nullable|array',
+            'booking_rules.*' => 'nullable|string|max:500',
+            'mp_content' => 'nullable|string',
+            'fee_note' => 'nullable|string|max:500',
             'price_source' => 'sometimes|in:manual,api',
             'stay_days' => 'required|integer|min:1|max:30', // 改为必填
             'sale_start_date' => 'required|date',
             'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
+            'fulfillment_mode' => 'sometimes|in:immediate,deferred',
+            'booking_advance_days' => 'nullable|integer|min:0|max:90',
             'order_mode' => 'nullable|in:auto,manual,other',
             'order_provider_id' => [
                 'nullable',
@@ -249,6 +261,9 @@ class ProductController extends Controller
             'unavailable_periods.*.start_date' => 'required|date',
             'unavailable_periods.*.end_date' => 'required|date',
             'unavailable_periods.*.note' => 'nullable|string|max:500',
+            'id_region_restriction_enabled' => 'sometimes|boolean',
+            'id_region_prefixes' => 'nullable|array',
+            'id_region_prefixes.*' => 'nullable|string|max:6',
         ]);
 
         // 权限控制：使用 Policy 检查创建权限（传入景区ID）
@@ -266,6 +281,9 @@ class ProductController extends Controller
         if (isset($validated['sale_end_date']) && $validated['sale_end_date'] === '') {
             $validated['sale_end_date'] = null;
         }
+
+        $validated = $this->normalizeBookingAdvanceDays($validated);
+        $validated = $this->normalizeIdRegionRestriction($validated);
 
         $product = $this->productService->createProduct($validated);
 
@@ -304,10 +322,17 @@ class ProductController extends Controller
             'code' => ['sometimes', 'nullable', 'string', 'max:255', 'unique:products,code,'.$product->id], // code 不可修改，但允许为空（自动生成）
             'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
             'description' => 'nullable|string',
+            'cover_image' => 'nullable|string|max:500',
+            'booking_rules' => 'nullable|array',
+            'booking_rules.*' => 'nullable|string|max:500',
+            'mp_content' => 'nullable|string',
+            'fee_note' => 'nullable|string|max:500',
             'price_source' => 'sometimes|in:manual,api',
             'stay_days' => 'required|integer|min:1|max:30', // 改为必填
             'sale_start_date' => 'required|date',
             'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
+            'fulfillment_mode' => 'sometimes|in:immediate,deferred',
+            'booking_advance_days' => 'nullable|integer|min:0|max:90',
             'order_mode' => 'nullable|in:auto,manual,other',
             'order_provider_id' => [
                 'nullable',
@@ -336,6 +361,9 @@ class ProductController extends Controller
             'unavailable_periods.*.start_date' => 'required|date',
             'unavailable_periods.*.end_date' => 'required|date',
             'unavailable_periods.*.note' => 'nullable|string|max:500',
+            'id_region_restriction_enabled' => 'sometimes|boolean',
+            'id_region_prefixes' => 'nullable|array',
+            'id_region_prefixes.*' => 'nullable|string|max:6',
         ]);
 
         // 权限控制：使用 Policy 检查更新权限（包括景区变更的权限）
@@ -359,6 +387,9 @@ class ProductController extends Controller
         if (isset($validated['sale_end_date']) && $validated['sale_end_date'] === '') {
             $validated['sale_end_date'] = null;
         }
+
+        $validated = $this->normalizeBookingAdvanceDays($validated);
+        $validated = $this->normalizeIdRegionRestriction($validated);
 
         $product = $this->productService->updateProduct($product, $validated);
 
@@ -557,5 +588,39 @@ class ProductController extends Controller
         }
 
         return $field;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeBookingAdvanceDays(array $validated): array
+    {
+        $mode = (string) ($validated['fulfillment_mode'] ?? 'immediate');
+        if ($mode !== 'deferred') {
+            $validated['booking_advance_days'] = 0;
+        } else {
+            $validated['booking_advance_days'] = max(0, (int) ($validated['booking_advance_days'] ?? 0));
+        }
+
+        return $validated;
+    }
+
+    private function normalizeIdRegionRestriction(array $validated): array
+    {
+        $enabled = (bool) ($validated['id_region_restriction_enabled'] ?? false);
+        $validated['id_region_restriction_enabled'] = $enabled;
+
+        $prefixes = \App\Support\ProductIdRegionRestriction::sanitizePrefixesForStorage(
+            is_array($validated['id_region_prefixes'] ?? null) ? $validated['id_region_prefixes'] : []
+        );
+
+        if ($enabled && $prefixes === []) {
+            abort(422, '启用地区限制时请至少配置一个有效的身份证前几位（2-6位数字）');
+        }
+
+        $validated['id_region_prefixes'] = $prefixes === [] ? null : $prefixes;
+
+        return $validated;
     }
 }

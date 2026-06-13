@@ -15,6 +15,8 @@ class Order extends Model
 
     protected $fillable = [
         'order_no',
+        'parent_order_id',
+        'order_type',
         'ota_order_no',
         'ctrip_item_id',
         'ota_platform_id',
@@ -58,6 +60,25 @@ class Order extends Model
             'confirmed_at' => 'datetime',
             'cancelled_at' => 'datetime',
         ];
+    }
+
+    public function presaleParent(): BelongsTo
+    {
+        return $this->belongsTo(Order::class, 'parent_order_id');
+    }
+
+    /**
+     * 预售履约子单（每次小程序预约一条）
+     */
+    public function fulfillmentChildren(): HasMany
+    {
+        return $this->hasMany(Order::class, 'parent_order_id')
+            ->where('order_type', 'hotel');
+    }
+
+    public function isPresaleFulfillmentChild(): bool
+    {
+        return $this->parent_order_id !== null && $this->order_type === 'hotel';
     }
 
     /**
@@ -146,5 +167,21 @@ class Order extends Model
     public function exceptionOrder(): HasMany
     {
         return $this->hasMany(ExceptionOrder::class);
+    }
+
+    /**
+     * 预售权益行（一份预售对应一条权益）
+     */
+    public function entitlements(): HasMany
+    {
+        return $this->hasMany(OrderEntitlement::class);
+    }
+
+    /**
+     * 预约记录（一次权益一次预约）
+     */
+    public function bookings(): HasMany
+    {
+        return $this->hasMany(OrderBooking::class);
     }
 }

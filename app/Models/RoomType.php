@@ -32,6 +32,11 @@ class RoomType extends Model
         'code',
         'max_occupancy',
         'description',
+        'cover_image',
+        'images',
+        'bed_type',
+        'room_area',
+        'breakfast',
         'external_id',
         'external_code',
         'is_active',
@@ -40,6 +45,8 @@ class RoomType extends Model
     protected function casts(): array
     {
         return [
+            'images' => 'array',
+            'room_area' => 'decimal:2',
             'is_active' => 'boolean',
         ];
     }

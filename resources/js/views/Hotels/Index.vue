@@ -90,7 +90,7 @@
         <el-dialog
             v-model="dialogVisible"
             :title="dialogTitle"
-            width="600px"
+            width="720px"
             @close="resetForm"
         >
             <el-form
@@ -134,6 +134,34 @@
                 </el-form-item>
                 <el-form-item label="联系电话" prop="contact_phone">
                     <el-input v-model="form.contact_phone" placeholder="请输入联系电话" />
+                </el-form-item>
+                <el-form-item label="封面图">
+                    <PublicImageUpload
+                        mode="cover"
+                        :cover-path="form.cover_image"
+                        :cover-preview-url="form.cover_image_url"
+                        directory="hotel-media"
+                        @update:cover-path="form.cover_image = $event"
+                        @update:cover-preview-url="form.cover_image_url = $event"
+                    />
+                </el-form-item>
+                <el-form-item label="相册图">
+                    <PublicImageUpload
+                        mode="gallery"
+                        :image-paths="form.images"
+                        :image-preview-urls="form.image_urls"
+                        directory="hotel-media"
+                        @update:image-paths="form.images = $event"
+                        @update:image-preview-urls="form.image_urls = $event"
+                    />
+                </el-form-item>
+                <el-form-item label="酒店介绍">
+                    <el-input
+                        v-model="form.introduction"
+                        type="textarea"
+                        :rows="4"
+                        placeholder="选填，展示在酒店详情页"
+                    />
                 </el-form-item>
                 <el-form-item label="是否直连" prop="is_connected">
                     <el-switch v-model="form.is_connected" />
@@ -190,7 +218,7 @@
             <el-dialog
                 v-model="roomTypeFormDialogVisible"
                 :title="roomTypeFormTitle"
-                width="500px"
+                width="640px"
                 append-to-body
                 @close="resetRoomTypeForm"
             >
@@ -225,6 +253,35 @@
                             :rows="3"
                             placeholder="请输入房型描述"
                         />
+                    </el-form-item>
+                    <el-form-item label="封面图">
+                        <PublicImageUpload
+                            mode="cover"
+                            :cover-path="roomTypeForm.cover_image"
+                            :cover-preview-url="roomTypeForm.cover_image_url"
+                            directory="room-type-media"
+                            @update:cover-path="roomTypeForm.cover_image = $event"
+                            @update:cover-preview-url="roomTypeForm.cover_image_url = $event"
+                        />
+                    </el-form-item>
+                    <el-form-item label="相册图">
+                        <PublicImageUpload
+                            mode="gallery"
+                            :image-paths="roomTypeForm.images"
+                            :image-preview-urls="roomTypeForm.image_urls"
+                            directory="room-type-media"
+                            @update:image-paths="roomTypeForm.images = $event"
+                            @update:image-preview-urls="roomTypeForm.image_urls = $event"
+                        />
+                    </el-form-item>
+                    <el-form-item label="床型">
+                        <el-input v-model="roomTypeForm.bed_type" placeholder="如：大床、双床" />
+                    </el-form-item>
+                    <el-form-item label="面积(㎡)">
+                        <el-input-number v-model="roomTypeForm.room_area" :min="0" :precision="2" style="width: 100%" />
+                    </el-form-item>
+                    <el-form-item label="早餐">
+                        <el-input v-model="roomTypeForm.breakfast" placeholder="如：含双早" />
                     </el-form-item>
                     <el-form-item label="状态" prop="is_active">
                         <el-switch v-model="roomTypeForm.is_active" />
@@ -414,6 +471,7 @@ import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Search } from '@element-plus/icons-vue';
 import { useAuthStore } from '../../stores/auth';
+import PublicImageUpload from '../../components/PublicImageUpload.vue';
 
 const authStore = useAuthStore();
 
@@ -470,6 +528,11 @@ const form = ref({
     external_code: '',
     address: '',
     contact_phone: '',
+    cover_image: '',
+    cover_image_url: '',
+    images: [],
+    image_urls: [],
+    introduction: '',
     is_connected: false,
     is_active: true,
 });
@@ -480,6 +543,13 @@ const roomTypeForm = ref({
     external_code: '',
     max_occupancy: 2,
     description: '',
+    cover_image: '',
+    cover_image_url: '',
+    images: [],
+    image_urls: [],
+    bed_type: '',
+    room_area: null,
+    breakfast: '',
     is_active: true,
 });
 
@@ -612,19 +682,31 @@ const handleCreate = () => {
     dialogVisible.value = true;
 };
 
-const handleEdit = (row) => {
+const handleEdit = async (row) => {
     editingId.value = row.id;
-    form.value = {
-        scenic_spot_id: row.scenic_spot_id,
-        name: row.name,
-        code: row.code,
-        external_code: row.external_code || '',
-        address: row.address || '',
-        contact_phone: row.contact_phone || '',
-        is_connected: row.is_connected || false,
-        is_active: row.is_active,
-    };
-    dialogVisible.value = true;
+    try {
+        const response = await axios.get(`/hotels/${row.id}`);
+        const data = response.data.data || {};
+        form.value = {
+            scenic_spot_id: data.scenic_spot_id,
+            name: data.name,
+            code: data.code,
+            external_code: data.external_code || '',
+            address: data.address || '',
+            contact_phone: data.contact_phone || '',
+            cover_image: data.cover_image || '',
+            cover_image_url: data.cover_image_url || '',
+            images: data.images || [],
+            image_urls: data.image_urls || [],
+            introduction: data.introduction || '',
+            is_connected: data.is_connected || false,
+            is_active: data.is_active,
+        };
+        dialogVisible.value = true;
+    } catch (error) {
+        ElMessage.error('获取酒店详情失败');
+        console.error(error);
+    }
 };
 
 const handleSubmit = async () => {
@@ -634,11 +716,23 @@ const handleSubmit = async () => {
         if (valid) {
             submitting.value = true;
             try {
+                const payload = {
+                    scenic_spot_id: form.value.scenic_spot_id,
+                    name: form.value.name,
+                    external_code: form.value.external_code,
+                    address: form.value.address,
+                    contact_phone: form.value.contact_phone,
+                    cover_image: form.value.cover_image || null,
+                    images: form.value.images || [],
+                    introduction: form.value.introduction || null,
+                    is_connected: form.value.is_connected,
+                    is_active: form.value.is_active,
+                };
                 if (isEdit.value) {
-                    await axios.put(`/hotels/${editingId.value}`, form.value);
+                    await axios.put(`/hotels/${editingId.value}`, payload);
                     ElMessage.success('酒店更新成功');
                 } else {
-                    await axios.post('/hotels', form.value);
+                    await axios.post('/hotels', payload);
                     ElMessage.success('酒店创建成功');
                 }
                 dialogVisible.value = false;
@@ -684,6 +778,11 @@ const resetForm = () => {
         external_code: '',
         address: '',
         contact_phone: '',
+        cover_image: '',
+        cover_image_url: '',
+        images: [],
+        image_urls: [],
+        introduction: '',
         is_connected: false,
         is_active: true,
     };
@@ -724,9 +823,23 @@ const handleEditRoomType = (row) => {
         external_code: row.external_code || '',
         max_occupancy: row.max_occupancy || 2,
         description: row.description || '',
+        cover_image: row.cover_image || '',
+        cover_image_url: row.cover_image_url || PublicMediaUrl(row.cover_image),
+        images: row.images || [],
+        image_urls: row.image_urls || (row.images || []).map((path) => PublicMediaUrl(path)),
+        bed_type: row.bed_type || '',
+        room_area: row.room_area != null ? Number(row.room_area) : null,
+        breakfast: row.breakfast || '',
         is_active: row.is_active,
     };
     roomTypeFormDialogVisible.value = true;
+};
+
+const PublicMediaUrl = (path) => {
+    if (!path) return '';
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = import.meta.env.VITE_APP_URL || window.location.origin;
+    return `${base.replace(/\/$/, '')}/storage/${path.replace(/^\//, '')}`;
 };
 
 const handleSubmitRoomType = async () => {
@@ -737,7 +850,16 @@ const handleSubmitRoomType = async () => {
             roomTypeSubmitting.value = true;
             try {
                 const data = {
-                    ...roomTypeForm.value,
+                    name: roomTypeForm.value.name,
+                    external_code: roomTypeForm.value.external_code,
+                    max_occupancy: roomTypeForm.value.max_occupancy,
+                    description: roomTypeForm.value.description,
+                    cover_image: roomTypeForm.value.cover_image || null,
+                    images: roomTypeForm.value.images || [],
+                    bed_type: roomTypeForm.value.bed_type || null,
+                    room_area: roomTypeForm.value.room_area,
+                    breakfast: roomTypeForm.value.breakfast || null,
+                    is_active: roomTypeForm.value.is_active,
                     hotel_id: currentHotel.value.id,
                 };
                 
@@ -790,6 +912,13 @@ const resetRoomTypeForm = () => {
         external_code: '',
         max_occupancy: 2,
         description: '',
+        cover_image: '',
+        cover_image_url: '',
+        images: [],
+        image_urls: [],
+        bed_type: '',
+        room_area: null,
+        breakfast: '',
         is_active: true,
     };
     roomTypeFormRef.value?.clearValidate();

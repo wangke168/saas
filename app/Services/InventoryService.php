@@ -13,6 +13,17 @@ use Carbon\Carbon;
 class InventoryService
 {
     /**
+     * 按房型+日期查询库存（与小程序日历/quote 一致使用 whereDate，避免 date 列精确匹配失败）。
+     */
+    private function findInventoryForDate(int $roomTypeId, string $date): ?Inventory
+    {
+        return Inventory::query()
+            ->where('room_type_id', $roomTypeId)
+            ->whereDate('date', $date)
+            ->first();
+    }
+
+    /**
      * 按产品维度检查库存可用性（方案B：共享库存池 + 产品级可售开关）。
      *
      * @param int $productId 产品ID
@@ -24,9 +35,7 @@ class InventoryService
     public function checkInventoryAvailabilityForProduct(int $productId, int $roomTypeId, array $dates, int $quantity): array
     {
         foreach ($dates as $date) {
-            $inventory = Inventory::where('room_type_id', $roomTypeId)
-                ->where('date', $date)
-                ->first();
+            $inventory = $this->findInventoryForDate($roomTypeId, $date);
 
             if (!$inventory) {
                 return [
@@ -86,10 +95,15 @@ class InventoryService
      * @param int $roomTypeId 房型ID
      * @param array $dates 日期数组 (Y-m-d)
      * @param int $quantity 锁定数量
+     * @param bool $useRedisLock 是否使用 Redis 互斥（小程序履约建议 false，避免与 OTA 并发抢同键误报库存不足）
      * @return bool 是否锁定成功
      */
-    public function lockInventoryForDates(int $roomTypeId, array $dates, int $quantity): bool
+    public function lockInventoryForDates(int $roomTypeId, array $dates, int $quantity, bool $useRedisLock = true): bool
     {
+        if (! $useRedisLock) {
+            return $this->lockInventoryWithDatabaseLock($roomTypeId, $dates, $quantity);
+        }
+
         // 尝试使用 Redis 分布式锁
         try {
             // 生成锁键
@@ -132,21 +146,24 @@ class InventoryService
                     return false;
                 }
 
-                // 锁定库存（使用数据库行级锁）
+                // 锁定库存（使用数据库行级锁，行锁内再次校验可用量）
                 DB::transaction(function () use ($roomTypeId, $dates, $quantity) {
                     foreach ($dates as $date) {
-                        $inventory = Inventory::where('room_type_id', $roomTypeId)
-                            ->where('date', $date)
-                            ->lockForUpdate() // 数据库行级锁
+                        $inventory = Inventory::query()
+                            ->where('room_type_id', $roomTypeId)
+                            ->whereDate('date', $date)
+                            ->lockForUpdate()
                             ->first();
 
-                        if (!$inventory) {
-                            throw new \Exception("库存记录不存在：room_type_id={$roomTypeId}, date={$date}");
+                        if (! $inventory) {
+                            throw new \RuntimeException("库存记录不存在：room_type_id={$roomTypeId}, date={$date}");
                         }
 
-                        // 修复：确保锁定后 available_quantity 不会小于 0，且不超过 total_quantity
-                        $newAvailableQuantity = max(0, $inventory->available_quantity - $quantity);
-                        $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
+                        if ($inventory->is_closed || $inventory->available_quantity < $quantity) {
+                            throw new \RuntimeException("库存不足：room_type_id={$roomTypeId}, date={$date}");
+                        }
+
+                        $inventory->available_quantity = max(0, $inventory->available_quantity - $quantity);
                         $inventory->locked_quantity += $quantity;
                         $inventory->save();
                     }
@@ -210,10 +227,15 @@ class InventoryService
      * @param int $roomTypeId 房型ID
      * @param array $dates 日期数组 (Y-m-d)
      * @param int $quantity 释放数量
+     * @param bool $useRedisLock 与 lockInventoryForDates 保持一致
      * @return bool 是否释放成功
      */
-    public function releaseInventoryForDates(int $roomTypeId, array $dates, int $quantity): bool
+    public function releaseInventoryForDates(int $roomTypeId, array $dates, int $quantity, bool $useRedisLock = true): bool
     {
+        if (! $useRedisLock) {
+            return $this->releaseInventoryWithDatabaseLock($roomTypeId, $dates, $quantity);
+        }
+
         // 尝试使用 Redis 分布式锁
         try {
             // 生成锁键
@@ -249,8 +271,9 @@ class InventoryService
                 // 释放库存（使用数据库行级锁）
                 DB::transaction(function () use ($roomTypeId, $dates, $quantity) {
                     foreach ($dates as $date) {
-                        $inventory = Inventory::where('room_type_id', $roomTypeId)
-                            ->where('date', $date)
+                        $inventory = Inventory::query()
+                            ->where('room_type_id', $roomTypeId)
+                            ->whereDate('date', $date)
                             ->lockForUpdate() // 数据库行级锁
                             ->first();
 
@@ -318,11 +341,18 @@ class InventoryService
     public function checkInventoryAvailability(int $roomTypeId, array $dates, int $quantity): bool
     {
         foreach ($dates as $date) {
-            $inventory = Inventory::where('room_type_id', $roomTypeId)
-                ->where('date', $date)
-                ->first();
+            $inventory = $this->findInventoryForDate($roomTypeId, $date);
 
             if (!$inventory || $inventory->is_closed || $inventory->available_quantity < $quantity) {
+                Log::warning('库存可用性检查未通过', [
+                    'room_type_id' => $roomTypeId,
+                    'date' => $date,
+                    'quantity' => $quantity,
+                    'found' => $inventory !== null,
+                    'is_closed' => $inventory?->is_closed,
+                    'available_quantity' => $inventory?->available_quantity,
+                ]);
+
                 return false;
             }
         }
@@ -364,8 +394,9 @@ class InventoryService
             return DB::transaction(function () use ($roomTypeId, $dates, $quantity) {
                 // 检查库存可用性
                 foreach ($dates as $date) {
-                    $inventory = Inventory::where('room_type_id', $roomTypeId)
-                        ->where('date', $date)
+                    $inventory = Inventory::query()
+                        ->where('room_type_id', $roomTypeId)
+                        ->whereDate('date', $date)
                         ->lockForUpdate() // 数据库行级锁
                         ->first();
 
@@ -383,8 +414,9 @@ class InventoryService
 
                 // 锁定库存
                 foreach ($dates as $date) {
-                    $inventory = Inventory::where('room_type_id', $roomTypeId)
-                        ->where('date', $date)
+                    $inventory = Inventory::query()
+                        ->where('room_type_id', $roomTypeId)
+                        ->whereDate('date', $date)
                         ->lockForUpdate()
                         ->first();
 
@@ -430,8 +462,9 @@ class InventoryService
             return DB::transaction(function () use ($roomTypeId, $dates, $quantity) {
                 // 释放库存
                 foreach ($dates as $date) {
-                    $inventory = Inventory::where('room_type_id', $roomTypeId)
-                        ->where('date', $date)
+                    $inventory = Inventory::query()
+                        ->where('room_type_id', $roomTypeId)
+                        ->whereDate('date', $date)
                         ->lockForUpdate() // 数据库行级锁
                         ->first();
 

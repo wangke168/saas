@@ -10,6 +10,8 @@ use App\Models\ExceptionOrder;
 use App\Models\Order;
 use App\Services\InventoryService;
 use App\Services\OTA\NotificationFactory;
+use App\Services\Presale\PresaleFulfillmentOrderService;
+use App\Services\Presale\PresaleOtaConsumeService;
 use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -64,7 +66,8 @@ class ProcessResourceOrderJob implements ShouldQueue
      */
     public function handle(
         ResourceServiceFactory $factory,
-        InventoryService $inventoryService
+        InventoryService $inventoryService,
+        PresaleOtaConsumeService $presaleOtaConsumeService,
     ): void {
         Log::info('ProcessResourceOrderJob 开始执行', [
             'order_id' => $this->order->id,
@@ -108,7 +111,7 @@ class ProcessResourceOrderJob implements ShouldQueue
                     'attempt' => $this->attempts(),
                 ]);
                 
-                $this->handleConfirmResult($result, $inventoryService);
+                $this->handleConfirmResult($result, $inventoryService, $presaleOtaConsumeService);
             } else {
                 $reason = 'OTA平台申请取消订单';
                 $result = $resourceService->cancelOrder($this->order, $reason);
@@ -153,7 +156,11 @@ class ProcessResourceOrderJob implements ShouldQueue
     /**
      * 处理接单结果
      */
-    protected function handleConfirmResult(array $result, InventoryService $inventoryService): void
+    protected function handleConfirmResult(
+        array $result,
+        InventoryService $inventoryService,
+        PresaleOtaConsumeService $presaleOtaConsumeService,
+    ): void
     {
         if ($result['success'] ?? false) {
             // 提取资源方订单号
@@ -174,117 +181,19 @@ class ProcessResourceOrderJob implements ShouldQueue
                 $resourceOrderNo = $this->order->resource_order_no;
             }
 
+            if (PresaleFulfillmentOrderService::isFulfillmentChild($this->order)) {
+                $this->finalizePresaleFulfillmentChild($resourceOrderNo, $presaleOtaConsumeService);
+
+                return;
+            }
+
             Log::info('ProcessResourceOrderJob: 景区方接单成功，准备通知OTA平台', [
                 'order_id' => $this->order->id,
                 'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
                 'result_data_type' => gettype($result['data'] ?? null),
             ]);
 
-            // 先通知OTA平台，等待成功后再更新订单状态
-            // 重新加载订单关联数据，确保 otaPlatform 已加载
-            $this->order->load(['otaPlatform']);
-            
-            // 检查是否有 OTA 平台
-            if (!$this->order->otaPlatform) {
-                Log::warning('ProcessResourceOrderJob: 订单没有关联 OTA 平台，跳过通知和状态更新', [
-                    'order_id' => $this->order->id,
-                    'ota_platform_id' => $this->order->ota_platform_id,
-                ]);
-                // 没有OTA平台，创建异常订单供人工处理
-                $this->createExceptionOrder([
-                    'success' => false,
-                    'message' => '订单没有关联OTA平台，无法通知',
-                ]);
-                return;
-            }
-            
-            // 判断平台类型
-            $isMeituan = $this->order->otaPlatform->code === OtaPlatform::MEITUAN;
-            
-            Log::info('ProcessResourceOrderJob: 判断平台类型', [
-                'order_id' => $this->order->id,
-                'ota_platform_code' => $this->order->otaPlatform->code->value,
-                'is_meituan' => $isMeituan,
-            ]);
-            
-            // 先通知OTA平台，等待成功后再更新状态
-            try {
-                if ($isMeituan) {
-                    // 美团订单：同步通知
-                    Log::info('ProcessResourceOrderJob: 美团订单，同步通知', [
-                        'order_id' => $this->order->id,
-                    ]);
-                    
-                    $notification = NotificationFactory::create($this->order);
-                    if (!$notification) {
-                        throw new \Exception('无法创建美团通知服务');
-                    }
-                    
-                    $notification->notifyOrderConfirmed($this->order);
-                    
-                    Log::info('ProcessResourceOrderJob: 美团订单同步通知成功', [
-                        'order_id' => $this->order->id,
-                    ]);
-                } else {
-                    // 携程订单：同步通知（使用NotificationFactory）
-                    Log::info('ProcessResourceOrderJob: 携程订单，同步通知', [
-                        'order_id' => $this->order->id,
-                    ]);
-                    
-                    $notification = NotificationFactory::create($this->order);
-                    if (!$notification) {
-                        throw new \Exception('无法创建携程通知服务');
-                    }
-                    
-                    $notification->notifyOrderConfirmed($this->order);
-                    
-                    Log::info('ProcessResourceOrderJob: 携程订单同步通知成功', [
-                        'order_id' => $this->order->id,
-                    ]);
-                }
-            } catch (\Exception $e) {
-                Log::error('ProcessResourceOrderJob: OTA平台通知失败，不更新订单状态', [
-                    'order_id' => $this->order->id,
-                    'ota_platform' => $this->order->otaPlatform->code->value,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-                
-                // OTA通知失败，不更新状态，创建异常订单供人工处理
-                $this->createExceptionOrder([
-                    'success' => false,
-                    'message' => 'OTA平台通知失败：' . $e->getMessage(),
-                ]);
-                
-                // 抛出异常，让队列系统重试（如果是临时性错误）
-                throw $e;
-            }
-            
-            // OTA平台通知成功，开始更新订单状态
-            Log::info('ProcessResourceOrderJob: OTA平台通知成功，开始更新订单状态', [
-                'order_id' => $this->order->id,
-            ]);
-            
-            // 更新订单状态
-            $updateData = [
-                'status' => OrderStatus::CONFIRMED,
-                'confirmed_at' => now(),
-            ];
-            
-            // 只有在 resource_order_no 存在且与当前值不同时才更新
-            if ($resourceOrderNo && $this->order->resource_order_no !== $resourceOrderNo) {
-                $updateData['resource_order_no'] = $resourceOrderNo;
-            }
-            
-            $this->order->update($updateData);
-            $this->order->refresh();
-
-            Log::info('ProcessResourceOrderJob: 订单状态已更新为已确认', [
-                'order_id' => $this->order->id,
-                'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
-            ]);
-
-            NotifyOrderDirectConfirmedJob::dispatch($this->order);
+            $this->notifyOtaConfirmedAndFinalizeOrder($resourceOrderNo);
         } else {
             // 检查是否需要转人工操作（自我游接单失败时，直接转人工，不重试）
             $needManual = $result['need_manual'] ?? false;
@@ -520,5 +429,110 @@ class ProcessResourceOrderJob implements ShouldQueue
         
         // 默认视为业务性错误，不重试
         return false;
+    }
+
+    /**
+     * 预售履约子单：景区接单成功后更新子单、钉钉通知，并对父单 OTA 按份核销（不再二次出票确认）。
+     */
+    protected function finalizePresaleFulfillmentChild(?string $resourceOrderNo, PresaleOtaConsumeService $presaleOtaConsumeService): void
+    {
+        $updateData = [
+            'status' => OrderStatus::CONFIRMED,
+            'confirmed_at' => now(),
+        ];
+        if ($resourceOrderNo && $this->order->resource_order_no !== $resourceOrderNo) {
+            $updateData['resource_order_no'] = $resourceOrderNo;
+        }
+        $this->order->update($updateData);
+        $this->order->refresh();
+
+        NotifyOrderDirectConfirmedJob::dispatch($this->order);
+
+        try {
+            $presaleOtaConsumeService->consumeAfterFulfillment($this->order);
+        } catch (\Exception $e) {
+            Log::error('ProcessResourceOrderJob: 预售父单 OTA 核销失败', [
+                'fulfillment_order_id' => $this->order->id,
+                'parent_order_id' => $this->order->parent_order_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->createExceptionOrder([
+                'success' => false,
+                'message' => '预售 OTA 核销失败：'.$e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+    }
+
+    protected function notifyOtaConfirmedAndFinalizeOrder(?string $resourceOrderNo): void
+    {
+        $this->order->load(['otaPlatform']);
+
+        if (! $this->order->otaPlatform) {
+            Log::warning('ProcessResourceOrderJob: 订单没有关联 OTA 平台，跳过通知和状态更新', [
+                'order_id' => $this->order->id,
+                'ota_platform_id' => $this->order->ota_platform_id,
+            ]);
+            $this->createExceptionOrder([
+                'success' => false,
+                'message' => '订单没有关联OTA平台，无法通知',
+            ]);
+
+            return;
+        }
+
+        $isMeituan = $this->order->otaPlatform->code === OtaPlatform::MEITUAN;
+
+        Log::info('ProcessResourceOrderJob: 判断平台类型', [
+            'order_id' => $this->order->id,
+            'ota_platform_code' => $this->order->otaPlatform->code->value,
+            'is_meituan' => $isMeituan,
+        ]);
+
+        try {
+            $notification = NotificationFactory::create($this->order);
+            if ($notification === null) {
+                throw new \Exception('无法创建 OTA 通知服务');
+            }
+
+            $notification->notifyOrderConfirmed($this->order);
+
+            Log::info('ProcessResourceOrderJob: OTA 订单确认通知成功', [
+                'order_id' => $this->order->id,
+                'is_meituan' => $isMeituan,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('ProcessResourceOrderJob: OTA平台通知失败，不更新订单状态', [
+                'order_id' => $this->order->id,
+                'ota_platform' => $this->order->otaPlatform->code->value,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->createExceptionOrder([
+                'success' => false,
+                'message' => 'OTA平台通知失败：'.$e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        $updateData = [
+            'status' => OrderStatus::CONFIRMED,
+            'confirmed_at' => now(),
+        ];
+        if ($resourceOrderNo && $this->order->resource_order_no !== $resourceOrderNo) {
+            $updateData['resource_order_no'] = $resourceOrderNo;
+        }
+        $this->order->update($updateData);
+        $this->order->refresh();
+
+        Log::info('ProcessResourceOrderJob: 订单状态已更新为已确认', [
+            'order_id' => $this->order->id,
+            'resource_order_no' => $resourceOrderNo ?: $this->order->resource_order_no,
+        ]);
+
+        NotifyOrderDirectConfirmedJob::dispatch($this->order);
     }
 }

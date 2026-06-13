@@ -33,7 +33,8 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // 勿对 /storage 启用 serve：会与 public/storage 符号链接 URL 冲突，未签名访问在本地返回 403
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],
@@ -43,6 +44,8 @@ return [
             'root' => storage_path('app/public'),
             'url' => env('APP_URL').'/storage',
             'visibility' => 'public',
+            // Web 服务器未直接命中 public/storage 时，由 Laravel 从 app/public 回退输出
+            'serve' => true,
             'throw' => false,
             'report' => false,
         ],

@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Enums\OrderStatus;
 use App\Http\Requests\OrderExportRequest;
 use App\Models\Order;
+use App\Models\OrderBooking;
 use App\Services\OrderExportService;
+use App\Services\Presale\PresaleFulfillmentOrderService;
 use App\Services\OrderOperationService;
 use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
@@ -99,8 +101,23 @@ class OrderController extends Controller
             $query->where('ota_order_no', 'like', '%'.$request->ota_order_no.'%');
         }
 
+        $bookingNo = trim((string) $request->input('booking_no', ''));
+        if ($bookingNo !== '') {
+            $query->whereHas('entitlements.booking', function ($q) use ($bookingNo) {
+                $q->where('booking_no', 'like', '%'.$bookingNo.'%');
+            });
+        }
+
         $orders = $query->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 15));
+
+        $orders->getCollection()->transform(function (Order $order): Order {
+            $flags = PresaleFulfillmentOrderService::presaleDisplayFlags($order);
+            $order->setAttribute('is_presale_parent', $flags['is_presale_parent']);
+            $order->setAttribute('is_presale_fulfillment_child', $flags['is_presale_fulfillment_child']);
+
+            return $order;
+        });
 
         return response()->json($orders);
     }
@@ -131,9 +148,88 @@ class OrderController extends Controller
             'items',
             'logs.operator',
             'exceptionOrder',
+            'entitlements.booking.hotel',
+            'entitlements.booking.roomType',
+            'entitlements.booking.fulfilledOrder',
+            'fulfillmentChildren.hotel',
+            'fulfillmentChildren.roomType',
         ]);
 
-        return response()->json($order);
+        $payload = $order->toArray();
+        $presaleFlags = PresaleFulfillmentOrderService::presaleDisplayFlags($order);
+        $payload['is_presale_parent'] = $presaleFlags['is_presale_parent'];
+        $payload['is_presale_fulfillment_child'] = $presaleFlags['is_presale_fulfillment_child'];
+
+        if ($presaleFlags['is_presale_fulfillment_child']) {
+            $order->loadMissing('presaleParent.otaPlatform');
+            $parent = $order->presaleParent;
+            $sourceBooking = OrderBooking::query()
+                ->where('fulfilled_order_id', $order->id)
+                ->first();
+
+            $payload['presale_parent'] = $parent === null ? null : [
+                'id' => $parent->id,
+                'order_no' => $parent->order_no,
+                'ota_order_no' => $parent->ota_order_no,
+                'ota_platform_name' => $parent->otaPlatform?->name,
+            ];
+            $payload['source_booking'] = $sourceBooking === null ? null : [
+                'booking_no' => $sourceBooking->booking_no,
+                'base_price' => (float) $sourceBooking->base_price,
+                'surcharge_amount' => (float) $sourceBooking->surcharge_amount,
+                'package_sale_price' => (float) $sourceBooking->package_sale_price,
+            ];
+        }
+        $payload['presale_entitlements'] = $order->entitlements
+            ->map(static function ($entitlement) {
+                $booking = $entitlement->booking;
+
+                return [
+                    'entitlement_no' => $entitlement->entitlement_no,
+                    'status' => $entitlement->status instanceof \BackedEnum
+                        ? $entitlement->status->value
+                        : (string) $entitlement->status,
+                    'base_price' => (float) $entitlement->base_price,
+                    'booked_at' => $entitlement->booked_at?->toDateTimeString(),
+                    'booking' => $booking === null ? null : [
+                        'id' => $booking->id,
+                        'booking_no' => $booking->booking_no,
+                        'status' => $booking->status instanceof \BackedEnum
+                            ? $booking->status->value
+                            : (string) $booking->status,
+                        'check_in_date' => $booking->check_in_date?->format('Y-m-d'),
+                        'check_out_date' => $booking->check_out_date?->format('Y-m-d'),
+                        'guest_name' => $booking->guest_name,
+                        'guest_phone' => $booking->guest_phone,
+                        'hotel_name' => $booking->hotel?->name,
+                        'room_type_name' => $booking->roomType?->name,
+                        'surcharge_amount' => (float) $booking->surcharge_amount,
+                        'fulfilled_order_id' => $booking->fulfilled_order_id,
+                        'fulfillment_order_no' => $booking->fulfilledOrder?->order_no,
+                    ],
+                ];
+            })
+            ->values()
+            ->all();
+
+        if ($payload['is_presale_parent']) {
+            $payload['fulfillment_orders'] = $order->fulfillmentChildren
+                ->map(static fn ($child) => [
+                    'id' => $child->id,
+                    'order_no' => $child->order_no,
+                    'ota_order_no' => $child->ota_order_no,
+                    'status' => $child->status instanceof \BackedEnum ? $child->status->value : (string) $child->status,
+                    'check_in_date' => $child->check_in_date?->format('Y-m-d'),
+                    'check_out_date' => $child->check_out_date?->format('Y-m-d'),
+                    'hotel_name' => $child->hotel?->name,
+                    'room_type_name' => $child->roomType?->name,
+                    'resource_order_no' => $child->resource_order_no,
+                ])
+                ->values()
+                ->all();
+        }
+
+        return response()->json($payload);
     }
 
     /**

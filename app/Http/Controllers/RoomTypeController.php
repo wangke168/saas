@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\RoomType;
+use App\Support\HotelMediaPayload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -60,6 +61,12 @@ class RoomTypeController extends Controller
             'code' => 'nullable|string|max:255', // 改为可空，自动生成
             'max_occupancy' => 'required|integer|min:1',
             'description' => 'nullable|string',
+            'cover_image' => 'nullable|string|max:500',
+            'images' => 'nullable|array|max:20',
+            'images.*' => 'nullable|string|max:500',
+            'bed_type' => 'nullable|string|max:50',
+            'room_area' => 'nullable|numeric|min:0|max:9999',
+            'breakfast' => 'nullable|string|max:100',
             'external_id' => 'nullable|string|max:255',
             'external_code' => 'nullable|string|max:255',
             'is_active' => 'boolean',
@@ -113,6 +120,12 @@ class RoomTypeController extends Controller
             'code' => 'nullable|string|max:255', // 改为可空，编辑时不允许修改
             'max_occupancy' => 'sometimes|required|integer|min:1',
             'description' => 'nullable|string',
+            'cover_image' => 'nullable|string|max:500',
+            'images' => 'nullable|array|max:20',
+            'images.*' => 'nullable|string|max:500',
+            'bed_type' => 'nullable|string|max:50',
+            'room_area' => 'nullable|numeric|min:0|max:9999',
+            'breakfast' => 'nullable|string|max:100',
             'external_id' => 'nullable|string|max:255',
             'external_code' => 'nullable|string|max:255',
             'is_active' => 'sometimes|boolean',
@@ -126,10 +139,30 @@ class RoomTypeController extends Controller
         $roomType->update($validated);
         $roomType->load('hotel');
 
+        $roomType->refresh();
+
         return response()->json([
             'message' => '房型更新成功',
-            'data' => $roomType,
+            'data' => array_merge($roomType->toArray(), self::mediaFields($roomType)),
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function mediaFields(RoomType $roomType): array
+    {
+        $payload = HotelMediaPayload::forMpRoomType($roomType);
+
+        return [
+            'cover_image' => $roomType->cover_image,
+            'cover_image_url' => $payload['cover_image'],
+            'images' => is_array($roomType->images) ? $roomType->images : [],
+            'image_urls' => $payload['images'],
+            'bed_type' => $roomType->bed_type,
+            'room_area' => $roomType->room_area,
+            'breakfast' => $roomType->breakfast,
+        ];
     }
 
     /**

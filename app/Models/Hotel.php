@@ -32,6 +32,9 @@ class Hotel extends Model
         'code',
         'address',
         'contact_phone',
+        'cover_image',
+        'images',
+        'introduction',
         'is_connected',
         'external_id',
         'external_code',
@@ -41,6 +44,7 @@ class Hotel extends Model
     protected function casts(): array
     {
         return [
+            'images' => 'array',
             'is_connected' => 'boolean',
             'is_active' => 'boolean',
         ];

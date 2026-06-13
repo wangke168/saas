@@ -89,10 +89,10 @@ class CtripNotificationService implements OtaNotificationInterface
     public function notifyOrderConsumed(Order $order, array $data = []): void
     {
         $itemId = $order->ctrip_item_id ?: (string) $order->id;
-        $useStartDate = $order->check_in_date->format('Y-m-d');
-        $useEndDate = $order->check_out_date->format('Y-m-d');
+        $useStartDate = $data['use_start_date'] ?? $order->check_in_date->format('Y-m-d');
+        $useEndDate = $data['use_end_date'] ?? $order->check_out_date->format('Y-m-d');
         $quantity = $order->room_count;
-        $useQuantity = $data['useQuantity'] ?? $order->room_count;
+        $useQuantity = $data['useQuantity'] ?? $data['use_quantity'] ?? 1;
         
         // 从 guest_info 中提取出行人信息
         $passengers = [];

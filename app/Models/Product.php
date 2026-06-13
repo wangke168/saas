@@ -13,6 +13,10 @@ class Product extends Model
 {
     use HasFactory, SoftDeletes;
 
+    protected $attributes = [
+        'fulfillment_mode' => 'immediate',
+    ];
+
     /**
      * 模型启动方法
      */
@@ -61,25 +65,65 @@ class Product extends Model
         'code',
         'external_code',
         'description',
+        'cover_image',
+        'booking_rules',
+        'mp_content',
+        'fee_note',
         'price_source',
         'is_active',
         'stay_days',
         'sale_start_date',
         'sale_end_date',
         'order_mode',
+        'fulfillment_mode',
+        'booking_advance_days',
         'order_provider_id',
         'is_realname',
+        'id_region_restriction_enabled',
+        'id_region_prefixes',
     ];
 
     protected function casts(): array
     {
         return [
             'price_source' => PriceSource::class,
+            'fulfillment_mode' => 'string',
             'is_active' => 'boolean',
             'is_realname' => 'integer',
+            'id_region_restriction_enabled' => 'boolean',
+            'id_region_prefixes' => 'array',
             'sale_start_date' => 'date',
             'sale_end_date' => 'date',
+            'booking_rules' => 'array',
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function resolvedBookingRules(): array
+    {
+        $rules = $this->booking_rules;
+        if (is_array($rules) && $rules !== []) {
+            return array_values(array_filter(array_map(
+                static fn (mixed $rule): string => trim((string) $rule),
+                $rules,
+            ), static fn (string $rule): bool => $rule !== ''));
+        }
+
+        return [
+            '须在本小程序完成预约后方可入住',
+            '预约成功后不可改期',
+            '一份预售仅可预约一次',
+            '入住人可与购买手机号不同',
+        ];
+    }
+
+    public function resolvedFeeNote(): string
+    {
+        $note = trim((string) ($this->fee_note ?? ''));
+
+        return $note !== '' ? $note : '已付金额为预售基础价；所选日期房型高于基础价需在线补差价。';
     }
 
     /**
@@ -88,6 +132,34 @@ class Product extends Model
     protected function serializeDate(\DateTimeInterface $date): string
     {
         return $date->format('Y-m-d');
+    }
+
+    /**
+     * 预售预约最早入住日（相对今天）。immediate 产品恒为今天。
+     */
+    public function earliestCheckInDate(?\Carbon\Carbon $from = null): \Carbon\Carbon
+    {
+        $from = $from ?? \Carbon\Carbon::today();
+        $days = 0;
+        if ($this->fulfillment_mode === 'deferred') {
+            $days = max(0, (int) ($this->booking_advance_days ?? 0));
+        }
+
+        return $from->copy()->addDays($days);
+    }
+
+    public function bookingAdvanceHint(): ?string
+    {
+        if ($this->fulfillment_mode !== 'deferred') {
+            return null;
+        }
+
+        $days = max(0, (int) ($this->booking_advance_days ?? 0));
+        if ($days <= 0) {
+            return null;
+        }
+
+        return sprintf('须提前%d天预约，最早可选入住日为%s', $days, $this->earliestCheckInDate()->format('Y-m-d'));
     }
 
     /**

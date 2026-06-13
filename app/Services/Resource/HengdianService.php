@@ -2,9 +2,13 @@
 
 namespace App\Services\Resource;
 
+use App\Enums\FulfillmentMode;
+use App\Enums\OrderBookingStatus;
 use App\Http\Client\HengdianClient;
 use App\Models\Order;
+use App\Models\OrderBooking;
 use App\Models\ResourceConfig;
+use App\Support\MpBookingGuestInfo;
 use App\Models\SoftwareProvider;
 use App\Models\ExceptionOrder;
 use App\Models\ProductExternalCodeMapping;
@@ -285,6 +289,12 @@ class HengdianService implements ResourceServiceInterface
             };
         }
 
+        // 小程序预约 guest_id_type：id_card / passport
+        $guestIdType = $guest['guest_id_type'] ?? null;
+        if ($guestIdType !== null && $guestIdType !== '') {
+            return $this->mapGenericIdType((string) $guestIdType);
+        }
+
         return '2';
     }
 
@@ -466,89 +476,103 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
+     * 预售预约：从 order_bookings 取入住人；即订等仍用 orders.guest_info（OTA 购票人/出行人）
+     *
+     * @return list<array<string, mixed>>
+     */
+    protected function resolveGuestInfoForResourceBook(Order $order): array
+    {
+        $order->loadMissing('product');
+
+        if ($order->parent_order_id !== null && is_array($order->guest_info) && $order->guest_info !== []) {
+            return $order->guest_info;
+        }
+
+        if ($order->product?->fulfillment_mode === FulfillmentMode::Deferred) {
+            $booking = OrderBooking::query()
+                ->where('order_id', $order->id)
+                ->whereIn('status', [
+                    OrderBookingStatus::Confirmed,
+                    OrderBookingStatus::Paid,
+                ])
+                ->latest('id')
+                ->first();
+
+            if ($booking !== null) {
+                $fromBooking = MpBookingGuestInfo::toOrderGuestInfo($booking);
+                if ($fromBooking !== []) {
+                    return $fromBooking;
+                }
+            }
+        }
+
+        return is_array($order->guest_info) ? $order->guest_info : [];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $guestInfoRows
+     * @return list<array{Name: string, IdType: string, IdCode: string}>
+     */
+    protected function buildOrderGuestListFromInfoRows(Order $order, array $guestInfoRows): array
+    {
+        $orderGuestList = [];
+
+        foreach ($guestInfoRows as $index => $guest) {
+            $idCode = trim((string) ($guest['cardNo'] ?? $guest['idCode'] ?? $guest['id_code'] ?? ''));
+            $name = trim((string) ($guest['name'] ?? ''));
+
+            if ($name === '' || $idCode === '') {
+                Log::warning('横店订单客人信息不完整', [
+                    'order_id' => $order->id,
+                    'guest_index' => $index,
+                    'guest' => $guest,
+                ]);
+
+                continue;
+            }
+
+            $orderGuestList[] = [
+                'Name' => $name,
+                'IdType' => $this->mapGuestIdType($guest),
+                'IdCode' => $idCode,
+            ];
+        }
+
+        return $orderGuestList;
+    }
+
+    protected function resolveBookRoomNum(Order $order): int
+    {
+        if ($order->parent_order_id !== null) {
+            return 1;
+        }
+
+        $order->loadMissing('product');
+
+        if ($order->product?->fulfillment_mode === FulfillmentMode::Deferred) {
+            return 1;
+        }
+
+        return max(1, (int) $order->room_count);
+    }
+
+    /**
      * 下单预订
      */
     public function book(Order $order): array
     {
         try {
             // 添加详细的调试日志
+            $guestInfoRows = $this->resolveGuestInfoForResourceBook($order);
+
             Log::info('横店接单开始', [
                 'order_id' => $order->id,
                 'ota_order_no' => $order->ota_order_no,
-                'guest_info_exists' => !empty($order->guest_info),
-                'guest_info_type' => gettype($order->guest_info),
-                'guest_info' => $order->guest_info,
-                'guest_info_count' => is_array($order->guest_info) ? count($order->guest_info) : 0,
+                'guest_source' => $order->product?->fulfillment_mode === FulfillmentMode::Deferred ? 'order_booking' : 'order',
+                'guest_info_count' => count($guestInfoRows),
             ]);
-            
-            // 构建订单客人信息
-            $orderGuestList = [];
-            if ($order->guest_info && is_array($order->guest_info)) {
-                Log::info('开始处理客人信息', [
-                    'order_id' => $order->id,
-                    'guest_info_count' => count($order->guest_info),
-                    'guest_info_structure' => array_map(function($guest) {
-                        return [
-                            'keys' => array_keys($guest),
-                            'has_name' => isset($guest['name']),
-                            'has_cardNo' => isset($guest['cardNo']),
-                            'has_idCode' => isset($guest['idCode']),
-                            'has_id_code' => isset($guest['id_code']),
-                        ];
-                    }, $order->guest_info),
-                ]);
-                
-                foreach ($order->guest_info as $index => $guest) {
-                    // 兼容多种字段名：cardNo（携程）、idCode、id_code
-                    // 注意：数据格式为 [{"cardNo":"530627200211154118","name":"王书桓",...}]
-                    $idCode = $guest['cardNo'] ?? $guest['idCode'] ?? $guest['id_code'] ?? '';
-                    $name = $guest['name'] ?? '';
-                    
-                    // 去除首尾空格
-                    $idCode = trim((string)$idCode);
-                    $name = trim((string)$name);
-                    
-                    Log::info("处理第 {$index} 个客人", [
-                        'order_id' => $order->id,
-                        'guest_index' => $index,
-                        'guest_data' => $guest,
-                        'guest_data_keys' => array_keys($guest),
-                        'extracted_name' => $name,
-                        'extracted_name_length' => strlen($name),
-                        'extracted_idCode' => $idCode,
-                        'extracted_idCode_length' => strlen($idCode),
-                    ]);
-                    
-                    // 如果姓名或身份证号为空，记录警告但继续处理
-                    if (empty($name) || empty($idCode)) {
-                        Log::warning('横店订单客人信息不完整', [
-                            'order_id' => $order->id,
-                            'guest_index' => $index,
-                            'guest' => $guest,
-                            'name' => $name,
-                            'name_empty' => empty($name),
-                            'idCode' => $idCode,
-                            'idCode_empty' => empty($idCode),
-                        ]);
-                    }
-                    
-                    // 只有当姓名和身份证号都不为空时才添加到列表
-                    if (!empty($name) && !empty($idCode)) {
-                        $orderGuestList[] = [
-                            'Name' => $name,
-                            'IdType' => $this->mapGuestIdType($guest),
-                            'IdCode' => $idCode,
-                        ];
-                    } else {
-                        Log::error('横店订单客人信息缺失，跳过该客人', [
-                            'order_id' => $order->id,
-                            'guest_index' => $index,
-                            'name' => $name,
-                            'idCode' => $idCode,
-                        ]);
-                    }
-                }
-            }
+
+            $orderGuestList = $this->buildOrderGuestListFromInfoRows($order, $guestInfoRows);
             
             // 如果客人列表为空，记录错误并直接返回错误（不发送到横店）
             if (empty($orderGuestList)) {
@@ -624,10 +648,10 @@ class HengdianService implements ResourceServiceInterface
                 'CheckIn' => $order->check_in_date->format('Y-m-d'),
                 'CheckOut' => $checkOutDate->format('Y-m-d'),
                 'Amount' => $this->buildBookAmount((float)($order->total_amount ?? 0)),
-                'RoomNum' => $order->room_count,
+                'RoomNum' => $this->resolveBookRoomNum($order),
                 'PaymentType' => 1, // 预付
-                'ContactName' => $order->contact_name ?? '',
-                'ContactTel' => $order->contact_phone ?? '',
+                'ContactName' => $guestInfoRows[0]['name'] ?? $order->contact_name ?? '',
+                'ContactTel' => $guestInfoRows[0]['mobile'] ?? $order->contact_phone ?? '',
                 'OrderGuests' => [
                     'OrderGuest' => $orderGuestList, // 使用 OrderGuest 作为键，生成正确的 XML 结构
                 ],
@@ -639,7 +663,7 @@ class HengdianService implements ResourceServiceInterface
             Log::info('发送到景区方系统的订单数据', [
                 'order_id' => $order->id,
                 'ota_order_no' => $order->ota_order_no,
-                'guest_info' => $order->guest_info,
+                'guest_info' => $guestInfoRows,
                 'order_guest_list' => $orderGuestList,
                 'order_guest_list_count' => count($orderGuestList),
                 'request_data' => $data,

@@ -19,10 +19,17 @@ class DuplicateProductRequest extends FormRequest
             'name' => 'required|string|max:255',
             'external_code' => 'nullable|string|max:255',
             'description' => 'nullable|string',
+            'cover_image' => 'nullable|string|max:500',
+            'booking_rules' => 'nullable|array',
+            'booking_rules.*' => 'nullable|string|max:500',
+            'mp_content' => 'nullable|string',
+            'fee_note' => 'nullable|string|max:500',
             'price_source' => 'sometimes|in:manual,api',
             'stay_days' => 'required|integer|min:1|max:30',
             'sale_start_date' => 'required|date',
             'sale_end_date' => 'required|date|after_or_equal:sale_start_date',
+            'fulfillment_mode' => 'sometimes|in:immediate,deferred',
+            'booking_advance_days' => 'nullable|integer|min:0|max:90',
             'order_mode' => 'nullable|in:auto,manual,other',
             'order_provider_id' => 'nullable|exists:software_providers,id',
             'is_active' => 'sometimes|boolean',
@@ -32,6 +39,9 @@ class DuplicateProductRequest extends FormRequest
             'unavailable_periods.*.start_date' => 'required|date',
             'unavailable_periods.*.end_date' => 'required|date',
             'unavailable_periods.*.note' => 'nullable|string|max:500',
+            'id_region_restriction_enabled' => 'sometimes|boolean',
+            'id_region_prefixes' => 'nullable|array',
+            'id_region_prefixes.*' => 'nullable|string|max:6',
         ];
     }
 }

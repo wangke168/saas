@@ -1,8 +1,13 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\UploadController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Mp\AuthController as MpAuthController;
+use App\Http\Controllers\Mp\EntitlementController as MpEntitlementController;
+use App\Http\Controllers\Mp\ProductController as MpProductController;
+use App\Http\Controllers\Mp\BookingController as MpBookingController;
 
 // Webhooks路由（无需认证）
 Route::prefix('webhooks')->group(function () {
@@ -40,6 +45,9 @@ Route::prefix('webhooks')->group(function () {
     // 自我游回调通知（统一回调地址）
     Route::post('/ziwoyou', [\App\Http\Controllers\Webhooks\ZiwoyouController::class, 'callback']);
 
+    // 微信小程序预约补差支付回调
+    Route::post('/wechat/pay', [\App\Http\Controllers\Webhooks\WechatPayController::class, 'notify']);
+
     // 测试接口（仅开发环境使用）
     if (app()->environment(['local', 'testing'])) {
         Route::post('/test/resource-inventory-push', [\App\Http\Controllers\Webhooks\ResourceController::class, 'handleHengdianInventory']);
@@ -49,6 +57,32 @@ Route::prefix('webhooks')->group(function () {
 // 资源方开关房状态推送（无需认证，使用签名校验）
 Route::post('/channel/{provider}/room-switch-sync', [\App\Http\Controllers\Channel\RoomSwitchSyncController::class, 'store'])
     ->middleware('channel.signature');
+
+// 小程序 C 端 API（独立 token，不走后台 sanctum）
+Route::prefix('mp/v1')->group(function () {
+    Route::prefix('auth')->group(function () {
+        Route::post('/wechat/phone', [MpAuthController::class, 'loginWithWechatPhone']);
+        Route::prefix('sms')->group(function () {
+            Route::post('/send', [MpAuthController::class, 'sendSms']);
+            Route::post('/verify', [MpAuthController::class, 'verifySms']);
+        });
+    });
+
+    Route::get('/entitlements', [MpEntitlementController::class, 'index']);
+    Route::get('/entitlements/{entitlement_no}', [MpEntitlementController::class, 'show']);
+    Route::get('/products/{product}', [MpProductController::class, 'show']);
+    Route::get('/calendar', [MpBookingController::class, 'calendar']);
+    Route::get('/hotels', [MpBookingController::class, 'hotels']);
+    Route::get('/hotels/{hotel}', [MpBookingController::class, 'hotelShow']);
+    Route::get('/room-types', [MpBookingController::class, 'roomTypes']);
+    Route::get('/room-types/{roomType}', [MpBookingController::class, 'roomTypeShow']);
+    Route::post('/bookings/quote', [MpBookingController::class, 'quote']);
+    Route::post('/bookings', [MpBookingController::class, 'store']);
+    Route::get('/bookings/{booking}', [MpBookingController::class, 'show']);
+    Route::post('/bookings/{booking}/pay', [MpBookingController::class, 'pay']);
+    Route::post('/bookings/{booking}/pay/callback', [MpBookingController::class, 'payCallback']);
+    Route::post('/bookings/{booking}/cancel', [MpBookingController::class, 'cancel']);
+});
 
 // 认证相关路由（无需认证）
 Route::prefix('auth')->group(function () {
@@ -64,6 +98,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/me', [AuthController::class, 'user']);
         Route::post('/change-password', [AuthController::class, 'changePassword']);
     });
+
+    Route::post('/uploads/images', [UploadController::class, 'storeImage']);
 
     // 用户管理（仅超级管理员）
     Route::prefix('users')->middleware('role:admin')->group(function () {

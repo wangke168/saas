@@ -2,7 +2,10 @@
     <div>
         <el-page-header @back="goBack" title="返回产品列表">
             <template #content>
-                <span>产品详情</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span>产品详情</span>
+                    <el-button v-if="product" type="primary" link @click="goEdit">编辑产品</el-button>
+                </div>
             </template>
         </el-page-header>
 
@@ -53,6 +56,23 @@
                     </el-descriptions-item>
                     <el-descriptions-item label="产品描述" :span="2">
                         {{ product.description || '-' }}
+                    </el-descriptions-item>
+                    <el-descriptions-item label="地区限制">
+                        <el-tag :type="product.id_region_restriction_enabled ? 'warning' : 'info'">
+                            {{ product.id_region_restriction_enabled ? '已启用' : '未启用' }}
+                        </el-tag>
+                    </el-descriptions-item>
+                    <el-descriptions-item label="身份证前几位">
+                        <template v-if="product.id_region_restriction_enabled && product.id_region_prefixes?.length">
+                            <el-tag
+                                v-for="(prefix, idx) in product.id_region_prefixes"
+                                :key="idx"
+                                style="margin-right: 6px;"
+                            >
+                                {{ prefix }}
+                            </el-tag>
+                        </template>
+                        <span v-else style="color: #909399;">未配置</span>
                     </el-descriptions-item>
                 </el-descriptions>
 
@@ -1243,6 +1263,12 @@ const processPriceGroups = (groups = []) => {
 
 const goBack = () => {
     router.push('/products');
+};
+
+const goEdit = () => {
+    const id = route.params.id;
+    if (!id) return;
+    router.push(`/products/${id}/edit`);
 };
 
 const fetchProduct = async () => {

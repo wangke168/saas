@@ -1,6 +1,13 @@
 <template>
     <div class="order-management-container">
         <h2>订单管理</h2>
+        <el-alert
+            type="info"
+            :closable="true"
+            show-icon
+            style="margin-bottom: 12px;"
+            title="OTA 预售：列表中的「系统订单号」为父订单（携程/美团购买）；小程序预约单号为 B 开头，可在筛选「预约单号」或进入父单详情查看「预售权益与预约单」。"
+        />
         <el-card>
             <!-- 筛选条件 -->
             <div class="filter-bar">
@@ -32,6 +39,14 @@
                     <el-input
                         v-model="filters.ota_order_no"
                         placeholder="OTA订单号"
+                        clearable
+                        style="width: 200px;"
+                        @clear="handleFilter"
+                        @keyup.enter="handleFilter"
+                    />
+                    <el-input
+                        v-model="filters.booking_no"
+                        placeholder="小程序预约单号"
                         clearable
                         style="width: 200px;"
                         @clear="handleFilter"
@@ -137,6 +152,22 @@
                             <span class="label">来源：</span>
                             <span class="value">{{ order.ota_platform?.name || '-' }}</span>
                         </span>
+                        <el-tag
+                            v-if="order.is_presale_fulfillment_child"
+                            type="success"
+                            size="small"
+                            style="margin-left: 8px;"
+                        >
+                            预售子单
+                        </el-tag>
+                        <el-tag
+                            v-else-if="order.is_presale_parent"
+                            type="warning"
+                            size="small"
+                            style="margin-left: 8px;"
+                        >
+                            预售父单
+                        </el-tag>
                     </div>
 
                     <!-- 主体内容区 -->
@@ -411,6 +442,7 @@ const filters = ref({
     status: null,
     order_no: '',
     ota_order_no: '',
+    booking_no: '',
     contact_name: '',
     contact_phone: '',
     ota_platform_id: null,
@@ -436,6 +468,9 @@ const fetchOrders = async () => {
         }
         if (filters.value.ota_order_no) {
             params.ota_order_no = filters.value.ota_order_no;
+        }
+        if (filters.value.booking_no) {
+            params.booking_no = filters.value.booking_no;
         }
         if (filters.value.contact_name) {
             params.contact_name = filters.value.contact_name;
@@ -492,6 +527,7 @@ const resetFilter = () => {
         status: null,
         order_no: '',
         ota_order_no: '',
+        booking_no: '',
         contact_name: '',
         contact_phone: '',
         ota_platform_id: null,

@@ -3,7 +3,9 @@ import laravel from 'laravel-vite-plugin';
 import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
-    base: '/manage/',
+    // 不要设置 base 为 /manage/：Laravel 构建产物在 /build/assets/，
+    // 若 base=/manage/ 会导致懒加载 chunk 请求 /manage/assets/* 而 404。
+    // SPA 路由前缀由 vue-router 的 createWebHistory('/manage/') 单独处理。
     plugins: [
         laravel({
             input: ['resources/css/app.css', 'resources/js/app.js'],

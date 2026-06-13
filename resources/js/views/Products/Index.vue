@@ -28,6 +28,16 @@
                     <el-option label="启用" :value="true" />
                     <el-option label="禁用" :value="false" />
                 </el-select>
+                <el-select
+                    v-model="filterFulfillmentMode"
+                    placeholder="履约模式"
+                    clearable
+                    style="width: 180px; margin-left: 10px;"
+                    @change="handleFilter"
+                >
+                    <el-option label="落单即履约" value="immediate" />
+                    <el-option label="小程序预约后履约" value="deferred" />
+                </el-select>
                 <el-input
                     v-model="searchKeyword"
                     placeholder="搜索产品名称或编码"
@@ -51,6 +61,13 @@
                     </template>
                 </el-table-column>
                 <el-table-column prop="description" label="描述" show-overflow-tooltip />
+                <el-table-column prop="fulfillment_mode" label="履约模式" width="150">
+                    <template #default="{ row }">
+                        <el-tag :type="row.fulfillment_mode === 'deferred' ? 'warning' : 'info'">
+                            {{ fulfillmentModeLabel(row.fulfillment_mode) }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
                 <el-table-column prop="price_source" label="价格来源" width="120">
                     <template #default="{ row }">
                         <el-tag :type="row.price_source === 'manual' ? 'primary' : 'success'">
@@ -96,238 +113,11 @@
             />
         </el-card>
 
-        <!-- 创建/编辑产品对话框 -->
-        <el-dialog
-            v-model="dialogVisible"
-            :title="dialogTitle"
-            width="680px"
-            @close="resetForm"
-        >
-            <el-form
-                ref="formRef"
-                :model="form"
-                :rules="rules"
-                label-width="120px"
-            >
-                <el-form-item label="所属景区" prop="scenic_spot_id">
-                    <el-select
-                        v-model="form.scenic_spot_id"
-                        placeholder="请选择景区"
-                        style="width: 100%"
-                        :disabled="isEdit"
-                        @change="handleScenicSpotChange"
-                    >
-                        <el-option
-                            v-for="spot in scenicSpots"
-                            :key="spot.id"
-                            :label="spot.name"
-                            :value="spot.id"
-                        />
-                    </el-select>
-                </el-form-item>
-                <el-form-item label="软件服务商" prop="software_provider_id" required>
-                    <el-select
-                        v-model="form.software_provider_id"
-                        placeholder="请先选择景区"
-                        style="width: 100%"
-                        :disabled="!form.scenic_spot_id"
-                    >
-                        <el-option
-                            v-for="provider in availableSoftwareProviders"
-                            :key="provider.id"
-                            :label="`${provider.name} (${provider.api_type || '无类型'})`"
-                            :value="provider.id"
-                        />
-                    </el-select>
-                    <div v-if="!form.scenic_spot_id" style="font-size: 12px; color: #909399; margin-top: 5px;">
-                        请先选择景区，然后选择该景区下的服务商
-                    </div>
-                    <div v-else-if="availableSoftwareProviders.length === 0" style="font-size: 12px; color: #f56c6c; margin-top: 5px;">
-                        该景区尚未配置服务商，请先在景区管理页面添加服务商
-                    </div>
-                    <div v-else style="font-size: 12px; color: #909399; margin-top: 5px;">
-                        选择产品使用的软件服务商（必填）
-                    </div>
-                </el-form-item>
-                <el-form-item label="产品名称" prop="name">
-                    <el-input v-model="form.name" placeholder="请输入产品名称" />
-                </el-form-item>
-                <el-form-item label="产品编码" prop="code" v-if="isEdit">
-                    <el-input v-model="form.code" placeholder="系统自动生成" disabled />
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        产品编码由系统自动生成，不可修改
-                    </span>
-                </el-form-item>
-                <el-form-item label="外部产品编码" prop="external_code">
-                    <el-input v-model="form.external_code" placeholder="请输入外部产品编码（可选，用于和景区系统对接，如横店）" />
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        用于和景区系统（如横店）对接的产品编码，如果产品不需要对接外部系统，可留空
-                    </span>
-                </el-form-item>
-                <el-form-item label="描述" prop="description">
-                    <el-input
-                        v-model="form.description"
-                        type="textarea"
-                        :rows="4"
-                        placeholder="请输入产品描述"
-                    />
-                </el-form-item>
-                <el-form-item label="价格来源" prop="price_source">
-                    <el-select
-                        v-model="form.price_source"
-                        placeholder="请选择价格来源"
-                        style="width: 100%"
-                    >
-                        <el-option label="人工维护" value="manual" />
-                        <el-option label="接口推送" value="api" />
-                    </el-select>
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        选择接口推送后，价格将通过资源方接口自动更新
-                    </span>
-                </el-form-item>
-                <el-form-item label="入住天数" prop="stay_days" required>
-                    <el-input-number
-                        v-model="form.stay_days"
-                        :min="1"
-                        :max="30"
-                        placeholder="请输入入住天数（必填）"
-                        style="width: 100%"
-                    />
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        产品需要连续入住的天数，至少为1
-                    </span>
-                </el-form-item>
-                <el-form-item label="销售开始日期" prop="sale_start_date">
-                    <el-date-picker
-                        v-model="form.sale_start_date"
-                        type="date"
-                        placeholder="选择销售开始日期"
-                        format="YYYY-MM-DD"
-                        value-format="YYYY-MM-DD"
-                        style="width: 100%"
-                        :disabled-date="(date) => form.sale_end_date && date > new Date(form.sale_end_date)"
-                    />
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        产品开始销售的日期（必填）
-                    </span>
-                </el-form-item>
-                <el-form-item label="销售结束日期" prop="sale_end_date">
-                    <el-date-picker
-                        v-model="form.sale_end_date"
-                        type="date"
-                        placeholder="选择销售结束日期"
-                        format="YYYY-MM-DD"
-                        value-format="YYYY-MM-DD"
-                        style="width: 100%"
-                        :disabled-date="(date) => form.sale_start_date && date < new Date(form.sale_start_date)"
-                    />
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        产品结束销售的日期（必填），不能早于开始日期
-                    </span>
-                </el-form-item>
-                <el-form-item label="不可订时段">
-                    <div style="width: 100%;">
-                        <div
-                            v-for="(row, idx) in form.unavailable_periods"
-                            :key="idx"
-                            style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px;"
-                        >
-                            <el-date-picker
-                                v-model="row.start_date"
-                                type="date"
-                                placeholder="开始"
-                                format="YYYY-MM-DD"
-                                value-format="YYYY-MM-DD"
-                                style="width: 140px;"
-                            />
-                            <span style="color: #909399;">至</span>
-                            <el-date-picker
-                                v-model="row.end_date"
-                                type="date"
-                                placeholder="结束"
-                                format="YYYY-MM-DD"
-                                value-format="YYYY-MM-DD"
-                                style="width: 140px;"
-                            />
-                            <el-input
-                                v-model="row.note"
-                                placeholder="备注（可选）"
-                                style="width: 160px;"
-                                maxlength="500"
-                                show-word-limit
-                            />
-                            <el-button type="danger" link @click="removeUnavailablePeriod(idx)">删除</el-button>
-                        </div>
-                        <el-button type="primary" link @click="addUnavailablePeriod">+ 添加不可订时段</el-button>
-                        <div style="font-size: 12px; color: #909399; margin-top: 6px;">
-                            与库存日历「房晚」日期一致（含首尾）。多晚产品若任一晚落在不可订区间内，则该入住日不向 OTA 推库存/价。
-                        </div>
-                    </div>
-                </el-form-item>
-                <el-form-item label="订单处理方式" prop="order_mode">
-                    <el-select
-                        v-model="form.order_mode"
-                        placeholder="使用景区配置（默认）"
-                        clearable
-                        style="width: 100%"
-                    >
-                        <el-option label="使用景区配置（默认）" :value="null" />
-                        <el-option label="系统直连" value="auto" />
-                        <el-option label="手工接单" value="manual" />
-                        <el-option label="其他系统" value="other" />
-                    </el-select>
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        选择订单处理方式。留空则使用景区配置；系统直连=自动调用资源方接口；手工接单=需要人工处理；其他系统=对接其他订单系统
-                    </span>
-                </el-form-item>
-                <el-form-item 
-                    label="订单下发服务商" 
-                    prop="order_provider_id"
-                    v-if="form.order_mode === 'other'"
-                >
-                    <el-select
-                        v-model="form.order_provider_id"
-                        placeholder="请选择订单下发服务商"
-                        clearable
-                        style="width: 100%"
-                        :disabled="!form.scenic_spot_id"
-                    >
-                        <el-option
-                            v-for="provider in availableSoftwareProviders"
-                            :key="provider.id"
-                            :label="`${provider.name} (${provider.api_type || '无类型'})`"
-                            :value="provider.id"
-                        />
-                    </el-select>
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        当订单处理方式为"其他系统"时，需要选择具体的订单下发服务商。留空则使用景区配置的订单下发服务商。
-                    </span>
-                </el-form-item>
-                <el-form-item label="状态" prop="is_active">
-                    <el-switch v-model="form.is_active" />
-                </el-form-item>
-                <el-form-item label="是否实名制" prop="is_realname">
-                    <el-switch
-                        v-model="form.is_realname"
-                        :active-value="true"
-                        :inactive-value="false"
-                        @change="form.is_realname_touched = true"
-                    />
-                    <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                        开启后，美团相关订单将按实名制返回/回传证件与凭证信息
-                    </span>
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="dialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="handleSubmit" :loading="submitting">确定</el-button>
-            </template>
-        </el-dialog>
     </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -339,88 +129,15 @@ const router = useRouter();
 
 const products = ref([]);
 const scenicSpots = ref([]);
-const availableSoftwareProviders = ref([]);
 const loading = ref(false);
-const submitting = ref(false);
 const exporting = ref({}); // 改为对象，记录每个产品的导出状态
-const dialogVisible = ref(false);
-const formRef = ref(null);
 const searchKeyword = ref('');
 const filterScenicSpotId = ref(null);
 const filterStatus = ref(null);
+const filterFulfillmentMode = ref(null);
 const currentPage = ref(1);
 const pageSize = ref(15);
 const total = ref(0);
-const editingId = ref(null);
-const duplicateSourceId = ref(null);
-
-const isEdit = computed(() => editingId.value !== null);
-const isDuplicate = computed(() => duplicateSourceId.value !== null);
-const dialogTitle = computed(() => {
-    if (isEdit.value) return '编辑产品';
-    if (isDuplicate.value) return '复制产品';
-    return '创建产品';
-});
-
-const form = ref({
-    scenic_spot_id: null,
-    software_provider_id: null,
-    name: '',
-    code: '',
-    description: '',
-    price_source: 'manual',
-    stay_days: 1, // 默认值为1，必填
-    sale_start_date: null,
-    sale_end_date: null,
-    order_mode: null, // 订单处理方式：null=使用景区配置, auto=系统直连, manual=手工接单, other=其他系统
-    order_provider_id: null, // 订单下发服务商ID（当order_mode为other时使用）
-    is_active: true,
-    // 是否实名制：默认非实名；若编辑时原值为 null 且用户未触碰，则提交 null 保持兼容
-    is_realname: false,
-    is_realname_touched: false,
-    _is_realname_original_null: false,
-    unavailable_periods: [],
-});
-
-const validateSaleEndDate = (rule, value, callback) => {
-    if (!value) {
-        callback(new Error('请选择销售结束日期'));
-    } else if (form.value.sale_start_date && value < form.value.sale_start_date) {
-        callback(new Error('销售结束日期不能早于开始日期'));
-    } else {
-        callback();
-    }
-};
-
-const rules = {
-    scenic_spot_id: [
-        { required: true, message: '请选择所属景区', trigger: 'change' }
-    ],
-    software_provider_id: [
-        { required: true, message: '请选择软件服务商', trigger: 'change' }
-    ],
-    name: [
-        { required: true, message: '请输入产品名称', trigger: 'blur' },
-        { max: 255, message: '产品名称不能超过255个字符', trigger: 'blur' }
-    ],
-    // code 由系统自动生成，不需要验证
-    external_code: [
-        { max: 255, message: '外部产品编码不能超过255个字符', trigger: 'blur' }
-    ],
-    price_source: [
-        { required: true, message: '请选择价格来源', trigger: 'change' }
-    ],
-    stay_days: [
-        { required: true, message: '请输入入住天数', trigger: 'blur' },
-        { type: 'number', min: 1, max: 30, message: '入住天数必须在1-30之间', trigger: 'blur' }
-    ],
-    sale_start_date: [
-        { required: true, message: '请选择销售开始日期', trigger: 'change' }
-    ],
-    sale_end_date: [
-        { validator: validateSaleEndDate, trigger: 'change' }
-    ],
-};
 
 const fetchProducts = async () => {
     loading.value = true;
@@ -436,6 +153,10 @@ const fetchProducts = async () => {
         
         if (filterStatus.value !== null) {
             params.is_active = filterStatus.value;
+        }
+
+        if (filterFulfillmentMode.value) {
+            params.fulfillment_mode = filterFulfillmentMode.value;
         }
         
         if (searchKeyword.value) {
@@ -507,19 +228,14 @@ const handleFilter = () => {
 };
 
 const handleCreate = async () => {
-    editingId.value = null;
-    duplicateSourceId.value = null;
-    resetForm();
-    // 确保景区列表已加载（特别是运营用户）
     if (scenicSpots.value.length === 0) {
         await fetchScenicSpots();
     }
-    // 如果是运营用户且没有景区，提示用户
     if (authStore.user?.role !== 'admin' && scenicSpots.value.length === 0) {
         ElMessage.warning('您未绑定任何景区，请联系管理员为您分配景区');
         return;
     }
-    dialogVisible.value = true;
+    router.push('/products/create');
 };
 
 const handleViewDetail = (row) => {
@@ -527,243 +243,19 @@ const handleViewDetail = (row) => {
     router.push(`/products/${row.id}/detail`);
 };
 
-const handleScenicSpotChange = async (scenicSpotId, preserveProviderId = false) => {
-    // 保存当前的服务商ID（如果是编辑模式，需要保留）
-    const currentProviderId = preserveProviderId ? form.value.software_provider_id : null;
-    
-    // 清空服务商选择
-    form.value.software_provider_id = null;
-    availableSoftwareProviders.value = [];
-    
-    if (scenicSpotId) {
-        // 加载该景区的服务商列表
-        try {
-            const response = await axios.get(`/scenic-spots/${scenicSpotId}`);
-            const scenicSpot = response.data.data;
-            availableSoftwareProviders.value = scenicSpot.software_providers || [];
-            
-            // 如果是编辑模式且之前有服务商ID，尝试恢复
-            if (preserveProviderId && currentProviderId) {
-                // 检查该服务商是否在新的服务商列表中
-                const providerExists = availableSoftwareProviders.value.some(
-                    provider => provider.id === currentProviderId
-                );
-                if (providerExists) {
-                    form.value.software_provider_id = currentProviderId;
-                } else {
-                    // 如果服务商不在列表中，清空选择并提示
-                    form.value.software_provider_id = null;
-                    ElMessage.warning('该产品配置的服务商不属于当前景区的服务商列表，请重新选择');
-                }
-            }
-            
-            if (availableSoftwareProviders.value.length === 0) {
-                ElMessage.warning('该景区尚未配置服务商，请先在景区管理页面添加服务商');
-            }
-        } catch (error) {
-            ElMessage.error('获取景区服务商列表失败');
-            console.error(error);
-        }
-    }
+const handleEdit = (row) => {
+    router.push(`/products/${row.id}/edit`);
 };
 
-// 格式化日期为 YYYY-MM-DD 格式（兼容多种输入格式）
-const formatDateForPicker = (dateString) => {
-    if (!dateString) return null;
-    // 如果是 ISO 8601 格式（包含 T），提取日期部分
-    if (typeof dateString === 'string' && dateString.includes('T')) {
-        return dateString.split('T')[0];
-    }
-    // 如果已经是 YYYY-MM-DD 格式，直接返回
-    if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-        return dateString;
-    }
-    // 其他情况返回原值
-    return dateString;
+const handleDuplicate = (row) => {
+    router.push({ path: '/products/create', query: { duplicate_from: row.id } });
 };
 
-const mapUnavailablePeriodsFromApi = (list) => {
-    if (!Array.isArray(list) || list.length === 0) {
-        return [];
+const fulfillmentModeLabel = (mode) => {
+    if (mode === 'deferred') {
+        return '预约后履约';
     }
-    return list.map((p) => ({
-        start_date: formatDateForPicker(p.start_date),
-        end_date: formatDateForPicker(p.end_date),
-        note: p.note || '',
-    }));
-};
-
-const handleEdit = async (row) => {
-    editingId.value = row.id;
-    duplicateSourceId.value = null;
-
-    let unavailablePeriods = [];
-    try {
-        const res = await axios.get(`/products/${row.id}`, { params: { include_prices: false } });
-        unavailablePeriods = mapUnavailablePeriodsFromApi(res.data?.data?.unavailable_periods);
-    } catch (e) {
-        console.error(e);
-    }
-
-    form.value = {
-        scenic_spot_id: row.scenic_spot_id,
-        software_provider_id: row.software_provider_id || null,
-        name: row.name,
-        code: row.code, // 只读显示，不可修改
-        external_code: row.external_code || '',
-        description: row.description || '',
-        price_source: row.price_source || 'manual',
-        stay_days: row.stay_days || 1, // 默认值为1，必填
-        sale_start_date: formatDateForPicker(row.sale_start_date),
-        sale_end_date: formatDateForPicker(row.sale_end_date),
-        order_mode: row.order_mode || null, // 订单处理方式
-        order_provider_id: row.order_provider_id || null, // 订单下发服务商ID
-        is_active: row.is_active,
-        // 兼容后端 boolean/tinyint 返回的 1/0、'1'/'0'
-        is_realname: Number(row.is_realname) === 1,
-        is_realname_touched: false,
-        _is_realname_original_null: row.is_realname === null || row.is_realname === undefined,
-        unavailable_periods: unavailablePeriods,
-    };
-    
-    // 加载该景区的服务商列表（编辑模式下保留当前的服务商ID）
-    if (row.scenic_spot_id) {
-        await handleScenicSpotChange(row.scenic_spot_id, true);
-    }
-    
-    dialogVisible.value = true;
-};
-
-const handleDuplicate = async (row) => {
-    editingId.value = null;
-    duplicateSourceId.value = row.id;
-
-    let unavailablePeriods = [];
-    try {
-        const res = await axios.get(`/products/${row.id}`, { params: { include_prices: false } });
-        unavailablePeriods = mapUnavailablePeriodsFromApi(res.data?.data?.unavailable_periods);
-    } catch (error) {
-        console.error(error);
-    }
-
-    form.value = {
-        scenic_spot_id: row.scenic_spot_id,
-        software_provider_id: row.software_provider_id || null,
-        name: `${row.name}-副本`,
-        code: '',
-        external_code: row.external_code || '',
-        description: row.description || '',
-        price_source: row.price_source || 'manual',
-        stay_days: row.stay_days || 1,
-        sale_start_date: formatDateForPicker(row.sale_start_date),
-        sale_end_date: formatDateForPicker(row.sale_end_date),
-        order_mode: row.order_mode || null,
-        order_provider_id: row.order_provider_id || null,
-        is_active: row.is_active,
-        is_realname: Number(row.is_realname) === 1,
-        is_realname_touched: false,
-        _is_realname_original_null: row.is_realname === null || row.is_realname === undefined,
-        unavailable_periods: unavailablePeriods,
-    };
-
-    if (row.scenic_spot_id) {
-        await handleScenicSpotChange(row.scenic_spot_id, true);
-    }
-
-    dialogVisible.value = true;
-};
-
-const addUnavailablePeriod = () => {
-    form.value.unavailable_periods.push({
-        start_date: null,
-        end_date: null,
-        note: '',
-    });
-};
-
-const removeUnavailablePeriod = (idx) => {
-    form.value.unavailable_periods.splice(idx, 1);
-};
-
-const handleSubmit = async () => {
-    if (!formRef.value) return;
-    
-    formRef.value.validate(async (valid) => {
-        if (valid) {
-            submitting.value = true;
-            try {
-                // 准备提交数据，确保空值转换为 null（stay_days 现在是必填，不需要转换）
-                const submitData = {
-                    ...form.value,
-                    stay_days: form.value.stay_days || 1, // 必填，默认值为1
-                    sale_start_date: form.value.sale_start_date || null,
-                    sale_end_date: form.value.sale_end_date || null,
-                };
-                
-                // 如果编辑时原值为 null 且用户没动开关，则保持提交 null
-                if (form.value._is_realname_original_null && !form.value.is_realname_touched) {
-                    submitData.is_realname = null;
-                }
-
-                // 清理仅用于前端状态的字段，避免污染后端入参
-                delete submitData.is_realname_touched;
-                delete submitData._is_realname_original_null;
-                
-                // code 由系统自动生成，创建和更新时都不需要发送
-                delete submitData.code;
-                
-                // external_code 如果为空字符串，转换为 null
-                if (submitData.external_code === '') {
-                    submitData.external_code = null;
-                }
-                
-                // order_mode 如果为空字符串，转换为 null
-                if (submitData.order_mode === '') {
-                    submitData.order_mode = null;
-                }
-                
-                // order_provider_id 如果为空字符串，转换为 null
-                if (submitData.order_provider_id === '') {
-                    submitData.order_provider_id = null;
-                }
-                
-                // 如果 order_mode 不是 'other'，清空 order_provider_id
-                if (submitData.order_mode !== 'other') {
-                    submitData.order_provider_id = null;
-                }
-
-                submitData.unavailable_periods = (form.value.unavailable_periods || [])
-                    .filter((p) => p.start_date && p.end_date)
-                    .map((p) => ({
-                        start_date: p.start_date,
-                        end_date: p.end_date,
-                        note: p.note && String(p.note).trim() !== '' ? String(p.note).trim() : null,
-                    }));
-                
-                if (isEdit.value) {
-                    await axios.put(`/products/${editingId.value}`, submitData);
-                    ElMessage.success('产品更新成功');
-                } else if (isDuplicate.value) {
-                    await axios.post(`/products/${duplicateSourceId.value}/duplicate`, submitData);
-                    ElMessage.success('产品复制成功');
-                } else {
-                    await axios.post('/products', submitData);
-                    ElMessage.success('产品创建成功');
-                }
-                dialogVisible.value = false;
-                resetForm();
-                // 延迟一下再刷新列表，确保后端数据已更新
-                setTimeout(() => {
-                    fetchProducts();
-                }, 100);
-            } catch (error) {
-                const message = error.response?.data?.message || error.response?.data?.errors?.code?.[0] || '操作失败';
-                ElMessage.error(message);
-            } finally {
-                submitting.value = false;
-            }
-        }
-    });
+    return '落单即履约';
 };
 
 const handleDelete = async (row) => {
@@ -786,34 +278,6 @@ const handleDelete = async (row) => {
             const message = error.response?.data?.message || '删除失败';
             ElMessage.error(message);
         }
-    }
-};
-
-const resetForm = () => {
-    editingId.value = null;
-    duplicateSourceId.value = null;
-    form.value = {
-        scenic_spot_id: null,
-        software_provider_id: null,
-        name: '',
-        code: '', // 创建时为空，系统自动生成
-        external_code: '',
-        description: '',
-        price_source: 'manual',
-        stay_days: 1, // 默认值为1，必填
-        sale_start_date: null,
-        sale_end_date: null,
-        order_mode: null, // 订单处理方式，null 表示使用景区配置
-        order_provider_id: null, // 订单下发服务商ID
-        is_active: true,
-        is_realname: false,
-        is_realname_touched: false,
-        _is_realname_original_null: false,
-        unavailable_periods: [],
-    };
-    availableSoftwareProviders.value = [];
-    if (formRef.value) {
-        formRef.value.clearValidate();
     }
 };
 

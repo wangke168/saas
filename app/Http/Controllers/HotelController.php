@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Hotel;
+use App\Support\HotelMediaPayload;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -62,6 +63,10 @@ class HotelController extends Controller
             'code' => 'nullable|string|max:255', // 改为可空，自动生成
             'address' => 'nullable|string|max:255',
             'contact_phone' => 'nullable|string|max:20',
+            'cover_image' => 'nullable|string|max:500',
+            'images' => 'nullable|array|max:20',
+            'images.*' => 'nullable|string|max:500',
+            'introduction' => 'nullable|string|max:5000',
             'external_id' => 'nullable|string|max:255',
             'external_code' => 'nullable|string|max:255',
             'is_connected' => 'boolean',
@@ -87,7 +92,7 @@ class HotelController extends Controller
 
         return response()->json([
             'message' => '酒店创建成功',
-            'data' => $hotel,
+            'data' => array_merge($hotel->toArray(), HotelMediaPayload::forHotel($hotel)),
         ], 201);
     }
 
@@ -113,7 +118,7 @@ class HotelController extends Controller
         }
         
         return response()->json([
-            'data' => $hotel,
+            'data' => array_merge($hotel->toArray(), HotelMediaPayload::forHotel($hotel)),
         ]);
     }
 
@@ -142,6 +147,10 @@ class HotelController extends Controller
             'code' => 'nullable|string|max:255', // 改为可空，编辑时不允许修改
             'address' => 'nullable|string|max:255',
             'contact_phone' => 'nullable|string|max:20',
+            'cover_image' => 'nullable|string|max:500',
+            'images' => 'nullable|array|max:20',
+            'images.*' => 'nullable|string|max:500',
+            'introduction' => 'nullable|string|max:5000',
             'external_id' => 'nullable|string|max:255',
             'external_code' => 'nullable|string|max:255',
             'is_connected' => 'sometimes|boolean',
@@ -172,7 +181,7 @@ class HotelController extends Controller
 
         return response()->json([
             'message' => '酒店更新成功',
-            'data' => $hotel,
+            'data' => array_merge($hotel->toArray(), HotelMediaPayload::forHotel($hotel)),
         ]);
     }
 

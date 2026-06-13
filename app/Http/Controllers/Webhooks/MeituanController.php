@@ -28,6 +28,9 @@ use App\Jobs\NotifyMeituanOrderForceCancelledJob;
 use App\Services\OTA\MeituanService;
 use App\Services\OTA\NotificationFactory;
 use App\Services\ProductUnavailableNightService;
+use App\Services\Presale\PresaleOtaConsumeService;
+use App\Services\Presale\PresaleOrderService;
+use App\Support\ProductIdRegionRestriction;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -55,6 +58,7 @@ class MeituanController extends Controller
         protected OrderOperationService $orderOperationService,
         protected OtaConfigResolver $otaConfigResolver,
         protected OtaAutoAcceptConfigService $otaAutoAcceptConfigService,
+        protected PresaleOrderService $presaleOrderService,
     ) {}
 
     /**
@@ -527,11 +531,6 @@ class MeituanController extends Controller
                 return $this->errorResponse(400, '产品编码(partnerDealId)为空', $partnerId, true);  // 订单创建V2需要加密
             }
 
-            if (empty($useDate)) {
-                DB::rollBack();
-                return $this->errorResponse(400, '使用日期(useDate)为空', $partnerId, true);  // 订单创建V2需要加密
-            }
-
             // 判断产品类型：根据产品编号是否以 "pkg" 开头（不区分大小写）
             $isPkgProduct = strtolower(substr($partnerDealId, 0, 3)) === 'pkg';
             
@@ -851,6 +850,106 @@ class MeituanController extends Controller
                         'partner_deal_id' => $partnerDealId,
                     ]);
                     return $this->errorResponse(505, '产品不存在', $partnerId, true);  // 订单创建V2需要加密
+                }
+
+                $regionMessage = ProductIdRegionRestriction::validateOrMessage(
+                    $product,
+                    ProductIdRegionRestriction::extractIdCardsFromMeituan(
+                        is_array($contacts) ? $contacts : [],
+                        is_array($credentialList) ? $credentialList : []
+                    )
+                );
+                if ($regionMessage !== null) {
+                    DB::rollBack();
+                    Log::warning('美团订单创建V2：地区限制校验未通过', [
+                        'product_id' => $product->id,
+                        'order_id' => $orderId,
+                    ]);
+
+                    return $this->errorResponse(410, $regionMessage, $partnerId, true);
+                }
+
+                // deferred 预售：允许 travelDate 为空，落单仅建权益，不占库存
+                if (PresaleOrderService::isDeferredProduct($product)) {
+                    $existingOrderQuery = Order::where('ota_order_no', (string) $orderId)
+                        ->where('ota_platform_id', $otaPlatform->id);
+                    if ($this->currentScenicSpotId !== null) {
+                        $existingOrderQuery->whereHas('product', function ($q) {
+                            $q->where('scenic_spot_id', $this->currentScenicSpotId);
+                        });
+                    }
+                    $existingOrder = $existingOrderQuery->first();
+
+                    if ($existingOrder) {
+                        DB::rollBack();
+                        Log::info('美团订单创建V2：deferred 订单已存在，返回成功', [
+                            'order_id' => $orderId,
+                            'order_no' => $existingOrder->order_no,
+                            'product_id' => $product->id,
+                        ]);
+
+                        return $this->successResponse([
+                            'orderId' => intval($orderId),
+                            'partnerOrderId' => $existingOrder->order_no,
+                        ], $partnerId, null, 200, 'success', true);
+                    }
+
+                    $effectiveUseDate = !empty($useDate) ? $useDate : now()->toDateString();
+                    $salePrice = floatval($body['unitPrice'] ?? $body['totalPrice'] ?? 0);
+                    $costPrice = floatval($body['buyPrice'] ?? $salePrice);
+                    $contactName = $contactInfo['name'] ?? '';
+                    $contactPhone = $contactInfo['mobile'] ?? $contactInfo['phone'] ?? '';
+                    $contactEmail = $contactInfo['email'] ?? '';
+
+                    $passengers = [];
+                    if (!empty($contacts) && is_array($contacts)) {
+                        foreach ($contacts as $contact) {
+                            $passengers[] = [
+                                'name' => $contact['name'] ?? '',
+                                'mobile' => $contact['mobile'] ?? $contact['phone'] ?? '',
+                                'cardNo' => '',
+                            ];
+                        }
+                    }
+
+                    $order = $this->presaleOrderService->createOtaPreOrder(
+                        $product,
+                        $otaPlatform->id,
+                        (string) $orderId,
+                        $effectiveUseDate,
+                        $effectiveUseDate,
+                        $quantity,
+                        $salePrice,
+                        $costPrice,
+                        $passengers,
+                        [
+                            'name' => $contactName,
+                            'mobile' => $contactPhone,
+                            'email' => $contactEmail,
+                        ],
+                        null,
+                        fn (): string => $this->generateOrderNo(),
+                        [
+                            'ota_platform' => OtaPlatform::MEITUAN->value,
+                            'ota_date_mode' => empty($useDate) ? 'open_date_without_travel_date' : 'travel_date',
+                            'ota_travel_date' => $useDate ?: null,
+                        ],
+                    );
+
+                    DB::commit();
+
+                    Log::info('美团订单创建V2：deferred 创建成功（有效期票可空日期）', [
+                        'order_id' => $orderId,
+                        'order_no' => $order->order_no,
+                        'product_id' => $product->id,
+                        'travel_date' => $useDate,
+                        'effective_use_date' => $effectiveUseDate,
+                    ]);
+
+                    return $this->successResponse([
+                        'orderId' => intval($orderId),
+                        'partnerOrderId' => $order->order_no,
+                    ], $partnerId, null, 200, 'success', true);
                 }
 
                 // 查找产品关联的酒店和房型（通过价格表）
@@ -1176,6 +1275,24 @@ class MeituanController extends Controller
                 $order->update(['paid_at' => now()]);
             }
 
+            // deferred 预售：支付即出票成功，不占房、不派资源 Job
+            if (PresaleOrderService::shouldSkipResourceProcessing($order)) {
+                if ($order->status === OrderStatus::PAID_PENDING) {
+                    $this->orderService->updateOrderStatus(
+                        $order,
+                        OrderStatus::CONFIRMED,
+                        '美团预售订单出票成功（deferred，同步确认）'
+                    );
+                }
+
+                Log::info('美团订单出票：deferred 同步出票成功（跳过资源处理）', [
+                    'order_id' => $order->id,
+                    'ota_order_no' => $orderId,
+                ]);
+
+                return $this->buildOrderPaySuccessResponse($order->fresh(), $orderId, $partnerId);
+            }
+
             // 检查是否系统直连
             // 确保订单的关联数据已加载（用于系统直连检查）
             $order->load(['hotel.scenicSpot', 'product.softwareProvider', 'product.scenicSpot']);
@@ -1446,12 +1563,15 @@ class MeituanController extends Controller
             // 从订单日志表中查询已核销数量和已退款数量
             $usedQuantity = $this->calculateUsedQuantity($order);
             $refundedQuantity = $this->calculateRefundedQuantity($order);
-            
+            $orderQuantity = PresaleOtaConsumeService::isPresaleParentOrder($order)
+                ? PresaleOtaConsumeService::resolveTotalQuantity($order)
+                : (int) $order->room_count;
+
             $responseBody = [
                 'orderId' => intval($orderId),
                 'partnerOrderId' => $order->order_no,
                 'orderStatus' => $orderStatus,
-                'orderQuantity' => $order->room_count,  // 订单总票数
+                'orderQuantity' => $orderQuantity,  // 订单总票数
                 'usedQuantity' => $usedQuantity,  // 已使用数量（支持部分核销）
                 'refundedQuantity' => $refundedQuantity,  // 已退款数量（支持部分退款）
                 'voucherType' => 0,  // 凭证码类型：0为不需要码核销
@@ -1469,7 +1589,7 @@ class MeituanController extends Controller
                 'partner_order_id' => $order->order_no,
                 'order_status' => $order->status->value,
                 'meituan_order_status' => $orderStatus,
-                'order_quantity' => $order->room_count,
+                'order_quantity' => $orderQuantity,
                 'used_quantity' => $usedQuantity,
                 'refunded_quantity' => $refundedQuantity,
                 'real_name_type' => $order->real_name_type,
@@ -1497,6 +1617,13 @@ class MeituanController extends Controller
      */
     protected function calculateUsedQuantity(Order $order): int
     {
+        if (PresaleOtaConsumeService::isPresaleParentOrder($order)) {
+            return min(
+                PresaleOtaConsumeService::countBookedEntitlements($order),
+                PresaleOtaConsumeService::resolveTotalQuantity($order),
+            );
+        }
+
         // 查询所有核销相关的日志（to_status = 'verified'）
         $verifiedLogs = \App\Models\OrderLog::where('order_id', $order->id)
             ->where('to_status', OrderStatus::VERIFIED->value)
