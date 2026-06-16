@@ -425,4 +425,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [\App\Http\Controllers\Admin\ScenicSpotOtaInventoryPushConfigController::class, 'save']);
         Route::delete('/{config}', [\App\Http\Controllers\Admin\ScenicSpotOtaInventoryPushConfigController::class, 'destroy']);
     });
+
+    // 景区订单推送第三方配置（仅超级管理员）
+    Route::prefix('admin/scenic-spot-order-push')->middleware('auth:sanctum')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Admin\ScenicSpotOrderPushConfigController::class, 'show']);
+        Route::post('/', [\App\Http\Controllers\Admin\ScenicSpotOrderPushConfigController::class, 'save']);
+    });
 });

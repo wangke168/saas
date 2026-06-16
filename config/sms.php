@@ -36,6 +36,13 @@ return [
             env('SMS_EXPOSE_DEBUG_CODE', env('APP_ENV') === 'local'),
             FILTER_VALIDATE_BOOL,
         ),
+        // 本地联调：指定手机号可用固定验证码登录，生产环境务必关闭
+        'bypass_enabled' => filter_var(
+            env('SMS_MP_LOGIN_BYPASS_ENABLED', env('APP_ENV') === 'local'),
+            FILTER_VALIDATE_BOOL,
+        ),
+        'bypass_phone' => env('SMS_MP_LOGIN_BYPASS_PHONE', '13605725464'),
+        'bypass_code' => env('SMS_MP_LOGIN_BYPASS_CODE', '888888'),
     ],
 
 ];

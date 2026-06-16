@@ -85,6 +85,7 @@ return [
         'redis:ota-notification' => 30,  // OTA通知需要快速响应
         'redis:resource-push' => 30,  // 资源方推送需要快速响应
         'redis:ota-sync' => 120,
+        'redis:external-order-push' => 120,
     ],
 
     /*
@@ -207,10 +208,10 @@ return [
                 'rest' => 0,
             ],
             
-            // 策略组3：低优先级 - 同步任务（可延迟）
+            // 策略组3：低优先级 - 同步任务、第三方订单推送（可延迟）
             'supervisor-low-priority' => [
                 'connection' => 'redis',
-                'queue' => ['ota-sync'],
+                'queue' => ['ota-sync', 'external-order-push'],
                 'balance' => 'auto',
                 'minProcesses' => 1,
                 'maxProcesses' => 2,
@@ -230,7 +231,7 @@ return [
         'local' => [
             'supervisor-default' => [
                 'connection' => 'redis',
-                'queue' => ['order-verification', 'default', 'ota-notification', 'ota-push', 'resource-push', 'ota-sync'],
+                'queue' => ['order-verification', 'default', 'ota-notification', 'ota-push', 'resource-push', 'ota-sync', 'external-order-push'],
                 'balance' => 'simple',
                 'processes' => 2,
                 'tries' => 3,

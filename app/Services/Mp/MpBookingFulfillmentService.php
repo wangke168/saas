@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\OrderBooking;
 use App\Models\OrderEntitlement;
 use App\Services\InventoryService;
+use App\Services\ExternalOrder\ExternalOrderPushDispatcher;
 use App\Services\Presale\PresaleFulfillmentOrderService;
 use App\Services\Resource\ResourceServiceFactory;
 use Carbon\Carbon;
@@ -57,6 +58,7 @@ final class MpBookingFulfillmentService
         $lockRoomTypeId = null;
         $inventoryLocked = false;
         $orderForResourceJob = null;
+        $fulfillmentOrderForPush = null;
 
         try {
             DB::transaction(function () use (
@@ -68,6 +70,7 @@ final class MpBookingFulfillmentService
                 &$lockRoomTypeId,
                 &$inventoryLocked,
                 &$orderForResourceJob,
+                &$fulfillmentOrderForPush,
             ): void {
                 $lockedBooking = OrderBooking::query()
                     ->where('id', $booking->id)
@@ -146,6 +149,7 @@ final class MpBookingFulfillmentService
                 }
 
                 $fulfillmentOrder = $this->fulfillmentOrderService->createFromBooking($lockedBooking, $parentOrder);
+                $fulfillmentOrderForPush = $fulfillmentOrder;
 
                 $resourceService = ResourceServiceFactory::getService($fulfillmentOrder, 'order');
                 if ($resourceService !== null) {
@@ -174,6 +178,10 @@ final class MpBookingFulfillmentService
                     'check_out_date' => $checkOutDate,
                 ]);
             });
+
+            if ($fulfillmentOrderForPush instanceof Order) {
+                app(ExternalOrderPushDispatcher::class)->dispatchOrderPaid($fulfillmentOrderForPush->fresh());
+            }
 
             if ($orderForResourceJob instanceof Order) {
                 try {

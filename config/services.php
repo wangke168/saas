@@ -113,4 +113,8 @@ return [
         'fliggy_password' => env('HENGDIAN_FLIGGY_PASSWORD', ''),
     ],
 
+    'external_order_push' => [
+        'api_url' => env('EXTERNAL_ORDER_PUSH_API_URL', 'https://api.tripfastpass.com'),
+    ],
+
 ];

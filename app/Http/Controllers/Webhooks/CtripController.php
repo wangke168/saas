@@ -28,6 +28,7 @@ use App\Services\Resource\ResourceServiceFactory;
 use App\Services\ProductUnavailableNightService;
 use App\Services\Presale\PresaleOtaConsumeService;
 use App\Services\Presale\PresaleOrderService;
+use App\Services\ExternalOrder\ExternalOrderPushDispatcher;
 use App\Support\ProductIdRegionRestriction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1001,6 +1002,9 @@ class CtripController extends Controller
                 $order->update($updateData);
             }
 
+            $order->refresh();
+            app(ExternalOrderPushDispatcher::class)->dispatchOrderPaid($order);
+
             // 4. 检查是否系统直连
             Log::info('携程预下单支付：开始检查系统直连', [
                 'order_id' => $order->id,
@@ -1196,6 +1200,9 @@ class CtripController extends Controller
             if (!$pkgOrder->paid_at) {
                 $pkgOrder->update(['paid_at' => now()]);
             }
+
+            $pkgOrder->refresh();
+            app(ExternalOrderPushDispatcher::class)->dispatchPkgOrderPaid($pkgOrder);
 
             // 触发订单拆分和处理
             $splitService = new \App\Services\Pkg\PkgOrderSplitService();
@@ -1722,6 +1729,9 @@ class CtripController extends Controller
                     }
                 }
                 
+                $pkgOrder->refresh();
+                app(ExternalOrderPushDispatcher::class)->dispatchPkgOrderPaid($pkgOrder);
+
                 // 构建响应数据
                 $responseData = [
                     'otaOrderId' => $ctripOrderId,
@@ -1913,6 +1923,9 @@ class CtripController extends Controller
                 }
 
                 DB::commit();
+
+                $order->refresh();
+                app(ExternalOrderPushDispatcher::class)->dispatchOrderPaid($order);
 
                 if ($hasInventoryIssue) {
                     Log::info('携程直接下单：常规产品订单已创建（库存不足，待人工处理）', [

@@ -94,6 +94,10 @@ class MpAuthService
     public function verifySmsCode(string $phone, string $code): bool
     {
         $phone = $this->normalizeLoginPhone($phone);
+        if ($this->isBypassSmsCode($phone, $code)) {
+            return true;
+        }
+
         $cachedCode = Cache::get($this->smsKey($phone));
         if (! is_string($cachedCode) || $cachedCode !== $code) {
             return false;
@@ -202,6 +206,21 @@ class MpAuthService
 
         $ipKey = $this->smsDailyIpKey($ip);
         Cache::put($ipKey, (int) Cache::get($ipKey, 0) + 1, $secondsUntilMidnight);
+    }
+
+    private function isBypassSmsCode(string $phone, string $code): bool
+    {
+        if (! config('sms.mp_login.bypass_enabled', false)) {
+            return false;
+        }
+
+        $bypassPhone = $this->normalizeLoginPhone((string) config('sms.mp_login.bypass_phone', ''));
+        $bypassCode = (string) config('sms.mp_login.bypass_code', '');
+
+        return $bypassPhone !== ''
+            && $bypassCode !== ''
+            && $phone === $bypassPhone
+            && $code === $bypassCode;
     }
 
     private function smsTtlSeconds(): int

@@ -30,6 +30,7 @@ use App\Services\OTA\NotificationFactory;
 use App\Services\ProductUnavailableNightService;
 use App\Services\Presale\PresaleOtaConsumeService;
 use App\Services\Presale\PresaleOrderService;
+use App\Services\ExternalOrder\ExternalOrderPushDispatcher;
 use App\Support\ProductIdRegionRestriction;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -1275,6 +1276,8 @@ class MeituanController extends Controller
                 $order->update(['paid_at' => now()]);
             }
 
+            $order->refresh();
+
             // deferred 预售：支付即出票成功，不占房、不派资源 Job
             if (PresaleOrderService::shouldSkipResourceProcessing($order)) {
                 if ($order->status === OrderStatus::PAID_PENDING) {
@@ -1292,6 +1295,8 @@ class MeituanController extends Controller
 
                 return $this->buildOrderPaySuccessResponse($order->fresh(), $orderId, $partnerId);
             }
+
+            app(ExternalOrderPushDispatcher::class)->dispatchOrderPaid($order);
 
             // 检查是否系统直连
             // 确保订单的关联数据已加载（用于系统直连检查）

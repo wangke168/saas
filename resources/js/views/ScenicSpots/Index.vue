@@ -58,6 +58,9 @@
                                         <el-dropdown-item command="inventoryPush" divided>
                                             库存推送（OTA 缓冲）
                                         </el-dropdown-item>
+                                        <el-dropdown-item command="orderPush">
+                                            订单推送（第三方）
+                                        </el-dropdown-item>
                                     </el-dropdown-menu>
                                 </template>
                             </el-dropdown>
@@ -715,6 +718,38 @@
                 </el-form-item>
             </el-form>
         </el-dialog>
+
+        <!-- 第三方订单推送开关 -->
+        <el-dialog
+            v-model="orderPushDialogVisible"
+            :title="`订单推送配置 - ${currentOrderPushScenicSpot?.name || ''}`"
+            width="520px"
+            @close="closeOrderPushDialog"
+        >
+            <el-alert
+                type="info"
+                :closable="false"
+                style="margin-bottom: 16px;"
+                title="开启后，该景区携程/美团订单在支付成功及状态变更时，将推送到第三方订单服务（tripfastpass）。"
+            />
+            <el-form
+                ref="orderPushFormRef"
+                :model="orderPushForm"
+                label-width="100px"
+                v-loading="orderPushLoading"
+            >
+                <el-form-item label="启用推送">
+                    <el-switch v-model="orderPushForm.enabled" />
+                </el-form-item>
+                <el-form-item label="备注">
+                    <el-input v-model="orderPushForm.remark" type="textarea" :rows="2" placeholder="可选" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="orderPushDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="submitOrderPushForm" :loading="orderPushSubmitting">保存</el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
@@ -1027,6 +1062,9 @@ const handleScenicMoreCommand = (command, row) => {
             break;
         case 'inventoryPush':
             handleConfigInventoryPush(row);
+            break;
+        case 'orderPush':
+            handleConfigOrderPush(row);
             break;
         default:
             break;
@@ -1718,6 +1756,66 @@ const closeInventoryPushDialog = () => {
     inventoryPushList.value = [];
     inventoryPushFormVisible.value = false;
     inventoryPushFormRef.value?.resetFields();
+};
+
+// ---------- 第三方订单推送 ----------
+const orderPushDialogVisible = ref(false);
+const currentOrderPushScenicSpot = ref(null);
+const orderPushLoading = ref(false);
+const orderPushSubmitting = ref(false);
+const orderPushFormRef = ref(null);
+const orderPushForm = ref({
+    enabled: false,
+    remark: '',
+});
+
+const handleConfigOrderPush = async (row) => {
+    currentOrderPushScenicSpot.value = row;
+    orderPushDialogVisible.value = true;
+    await fetchOrderPushConfig();
+};
+
+const fetchOrderPushConfig = async () => {
+    if (!currentOrderPushScenicSpot.value?.id) return;
+    orderPushLoading.value = true;
+    try {
+        const res = await axios.get('/admin/scenic-spot-order-push', {
+            params: { scenic_spot_id: currentOrderPushScenicSpot.value.id },
+        });
+        const data = res.data.data || {};
+        orderPushForm.value = {
+            enabled: !!data.enabled,
+            remark: data.remark || '',
+        };
+    } catch (e) {
+        ElMessage.error('获取订单推送配置失败');
+        console.error(e);
+    } finally {
+        orderPushLoading.value = false;
+    }
+};
+
+const submitOrderPushForm = async () => {
+    if (!currentOrderPushScenicSpot.value?.id) return;
+    orderPushSubmitting.value = true;
+    try {
+        await axios.post('/admin/scenic-spot-order-push', {
+            scenic_spot_id: currentOrderPushScenicSpot.value.id,
+            enabled: orderPushForm.value.enabled,
+            remark: orderPushForm.value.remark || null,
+        });
+        ElMessage.success('保存成功');
+        orderPushDialogVisible.value = false;
+    } catch (e) {
+        ElMessage.error(e.response?.data?.message || '保存失败');
+    } finally {
+        orderPushSubmitting.value = false;
+    }
+};
+
+const closeOrderPushDialog = () => {
+    currentOrderPushScenicSpot.value = null;
+    orderPushForm.value = { enabled: false, remark: '' };
 };
 
 onMounted(() => {
