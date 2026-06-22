@@ -555,7 +555,7 @@ class CtripService
      * @param  \App\Models\Product  $product  产品
      * @param  \App\Models\Hotel  $hotel  酒店
      * @param  \App\Models\RoomType  $roomType  房型
-     * @param  array|null  $dates  指定日期数组，格式：['2025-12-27', '2025-12-28']，如果为null则同步所有价格
+     * @param  array|null  $dates  指定日期数组，格式：['2025-12-27', '2025-12-28']，如果为null则同步今天及以后的价格
      * @param  string  $dateType  DATE_REQUIRED（需指定日期）或 DATE_NOT_REQUIRED（无需指定日期）
      */
     public function syncProductPriceByCombo(
@@ -573,11 +573,19 @@ class CtripService
         // 生成携程产品编码
         $ctripProductCode = $this->generateCtripProductCode($product->code, $hotel->code, $roomType->code);
 
-        // 获取该房型的价格数据
+        // 获取该房型的价格数据（只查询今天及以后，与库存推送一致）
+        $today = \Carbon\Carbon::today()->format('Y-m-d');
         $prices = $product->prices()->where('room_type_id', $roomType->id);
+        $prices->where('date', '>=', $today);
 
         if ($dates !== null) {
-            $prices->whereIn('date', $dates);
+            $futureDates = array_filter($dates, fn (string $date) => $date >= $today);
+
+            if (empty($futureDates)) {
+                return ['success' => false, 'message' => '没有未来的价格数据'];
+            }
+
+            $prices->whereIn('date', array_values($futureDates));
         }
 
         $priceList = $prices->get();
