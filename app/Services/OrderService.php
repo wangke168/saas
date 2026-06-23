@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\OrderLog;
-use App\Services\ExternalOrder\ExternalOrderPushDispatcher;
 use App\Services\Resource\ResourceServiceFactory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -108,8 +107,6 @@ class OrderService
                 
                 \App\Jobs\NotifyOrderCancelConfirmedJob::dispatch($order, $remark ?? '');
             }
-
-            $this->triggerExternalOrderPush($order, $newStatus);
         } catch (\Exception $e) {
             // 通知失败不影响订单状态更新，只记录日志
             Log::error('OrderService: 触发状态变更通知失败', [
@@ -118,24 +115,6 @@ class OrderService
                 'new_status' => $newStatus->value,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-            ]);
-        }
-    }
-
-    protected function triggerExternalOrderPush(Order $order, OrderStatus $newStatus): void
-    {
-        try {
-            $routeStatus = app(ExternalOrderPushDispatcher::class)->mapOrderStatusToRouteStatus($newStatus);
-            if ($routeStatus === null) {
-                return;
-            }
-
-            app(ExternalOrderPushDispatcher::class)->dispatchOrderStatusUpdate($order, $routeStatus);
-        } catch (\Exception $e) {
-            Log::error('OrderService: 触发外部订单推送失败', [
-                'order_id' => $order->id,
-                'new_status' => $newStatus->value,
-                'error' => $e->getMessage(),
             ]);
         }
     }

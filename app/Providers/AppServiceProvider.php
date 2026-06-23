@@ -12,7 +12,9 @@ use App\Models\Pkg\PkgProductHotelRoomType;
 use App\Observers\PkgProductHotelRoomTypeObserver;
 use App\Models\Pkg\PkgProductBundleItem;
 use App\Observers\PkgProductBundleItemObserver;
+use App\Models\Order;
 use App\Models\Pkg\PkgOrder;
+use App\Observers\OrderObserver;
 use App\Observers\PkgOrderObserver;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\URL;
@@ -47,5 +49,6 @@ class AppServiceProvider extends ServiceProvider
         PkgProductHotelRoomType::observe(PkgProductHotelRoomTypeObserver::class);
         PkgProductBundleItem::observe(PkgProductBundleItemObserver::class);
         PkgOrder::observe(PkgOrderObserver::class);
+        Order::observe(OrderObserver::class);
     }
 }
