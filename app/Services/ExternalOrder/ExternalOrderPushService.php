@@ -91,6 +91,26 @@ class ExternalOrderPushService
             return null;
         }
 
+        if (
+            $pushType === OrderExternalPushLog::PUSH_TYPE_STATUS_UPDATE
+            && $routeOrderStatus === ExternalOrderRoute::STATUS_CANCELLED
+            && ! $this->hasSuccessfulPush(
+                $orderType,
+                $orderId,
+                OrderExternalPushLog::PUSH_TYPE_CREATE,
+                ExternalOrderRoute::STATUS_PENDING,
+            )
+        ) {
+            $this->dispatcher->logSkipped('取消推送跳过：对方系统无 create 记录', [
+                'order_type' => $orderType,
+                'order_id' => $orderId,
+                'push_type' => $pushType,
+                'route_order_status' => $routeOrderStatus,
+            ]);
+
+            return null;
+        }
+
         $endpoint = $pushType === OrderExternalPushLog::PUSH_TYPE_CREATE
             ? '/api/hd/createOrder'
             : '/api/hd/updateOrderStatus';

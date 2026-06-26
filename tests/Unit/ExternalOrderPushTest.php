@@ -6,6 +6,7 @@ use App\Enums\OtaPlatform as OtaPlatformEnum;
 use App\Enums\OrderStatus;
 use App\Models\Hotel;
 use App\Models\Order;
+use App\Models\OrderExternalPushLog;
 use App\Models\OtaPlatform;
 use App\Models\Product;
 use App\Models\RoomType;
@@ -258,5 +259,131 @@ class ExternalOrderPushTest extends TestCase
 
         Http::assertNothingSent();
         $this->assertDatabaseCount('order_external_push_logs', 0);
+    }
+
+    public function test_cancel_push_skipped_without_successful_create(): void
+    {
+        Http::fake();
+
+        $order = $this->createOrderForExternalPush('ORD20260613004', 'MT112233');
+
+        $result = app(ExternalOrderPushService::class)->push(
+            'order',
+            $order->id,
+            'status_update',
+            ExternalOrderRoute::STATUS_CANCELLED,
+        );
+
+        $this->assertNull($result);
+        Http::assertNothingSent();
+        $this->assertDatabaseCount('order_external_push_logs', 0);
+    }
+
+    public function test_cancel_push_proceeds_after_successful_create(): void
+    {
+        config(['services.external_order_push.api_url' => 'https://api.tripfastpass.com']);
+
+        Http::fake([
+            'https://api.tripfastpass.com/api/hd/updateOrderStatus' => Http::response([
+                'code' => 'OK',
+                'traceId' => 'cancel-trace-id',
+            ], 200),
+        ]);
+
+        $order = $this->createOrderForExternalPush('ORD20260613005', 'MT445566');
+
+        OrderExternalPushLog::query()->create([
+            'order_type' => 'order',
+            'order_id' => $order->id,
+            'order_no' => $order->order_no,
+            'scenic_spot_id' => $order->product->scenic_spot_id,
+            'push_type' => 'create',
+            'route_order_status' => ExternalOrderRoute::STATUS_PENDING,
+            'endpoint' => '/api/hd/createOrder',
+            'request_payload' => ['sourceOrderId' => $order->order_no],
+            'status' => 'success',
+            'attempt' => 1,
+        ]);
+
+        app(ExternalOrderPushService::class)->push(
+            'order',
+            $order->id,
+            'status_update',
+            ExternalOrderRoute::STATUS_CANCELLED,
+        );
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://api.tripfastpass.com/api/hd/updateOrderStatus'
+                && $request['routeOrderStatus'] === ExternalOrderRoute::STATUS_CANCELLED;
+        });
+
+        $this->assertDatabaseHas('order_external_push_logs', [
+            'order_type' => 'order',
+            'order_id' => $order->id,
+            'push_type' => 'status_update',
+            'route_order_status' => ExternalOrderRoute::STATUS_CANCELLED,
+            'status' => 'success',
+        ]);
+    }
+
+    private function createOrderForExternalPush(string $orderNo, string $otaOrderNo): Order
+    {
+        $provider = $this->createSoftwareProvider();
+
+        $scenicSpot = ScenicSpot::query()->create([
+            'name' => '推送测试景区',
+            'code' => 'SS_PUSH_'.substr($orderNo, -4),
+            'is_active' => true,
+        ]);
+
+        ScenicSpotOrderPushConfig::query()->create([
+            'scenic_spot_id' => $scenicSpot->id,
+            'enabled' => true,
+        ]);
+
+        $otaPlatform = OtaPlatform::query()->create([
+            'name' => '美团',
+            'code' => OtaPlatformEnum::MEITUAN->value,
+            'is_active' => true,
+        ]);
+
+        $hotel = Hotel::query()->create([
+            'scenic_spot_id' => $scenicSpot->id,
+            'name' => '测试酒店',
+            'contact_phone' => '0579-11112222',
+            'is_active' => true,
+        ]);
+
+        $roomType = RoomType::query()->create([
+            'hotel_id' => $hotel->id,
+            'name' => '标间',
+            'is_active' => true,
+        ]);
+
+        $product = Product::query()->create([
+            'scenic_spot_id' => $scenicSpot->id,
+            'hotel_id' => $hotel->id,
+            'room_type_id' => $roomType->id,
+            'name' => '测试产品',
+            'software_provider_id' => $provider->id,
+        ]);
+
+        return Order::query()->create([
+            'order_no' => $orderNo,
+            'ota_order_no' => $otaOrderNo,
+            'ota_platform_id' => $otaPlatform->id,
+            'product_id' => $product->id,
+            'hotel_id' => $hotel->id,
+            'room_type_id' => $roomType->id,
+            'status' => OrderStatus::CANCEL_APPROVED,
+            'check_in_date' => '2026-07-01',
+            'check_out_date' => '2026-07-02',
+            'room_count' => 1,
+            'guest_count' => 1,
+            'contact_name' => '测试',
+            'contact_phone' => '13900139001',
+            'total_amount' => 300,
+            'settlement_amount' => 250,
+        ]);
     }
 }
