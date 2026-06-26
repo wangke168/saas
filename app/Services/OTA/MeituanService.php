@@ -4,10 +4,13 @@ namespace App\Services\OTA;
 
 use App\Enums\OtaPlatform;
 use App\Http\Client\MeituanClient;
+use App\Models\Price;
+use App\Models\Product;
 use App\Services\OTA\OtaInventoryHelper;
 use App\Services\InventoryService;
 use App\Services\ProductService;
 use App\Services\ProductUnavailableNightService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 class MeituanService
@@ -62,6 +65,62 @@ class MeituanService
     {
         $key = "{$hotelId}|{$roomTypeId}|{$date}";
         return md5($key);
+    }
+
+    private const UNIT_PRICE_MATCH_TOLERANCE = 0.01;
+
+    /**
+     * 无 partnerPrimaryKey 时解析酒店/房型价格行
+     *
+     * @param  Collection<int, Price>  $prices
+     * @return array{price: Price, resolve_method: string, skip_inventory: bool}
+     */
+    public function resolvePriceWithoutPartnerPrimaryKey(
+        Product $product,
+        Collection $prices,
+        string $useDate,
+        float $unitPrice,
+    ): array {
+        $targetUnitPrice = round($unitPrice, 2);
+        $matches = [];
+
+        foreach ($prices as $price) {
+            $roomType = $price->roomType;
+            $hotel = $roomType?->hotel;
+            if ($hotel === null || $roomType === null) {
+                continue;
+            }
+
+            $priceData = $this->productService->calculatePrice($product, (int) $roomType->id, $useDate);
+            $salePrice = round((float) ($priceData['sale_price'] ?? 0), 2);
+
+            if (abs($salePrice - $targetUnitPrice) <= self::UNIT_PRICE_MATCH_TOLERANCE) {
+                $matches[] = $price;
+            }
+        }
+
+        if (count($matches) === 1) {
+            return [
+                'price' => $matches[0],
+                'resolve_method' => 'unit_price_unique',
+                'skip_inventory' => false,
+            ];
+        }
+
+        $fallback = $prices->first(function (Price $price): bool {
+            $roomType = $price->roomType;
+            if ($roomType === null) {
+                return false;
+            }
+
+            return $roomType->hotel !== null;
+        }) ?? $prices->first();
+
+        return [
+            'price' => $fallback,
+            'resolve_method' => 'first_price_fallback',
+            'skip_inventory' => true,
+        ];
     }
 
     /**

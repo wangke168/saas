@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Webhooks;
 
+use App\Enums\ExceptionOrderStatus;
 use App\Enums\ExceptionOrderType;
 use App\Enums\OrderStatus;
 use App\Enums\OtaPlatform;
@@ -25,6 +26,7 @@ use App\Services\OrderOperationService;
 use App\Services\InventoryService;
 use App\Services\Resource\ResourceServiceFactory;
 use App\Jobs\NotifyMeituanOrderForceCancelledJob;
+use App\Jobs\NotifyResourceChannelExceptionJob;
 use App\Services\OTA\MeituanService;
 use App\Services\OTA\NotificationFactory;
 use App\Services\ProductUnavailableNightService;
@@ -967,8 +969,12 @@ class MeituanController extends Controller
                 }
 
                 $price = null;
+                $meituanService = app(MeituanService::class);
+                $missingPartnerPrimaryKey = empty($partnerPrimaryKey);
+                $skuResolveMethod = null;
+                $skipInventory = false;
+
                 if (!empty($partnerPrimaryKey)) {
-                    $meituanService = app(MeituanService::class);
                     foreach ($prices as $p) {
                         $rt = $p->roomType;
                         $ht = $rt->hotel ?? null;
@@ -992,7 +998,28 @@ class MeituanController extends Controller
                         return $this->errorResponse(400, '无法匹配酒店和房型', $partnerId, true);
                     }
                 } else {
-                    $price = $prices->first();
+                    $unitPrice = floatval($body['unitPrice'] ?? $body['totalPrice'] ?? 0);
+                    $resolved = $meituanService->resolvePriceWithoutPartnerPrimaryKey(
+                        $product,
+                        $prices,
+                        $useDate,
+                        $unitPrice,
+                    );
+                    $price = $resolved['price'];
+                    $skuResolveMethod = $resolved['resolve_method'];
+                    $skipInventory = $resolved['skip_inventory'];
+
+                    Log::warning('美团订单创建V2：缺少 partnerPrimaryKey，已按备用规则匹配酒店房型', [
+                        'meituan_order_id' => $orderId,
+                        'partner_deal_id' => $partnerDealId,
+                        'use_date' => $useDate,
+                        'unit_price' => $unitPrice,
+                        'level_ids' => $body['levelIds'] ?? null,
+                        'resolve_method' => $skuResolveMethod,
+                        'skip_inventory' => $skipInventory,
+                        'hotel_id' => $price->roomType?->hotel?->id,
+                        'room_type_id' => $price->roomType?->id,
+                    ]);
                 }
 
                 $roomType = $price->roomType;
@@ -1009,12 +1036,32 @@ class MeituanController extends Controller
                 // 检查库存（考虑入住天数）
                 $stayDays = $product->stay_days ?: 1;
                 $checkInDate = \Carbon\Carbon::parse($useDate);
-                
-                // 检查连续入住天数的库存是否足够
-                $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity, $product);
-                if (!$inventoryCheck['success']) {
-                    DB::rollBack();
-                    return $this->errorResponse(503, $inventoryCheck['message'], $partnerId);
+
+                if (!$skipInventory) {
+                    $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity, $product);
+                    if (!$inventoryCheck['success']) {
+                        DB::rollBack();
+                        Log::warning('美团订单创建V2：库存检查未通过', [
+                            'meituan_order_id' => $orderId,
+                            'product_id' => $product->id,
+                            'hotel_id' => $hotel->id,
+                            'room_type_id' => $roomType->id,
+                            'use_date' => $useDate,
+                            'message' => $inventoryCheck['message'],
+                            'missing_partner_primary_key' => $missingPartnerPrimaryKey,
+                        ]);
+
+                        return $this->errorResponse(503, $inventoryCheck['message'], $partnerId, true);
+                    }
+                } else {
+                    Log::warning('美团订单创建V2：缺少 partnerPrimaryKey 且无法单价唯一匹配，跳过库存检查', [
+                        'meituan_order_id' => $orderId,
+                        'product_id' => $product->id,
+                        'hotel_id' => $hotel->id,
+                        'room_type_id' => $roomType->id,
+                        'use_date' => $useDate,
+                        'resolve_method' => $skuResolveMethod,
+                    ]);
                 }
 
                 // 检查是否已存在订单（防止重复）
@@ -1194,22 +1241,50 @@ class MeituanController extends Controller
                 ]);
 
                 // 锁定库存（订单创建的核心目的就是锁库存）
-                $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
-                if (!$lockResult['success']) {
-                    DB::rollBack();
-                    Log::error('美团订单创建V2：库存锁定失败', [
+                if (!$skipInventory) {
+                    $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
+                    if (!$lockResult['success']) {
+                        DB::rollBack();
+                        Log::error('美团订单创建V2：库存锁定失败', [
+                            'order_id' => $order->id,
+                            'error' => $lockResult['message'],
+                        ]);
+                        return $this->errorResponse(503, '库存锁定失败：' . $lockResult['message'], $partnerId, true);
+                    }
+                } else {
+                    Log::warning('美团订单创建V2：缺少 partnerPrimaryKey 且无法单价唯一匹配，跳过库存锁定', [
                         'order_id' => $order->id,
-                        'error' => $lockResult['message'],
+                        'meituan_order_id' => $orderId,
+                        'hotel_id' => $hotel->id,
+                        'room_type_id' => $roomType->id,
                     ]);
-                    return $this->errorResponse(503, '库存锁定失败：' . $lockResult['message'], $partnerId);
+                }
+
+                $skuException = null;
+                if ($missingPartnerPrimaryKey) {
+                    $skuException = $this->createMeituanMissingPartnerPrimaryKeyException(
+                        $order,
+                        (string) $orderId,
+                        $body,
+                        $skuResolveMethod ?? 'unknown',
+                        $hotel,
+                        $roomType,
+                    );
                 }
 
                 DB::commit();
+
+                if ($skuException !== null) {
+                    NotifyResourceChannelExceptionJob::dispatch($order->id, $skuException->id);
+                }
 
                 Log::info('美团订单创建V2成功', [
                     'order_id' => $orderId,
                     'order_no' => $order->order_no,
                     'partner_deal_id' => $partnerDealId,
+                    'missing_partner_primary_key' => $missingPartnerPrimaryKey,
+                    'sku_resolve_method' => $skuResolveMethod,
+                    'skip_inventory' => $skipInventory,
                 ]);
 
                 return $this->successResponse([
@@ -1297,6 +1372,34 @@ class MeituanController extends Controller
             }
 
             app(ExternalOrderPushDispatcher::class)->dispatchOrderPaid($order);
+
+            $pendingSkuException = $this->findPendingMeituanSkuException($order);
+            if ($pendingSkuException !== null) {
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CONFIRMING,
+                    '美团下单未传 partnerPrimaryKey，等待人工确认酒店房型'
+                );
+
+                Log::info('美团订单出票：存在 SKU 待确认异常单，跳过资源方自动接单', [
+                    'order_id' => $order->id,
+                    'exception_order_id' => $pendingSkuException->id,
+                ]);
+
+                $requestEncrypted = $request->header('X-Encryption-Status') === 'encrypted';
+
+                return $this->successResponse(
+                    [
+                        'orderId' => intval($orderId),
+                        'partnerOrderId' => $order->order_no,
+                    ],
+                    $partnerId,
+                    null,
+                    598,
+                    '出票中',
+                    $requestEncrypted
+                );
+            }
 
             // 检查是否系统直连
             // 确保订单的关联数据已加载（用于系统直连检查）
@@ -3166,6 +3269,58 @@ class MeituanController extends Controller
         }
         
         return $voucherPics;
+    }
+
+    protected function createMeituanMissingPartnerPrimaryKeyException(
+        Order $order,
+        string $meituanOrderId,
+        array $body,
+        string $resolveMethod,
+        \App\Models\Hotel $hotel,
+        \App\Models\RoomType $roomType,
+    ): ExceptionOrder {
+        $unitPrice = floatval($body['unitPrice'] ?? $body['totalPrice'] ?? 0);
+        $exceptionMessage = $resolveMethod === 'unit_price_unique'
+            ? "美团下单未传 partnerPrimaryKey，已通过单价({$unitPrice})匹配到酒店/房型，请核实美团 SKU 并重推价格日历"
+            : '美团下单未传 partnerPrimaryKey，且无法通过单价唯一识别酒店/房型，已临时落单待人工确认';
+
+        $exception = ExceptionOrder::create([
+            'order_id' => $order->id,
+            'exception_type' => ExceptionOrderType::API_ERROR,
+            'exception_message' => $exceptionMessage,
+            'exception_data' => [
+                'operation' => 'confirm',
+                'source' => 'meituan_order_create_v2',
+                'missing_partner_primary_key' => true,
+                'meituan_order_id' => $meituanOrderId,
+                'level_ids' => $body['levelIds'] ?? null,
+                'unit_price' => $unitPrice,
+                'resolve_method' => $resolveMethod,
+                'resolved_hotel_id' => $hotel->id,
+                'resolved_room_type_id' => $roomType->id,
+                'resolved_hotel_name' => $hotel->name,
+                'resolved_room_type_name' => $roomType->name,
+            ],
+            'status' => ExceptionOrderStatus::PENDING,
+        ]);
+
+        Log::info('美团订单创建V2：已创建 SKU 待确认异常单', [
+            'order_id' => $order->id,
+            'meituan_order_id' => $meituanOrderId,
+            'exception_order_id' => $exception->id,
+            'resolve_method' => $resolveMethod,
+        ]);
+
+        return $exception;
+    }
+
+    protected function findPendingMeituanSkuException(Order $order): ?ExceptionOrder
+    {
+        return ExceptionOrder::query()
+            ->where('order_id', $order->id)
+            ->where('status', ExceptionOrderStatus::PENDING)
+            ->where('exception_data->missing_partner_primary_key', true)
+            ->first();
     }
 
     /**
