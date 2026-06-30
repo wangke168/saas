@@ -293,6 +293,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // 运营快报
     Route::prefix('operation-report')->group(function () {
         Route::get('/', [\App\Http\Controllers\OperationReportController::class, 'index']);
+        Route::get('/export', [\App\Http\Controllers\OperationReportController::class, 'export']);
     });
 
     // 门票管理
