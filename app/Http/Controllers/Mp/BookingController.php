@@ -68,6 +68,8 @@ class BookingController extends BaseMpController
             'meta' => [
                 'booking_advance_days' => (int) ($context['booking_advance_days'] ?? 0),
                 'earliest_check_in_date' => $context['earliest_check_in_date'] ?? null,
+                'latest_check_in_date' => $context['latest_check_in_date'] ?? null,
+                'sale_end_date' => $context['sale_end_date'] ?? null,
                 'booking_advance_hint' => $context['booking_advance_hint'] ?? null,
             ],
         ]);
@@ -959,7 +961,6 @@ class BookingController extends BaseMpController
     {
         $entitlement->loadMissing(['order', 'product']);
         $stayDays = max(1, (int) ($entitlement->product?->stay_days ?: 1));
-        $window = $this->extractBookingWindow($entitlement);
         $today = Carbon::today();
 
         $product = $entitlement->product;
@@ -968,8 +969,9 @@ class BookingController extends BaseMpController
             : 0;
         $earliestCheckIn = $product?->earliestCheckInDate($today) ?? $today->copy();
 
-        $start = $window['start'] ? Carbon::parse($window['start']) : $today;
-        $end = $window['end'] ? Carbon::parse($window['end']) : $today->copy()->addYear();
+        $window = $this->resolveBookingWindowBounds($entitlement, $today);
+        $start = Carbon::parse($window['start']);
+        $end = Carbon::parse($window['end']);
         if ($start->lessThan($earliestCheckIn)) {
             $start = $earliestCheckIn->copy();
         }
@@ -1013,8 +1015,48 @@ class BookingController extends BaseMpController
             'room_type_ids' => $roomTypeIds,
             'booking_advance_days' => $advanceDays,
             'earliest_check_in_date' => $earliestCheckIn->format('Y-m-d'),
+            'latest_check_in_date' => $candidateDates === [] ? null : $candidateDates[array_key_last($candidateDates)],
+            'sale_end_date' => $product?->sale_end_date?->format('Y-m-d'),
             'booking_advance_hint' => $product?->bookingAdvanceHint(),
         ];
+    }
+
+    /**
+     * 合并 OTA 订单备注窗口与产品销售有效期，得到可预约入住的日期上界/下界。
+     *
+     * @return array{start: string, end: string}
+     */
+    private function resolveBookingWindowBounds(OrderEntitlement $entitlement, Carbon $today): array
+    {
+        $otaWindow = $this->extractBookingWindow($entitlement);
+        $product = $entitlement->product;
+
+        $start = $otaWindow['start'];
+        $end = $otaWindow['end'];
+
+        if ($product !== null) {
+            if ($product->sale_start_date !== null) {
+                $saleStart = $product->sale_start_date->format('Y-m-d');
+                $start = $start === null ? $saleStart : max($start, $saleStart);
+            }
+            if ($product->sale_end_date !== null) {
+                $saleEnd = $product->sale_end_date->format('Y-m-d');
+                $end = $end === null ? $saleEnd : min($end, $saleEnd);
+            }
+        }
+
+        if ($start === null) {
+            $start = $today->format('Y-m-d');
+        }
+        if ($end === null) {
+            $end = $today->copy()->addYear()->format('Y-m-d');
+        }
+
+        if ($start > $end) {
+            $end = $start;
+        }
+
+        return ['start' => $start, 'end' => $end];
     }
 
     /**
