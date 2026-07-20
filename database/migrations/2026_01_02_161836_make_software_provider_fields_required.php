@@ -35,6 +35,14 @@ return new class extends Migration
             $table->string('api_url', 255)->nullable(false)->change();
         });
         
+        // sqlite（测试环境）不支持删除/重建外键约束，只调整字段可空性
+        if (DB::getDriverName() === 'sqlite') {
+            Schema::table('products', function (Blueprint $table) {
+                $table->unsignedBigInteger('software_provider_id')->nullable(false)->change();
+            });
+            return;
+        }
+
         // 将 products.software_provider_id 改为必填，并修改外键约束为 RESTRICT
         Schema::table('products', function (Blueprint $table) {
             // 先删除旧的外键约束
@@ -61,6 +69,14 @@ return new class extends Migration
             $table->string('api_url', 255)->nullable()->change();
         });
         
+        // sqlite（测试环境）不支持删除/重建外键约束，只调整字段可空性
+        if (DB::getDriverName() === 'sqlite') {
+            Schema::table('products', function (Blueprint $table) {
+                $table->unsignedBigInteger('software_provider_id')->nullable()->change();
+            });
+            return;
+        }
+
         // 将 products.software_provider_id 改回可空，并修改外键约束为 SET NULL
         Schema::table('products', function (Blueprint $table) {
             // 先删除旧的外键约束

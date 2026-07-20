@@ -93,8 +93,8 @@ return new class extends Migration
 
     private function ensureIndex(string $table, string $indexName, array $columns): void
     {
-        $exists = collect(DB::select('SHOW INDEX FROM `'.$table.'` WHERE Key_name = ?', [$indexName]))->isNotEmpty();
-        if ($exists) {
+        // 使用框架的跨数据库实现（原 SHOW INDEX 语句仅兼容 MySQL）
+        if (Schema::hasIndex($table, $indexName)) {
             return;
         }
 

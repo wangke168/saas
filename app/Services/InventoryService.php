@@ -77,6 +77,73 @@ class InventoryService
     }
 
     /**
+     * 使用数据库行级锁完成“检查 + 扣减”一体的库存锁定（按产品维度校验）。
+     *
+     * 并发请求会在行锁上排队串行执行，从根本上避免 Redis SET NX 抢锁失败
+     * 导致的“并发冲突”假失败。若调用方已开启事务，行锁保持到外层事务提交/
+     * 回滚，库存扣减与订单创建原子生效；若无事务则自行开启。
+     *
+     * @param int $productId 产品ID
+     * @param int $roomTypeId 房型ID
+     * @param array $dates 日期数组 (Y-m-d)
+     * @param int $quantity 锁定数量
+     * @return array{success: bool, message: string}
+     */
+    public function lockInventoryForProductWithRowLock(int $productId, int $roomTypeId, array $dates, int $quantity): array
+    {
+        $execute = function () use ($productId, $roomTypeId, $dates, $quantity): array {
+            // 按日期升序固定加锁顺序，降低多单并发时的死锁风险
+            $inventories = collect($dates)
+                ->sort()
+                ->values()
+                ->mapWithKeys(fn (string $date) => [
+                    $date => Inventory::query()
+                        ->where('room_type_id', $roomTypeId)
+                        ->whereDate('date', $date)
+                        ->lockForUpdate()
+                        ->first(),
+                ]);
+
+            // 第一遍：持有行锁后用最新数据校验所有日期
+            foreach ($inventories as $date => $inventory) {
+                if (! $inventory) {
+                    return ['success' => false, 'message' => "日期 {$date} 没有库存记录"];
+                }
+
+                if ($inventory->is_closed) {
+                    return ['success' => false, 'message' => "日期 {$date} 库存已关闭"];
+                }
+
+                if ($inventory->available_quantity < $quantity) {
+                    return ['success' => false, 'message' => "日期 {$date} 库存不足"];
+                }
+
+                $isProductClosed = ProductRoomInventoryControl::query()
+                    ->where('product_id', $productId)
+                    ->where('room_type_id', $roomTypeId)
+                    ->whereDate('date', $date)
+                    ->where('is_closed', true)
+                    ->exists();
+
+                if ($isProductClosed) {
+                    return ['success' => false, 'message' => "日期 {$date} 产品维度已关闭"];
+                }
+            }
+
+            // 第二遍：全部校验通过后统一扣减
+            $inventories->each(function (Inventory $inventory) use ($quantity): void {
+                $inventory->available_quantity = max(0, $inventory->available_quantity - $quantity);
+                $inventory->locked_quantity += $quantity;
+                $inventory->save();
+            });
+
+            return ['success' => true, 'message' => ''];
+        };
+
+        return DB::transactionLevel() > 0 ? $execute() : DB::transaction($execute);
+    }
+
+    /**
      * 锁定库存（支持单天）
      *
      * @param int $roomTypeId 房型ID

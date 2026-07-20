@@ -116,16 +116,9 @@ return new class extends Migration
     protected function hasIndex(string $table, string $indexName): bool
     {
         try {
-            $connection = Schema::getConnection();
-            $databaseName = $connection->getDatabaseName();
-            
-            $result = $connection->select(
-                "SELECT COUNT(*) as count FROM information_schema.statistics 
-                 WHERE table_schema = ? AND table_name = ? AND index_name = ?",
-                [$databaseName, $table, $indexName]
-            );
-            
-            return $result[0]->count > 0;
+            // 使用框架的跨数据库实现（原 information_schema 查询仅兼容 MySQL，
+            // 在 sqlite 测试环境下恒返回 false，导致重复建索引报错）
+            return Schema::hasIndex($table, $indexName);
         } catch (\Exception $e) {
             // 如果查询失败，假设索引不存在
             return false;

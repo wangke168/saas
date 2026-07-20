@@ -683,20 +683,23 @@ class CtripController extends Controller
             $checkInDate = \Carbon\Carbon::parse($useStartDate);
             
             // 检查连续入住天数的库存是否足够
+            // 按业务规则：库存问题不拒单，仍创建订单并转异常订单人工处理
+            $hasInventoryIssue = false;
+            $inventoryIssueMessage = '';
             $inventoryCheck = $this->checkInventoryForStayDays($roomType->id, $checkInDate, $stayDays, $quantity, $product);
             if (!$inventoryCheck['success']) {
-                DB::rollBack();
-                Log::warning('携程预下单：库存检查失败', [
+                $hasInventoryIssue = true;
+                $inventoryIssueMessage = $inventoryCheck['message'];
+                Log::warning('携程预下单：库存检查失败，将转异常订单人工处理', [
                     'room_type_id' => $roomType->id,
                     'check_in_date' => $checkInDate->format('Y-m-d'),
                     'stay_days' => $stayDays,
                     'quantity' => $quantity,
                     'error_message' => $inventoryCheck['message'],
                 ]);
-                return $this->errorResponse('1003', $inventoryCheck['message']);
+            } else {
+                Log::info('携程预下单：库存检查通过');
             }
-            
-            Log::info('携程预下单：库存检查通过');
 
             // 检查是否已存在订单（防止重复）
             $existingOrder = Order::where('ota_order_no', $ctripOrderId)
@@ -772,14 +775,39 @@ class CtripController extends Controller
             ]);
 
             // 锁定库存（预下单的核心目的就是锁库存）
-            $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
-            if (!$lockResult['success']) {
-                DB::rollBack();
-                Log::error('携程预下单：库存锁定失败', [
+            // 库存检查已失败时跳过锁定，直接转异常订单
+            if (!$hasInventoryIssue) {
+                $lockResult = $this->lockInventoryForPreOrder($order, $product->stay_days);
+                if (!$lockResult['success']) {
+                    $hasInventoryIssue = true;
+                    $inventoryIssueMessage = $lockResult['message'];
+                    Log::warning('携程预下单：库存锁定失败，将转异常订单人工处理', [
+                        'order_id' => $order->id,
+                        'error' => $lockResult['message'],
+                    ]);
+                }
+            }
+
+            // 按业务规则：所有库存锁定失败都转异常订单，不拒单
+            if ($hasInventoryIssue) {
+                ExceptionOrder::create([
                     'order_id' => $order->id,
-                    'error' => $lockResult['message'],
+                    'exception_type' => ExceptionOrderType::INVENTORY_MISMATCH,
+                    'exception_message' => $inventoryIssueMessage ?: '库存锁定失败',
+                    'exception_data' => [
+                        'operation' => 'pre_create_order',
+                        'ctrip_order_id' => $ctripOrderId,
+                        // 标记该订单未实际锁定库存，取消释放库存时据此跳过，避免库存虚增
+                        'inventory_not_locked' => true,
+                    ],
+                    'status' => ExceptionOrderStatus::PENDING,
                 ]);
-                return $this->errorResponse('1003', '库存锁定失败：' . $lockResult['message']);
+
+                Log::info('携程预下单：已创建库存不匹配异常订单', [
+                    'order_id' => $order->id,
+                    'ctrip_order_id' => $ctripOrderId,
+                    'message' => $inventoryIssueMessage,
+                ]);
             }
 
             DB::commit();
@@ -1912,6 +1940,8 @@ class CtripController extends Controller
                         'exception_data' => [
                             'inventory_check_message' => $inventoryCheck['message'] ?? '',
                             'lock_result_message' => $lockResult['message'] ?? '',
+                            // 标记该订单未实际锁定库存，取消释放库存时据此跳过，避免库存虚增
+                            'inventory_not_locked' => true,
                         ],
                         'status' => ExceptionOrderStatus::PENDING,
                     ]);
@@ -2778,95 +2808,44 @@ class CtripController extends Controller
             }
 
             $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
-            $roomTypeId = $order->room_type_id;
-            $quantity = $order->room_count;
+            $roomTypeId = (int) $order->room_type_id;
+            $quantity = (int) $order->room_count;
 
-            // 使用 Redis 分布式锁，防止并发问题
-            // 锁的粒度：按房型和日期
-            $lockKeys = [];
-            for ($i = 0; $i < $stayDays; $i++) {
-                $date = $checkInDate->copy()->addDays($i);
-                $lockKey = "inventory_lock:{$roomTypeId}:{$date->format('Y-m-d')}";
-                $lockKeys[] = $lockKey;
+            // 产品不可订时段校验（原 checkInventoryForStayDays 中的业务规则）
+            if ($order->product !== null
+                && ProductUnavailableNightService::checkInTouchesUnavailable($order->product, $checkInDate->format('Y-m-d'))) {
+                return [
+                    'success' => false,
+                    'message' => '该入住日期与产品不可订时段冲突，无法预订',
+                ];
             }
 
-            // 尝试获取所有日期的锁
-            $acquiredLocks = [];
-            foreach ($lockKeys as $lockKey) {
-                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
-                if (!$lock) {
-                    // 获取锁失败，释放已获取的锁
-                    foreach ($acquiredLocks as $acquiredLock) {
-                        Redis::del($acquiredLock);
-                    }
-                    return [
-                        'success' => false,
-                        'message' => '库存锁定失败：并发冲突，请稍后重试',
-                    ];
-                }
-                $acquiredLocks[] = $lockKey;
+            $dates = $this->inventoryService->getDateRange($checkInDate->format('Y-m-d'), $stayDays);
+
+            // 使用数据库行级锁串行化并发请求（行锁保持到外层事务提交），
+            // 替代原 Redis SET NX 抢锁，避免并发时直接返回“并发冲突”失败
+            $lockResult = $this->inventoryService->lockInventoryForProductWithRowLock(
+                (int) $order->product_id,
+                $roomTypeId,
+                $dates,
+                $quantity
+            );
+
+            if (!$lockResult['success']) {
+                return [
+                    'success' => false,
+                    'message' => '库存锁定失败：' . $lockResult['message'],
+                ];
             }
 
-            try {
-                // 再次检查库存（在锁内检查，确保准确性）
-                $checkResult = $this->checkInventoryForStayDays($roomTypeId, $checkInDate, $stayDays, $quantity, $order->product);
-                if (!$checkResult['success']) {
-                    return $checkResult;
-                }
+            Log::info('预下单库存锁定成功', [
+                'order_id' => $order->id,
+                'room_type_id' => $roomTypeId,
+                'dates' => $dates,
+                'quantity' => $quantity,
+            ]);
 
-                // 锁定库存：增加 locked_quantity，减少 available_quantity
-                for ($i = 0; $i < $stayDays; $i++) {
-                    $date = $checkInDate->copy()->addDays($i);
-                    $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
-                        ->where('date', $date->format('Y-m-d'))
-                        ->lockForUpdate() // 行级锁，防止并发
-                        ->first();
-
-                    if (!$inventory) {
-                        return [
-                            'success' => false,
-                            'message' => '库存锁定失败：日期 ' . $date->format('Y-m-d') . ' 没有库存记录',
-                        ];
-                    }
-
-                    // 再次检查（双重检查，确保在获取行锁后库存仍然足够）
-                    $productCheckResult = $this->inventoryService->checkInventoryAvailabilityForProduct(
-                        (int) $order->product_id,
-                        (int) $roomTypeId,
-                        [$date->format('Y-m-d')],
-                        (int) $quantity
-                    );
-                    if (!$productCheckResult['success']) {
-                        return [
-                            'success' => false,
-                            'message' => '库存锁定失败：' . $productCheckResult['message'],
-                        ];
-                    }
-
-                    // 锁定库存
-                    // 修复：确保锁定后 available_quantity 不会小于 0，且不超过 total_quantity
-                    $newAvailableQuantity = max(0, $inventory->available_quantity - $quantity);
-                    $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
-                    $inventory->locked_quantity += $quantity;
-                    $inventory->save();
-
-                    Log::info('预下单库存锁定成功', [
-                        'order_id' => $order->id,
-                        'room_type_id' => $roomTypeId,
-                        'date' => $date->format('Y-m-d'),
-                        'quantity' => $quantity,
-                        'available_quantity' => $inventory->available_quantity,
-                        'locked_quantity' => $inventory->locked_quantity,
-                    ]);
-                }
-
-                return ['success' => true, 'message' => ''];
-            } finally {
-                // 释放所有 Redis 锁
-                foreach ($acquiredLocks as $lockKey) {
-                    Redis::del($lockKey);
-                }
-            }
+            return ['success' => true, 'message' => ''];
         } catch (\Exception $e) {
             Log::error('预下单库存锁定异常', [
                 'order_id' => $order->id,
@@ -2891,69 +2870,60 @@ class CtripController extends Controller
     protected function releaseInventoryForPreOrder(Order $order): array
     {
         try {
+            // 转异常订单的订单未实际锁定库存，跳过释放，避免库存虚增
+            $inventoryNotLocked = ExceptionOrder::query()
+                ->where('order_id', $order->id)
+                ->where('exception_type', ExceptionOrderType::INVENTORY_MISMATCH)
+                ->get()
+                ->contains(fn (ExceptionOrder $exception): bool => (bool) data_get($exception->exception_data, 'inventory_not_locked'));
+
+            if ($inventoryNotLocked) {
+                Log::info('预下单库存释放：订单未锁定库存（已转异常订单），跳过释放', [
+                    'order_id' => $order->id,
+                ]);
+                return ['success' => true, 'message' => '订单未锁定库存，跳过释放'];
+            }
+
             // 获取入住天数
             $product = $order->product;
             $stayDays = $product->stay_days ?: 1;
 
             $checkInDate = \Carbon\Carbon::parse($order->check_in_date);
-            $roomTypeId = $order->room_type_id;
-            $quantity = $order->room_count;
+            $roomTypeId = (int) $order->room_type_id;
+            $quantity = (int) $order->room_count;
+            $dates = $this->inventoryService->getDateRange($checkInDate->format('Y-m-d'), $stayDays);
 
-            // 使用 Redis 分布式锁
-            $lockKeys = [];
-            for ($i = 0; $i < $stayDays; $i++) {
-                $date = $checkInDate->copy()->addDays($i);
-                $lockKey = "inventory_lock:{$roomTypeId}:{$date->format('Y-m-d')}";
-                $lockKeys[] = $lockKey;
-            }
-
-            // 尝试获取所有日期的锁
-            $acquiredLocks = [];
-            foreach ($lockKeys as $lockKey) {
-                $lock = Redis::set($lockKey, 1, 'EX', 30, 'NX');
-                if (!$lock) {
-                    // 获取锁失败，释放已获取的锁
-                    foreach ($acquiredLocks as $acquiredLock) {
-                        Redis::del($acquiredLock);
-                    }
-                    return [
-                        'success' => false,
-                        'message' => '库存释放失败：并发冲突，请稍后重试',
-                    ];
-                }
-                $acquiredLocks[] = $lockKey;
-            }
-
-            try {
-                // 释放库存：减少 locked_quantity，增加 available_quantity
-                for ($i = 0; $i < $stayDays; $i++) {
-                    $date = $checkInDate->copy()->addDays($i);
-                    $inventory = \App\Models\Inventory::where('room_type_id', $roomTypeId)
-                        ->where('date', $date->format('Y-m-d'))
-                        ->lockForUpdate() // 行级锁
+            $release = function () use ($order, $roomTypeId, $dates, $quantity): array {
+                // 按日期升序固定加锁顺序，降低多单并发时的死锁风险
+                foreach (collect($dates)->sort()->values() as $date) {
+                    $inventory = \App\Models\Inventory::query()
+                        ->where('room_type_id', $roomTypeId)
+                        ->whereDate('date', $date)
+                        ->lockForUpdate()
                         ->first();
 
                     if (!$inventory) {
                         Log::warning('预下单库存释放：库存记录不存在', [
                             'order_id' => $order->id,
                             'room_type_id' => $roomTypeId,
-                            'date' => $date->format('Y-m-d'),
+                            'date' => $date,
                         ]);
-                        continue; // 继续处理其他日期
+                        continue;
                     }
 
-                    // 释放库存（确保不会出现负数）
+                    // 释放库存（确保不会出现负数，也不会超过 total_quantity）
                     $releaseQuantity = min($quantity, $inventory->locked_quantity);
                     $inventory->locked_quantity -= $releaseQuantity;
-                    // 修复：确保 available_quantity 不超过 total_quantity
-                    $newAvailableQuantity = $inventory->available_quantity + $releaseQuantity;
-                    $inventory->available_quantity = min($newAvailableQuantity, $inventory->total_quantity);
+                    $inventory->available_quantity = min(
+                        $inventory->available_quantity + $releaseQuantity,
+                        $inventory->total_quantity
+                    );
                     $inventory->save();
 
                     Log::info('预下单库存释放成功', [
                         'order_id' => $order->id,
                         'room_type_id' => $roomTypeId,
-                        'date' => $date->format('Y-m-d'),
+                        'date' => $date,
                         'quantity' => $releaseQuantity,
                         'available_quantity' => $inventory->available_quantity,
                         'locked_quantity' => $inventory->locked_quantity,
@@ -2961,12 +2931,10 @@ class CtripController extends Controller
                 }
 
                 return ['success' => true, 'message' => ''];
-            } finally {
-                // 释放所有 Redis 锁
-                foreach ($acquiredLocks as $lockKey) {
-                    Redis::del($lockKey);
-                }
-            }
+            };
+
+            // 调用方若已开启事务，行锁保持到外层事务提交；否则自行开启
+            return DB::transactionLevel() > 0 ? $release() : DB::transaction($release);
         } catch (\Exception $e) {
             Log::error('预下单库存释放异常', [
                 'order_id' => $order->id,

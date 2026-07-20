@@ -41,6 +41,7 @@ return new class extends Migration
             $table->timestamp('confirmed_at')->nullable()->comment('确认时间');
             $table->timestamp('cancelled_at')->nullable()->comment('取消时间');
             $table->timestamps();
+            $table->softDeletes();
             
             $table->index('ota_order_no');
             $table->index('status');

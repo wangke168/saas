@@ -12,6 +12,13 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // 全新数据库上该迁移先于 create_sales_products_table 执行（时间戳倒挂），此时跳过；
+        // 建表迁移已包含 sale_start_date / sale_end_date 列
+        if (! Schema::hasTable('sales_products')
+            || Schema::hasColumn('sales_products', 'sale_start_date')) {
+            return;
+        }
+
         Schema::table('sales_products', function (Blueprint $table) {
             // 先添加可为空的字段
             $table->date('sale_start_date')->nullable()->after('stay_days')->comment('销售开始日期');
