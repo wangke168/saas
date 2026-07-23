@@ -54,10 +54,10 @@
                             （当没有时间段映射时使用此编码）
                         </span>
                     </el-descriptions-item>
-                    <el-descriptions-item label="横店票性质" :span="2">
+                    <el-descriptions-item label="票性质" :span="2">
                         {{ ticketPropertyLabel(product.ticket_property) }}
                         <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                            （未设置则对接横店时不传 TicketProperty）
+                            （未设置则不传 TicketProperty）
                         </span>
                     </el-descriptions-item>
                     <el-descriptions-item label="产品描述" :span="2">

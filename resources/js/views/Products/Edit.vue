@@ -71,7 +71,7 @@
                             </el-col>
                         </el-row>
 
-                        <el-form-item label="横店票性质" prop="ticket_property">
+                        <el-form-item label="票性质" prop="ticket_property">
                             <el-select
                                 v-model="form.ticket_property"
                                 clearable
@@ -86,7 +86,7 @@
                                 <el-option label="半票 (half)" value="half" />
                             </el-select>
                             <div style="margin-top: 6px; color: #909399; font-size: 12px;">
-                                仅横店对接且部分强制票种产品需要配置；留空则下单/可订不传 TicketProperty。
+                                仅部分强制票种产品需要配置；留空则下单/可订不传 TicketProperty。
                             </div>
                         </el-form-item>
 
