@@ -71,6 +71,25 @@
                             </el-col>
                         </el-row>
 
+                        <el-form-item label="横店票性质" prop="ticket_property">
+                            <el-select
+                                v-model="form.ticket_property"
+                                clearable
+                                placeholder="默认不传（仅部分产品需配置）"
+                                style="width: 100%; max-width: 480px;"
+                            >
+                                <el-option label="成人票 (adult)" value="adult" />
+                                <el-option label="儿童票 (child)" value="child" />
+                                <el-option label="老年票 (elder)" value="elder" />
+                                <el-option label="教师票 (teacher)" value="teacher" />
+                                <el-option label="学生票 (student)" value="student" />
+                                <el-option label="半票 (half)" value="half" />
+                            </el-select>
+                            <div style="margin-top: 6px; color: #909399; font-size: 12px;">
+                                仅横店对接且部分强制票种产品需要配置；留空则下单/可订不传 TicketProperty。
+                            </div>
+                        </el-form-item>
+
                         <el-form-item label="描述" prop="description">
                             <el-input
                                 v-model="form.description"
@@ -396,6 +415,7 @@ const defaultForm = () => ({
     name: '',
     code: '',
     external_code: '',
+    ticket_property: null,
     description: '',
     cover_image: '',
     cover_image_url: '',
@@ -489,6 +509,7 @@ const applyProductToForm = (product, options = {}) => {
         name: duplicateName ? `${product.name}-副本` : product.name,
         code: duplicateName ? '' : (product.code || ''),
         external_code: product.external_code || '',
+        ticket_property: product.ticket_property || null,
         description: product.description || '',
         cover_image: product.cover_image || '',
         cover_image_url: product.cover_image_url || publicMediaUrl(product.cover_image),
@@ -630,6 +651,7 @@ const buildSubmitData = () => {
     delete submitData.cover_image_url;
 
     if (submitData.external_code === '') submitData.external_code = null;
+    if (submitData.ticket_property === '') submitData.ticket_property = null;
     if (submitData.order_mode === '') submitData.order_mode = null;
     if (submitData.order_provider_id === '') submitData.order_provider_id = null;
     if (submitData.order_mode !== 'other') submitData.order_provider_id = null;

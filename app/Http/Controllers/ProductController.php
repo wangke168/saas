@@ -221,6 +221,7 @@ class ProductController extends Controller
             'name' => 'required|string|max:255',
             'code' => 'nullable|string|max:255|unique:products,code', // 改为可空，自动生成
             'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
+            'ticket_property' => 'nullable|string|in:adult,child,elder,teacher,student,half',
             'description' => 'nullable|string',
             'cover_image' => 'nullable|string|max:500',
             'booking_rules' => 'nullable|array',
@@ -284,6 +285,7 @@ class ProductController extends Controller
 
         $validated = $this->normalizeBookingAdvanceDays($validated);
         $validated = $this->normalizeIdRegionRestriction($validated);
+        $validated = $this->normalizeTicketProperty($validated);
 
         $product = $this->productService->createProduct($validated);
 
@@ -321,6 +323,7 @@ class ProductController extends Controller
             'name' => 'sometimes|required|string|max:255',
             'code' => ['sometimes', 'nullable', 'string', 'max:255', 'unique:products,code,'.$product->id], // code 不可修改，但允许为空（自动生成）
             'external_code' => 'nullable|string|max:255', // 外部产品编码（可选）
+            'ticket_property' => 'nullable|string|in:adult,child,elder,teacher,student,half',
             'description' => 'nullable|string',
             'cover_image' => 'nullable|string|max:500',
             'booking_rules' => 'nullable|array',
@@ -390,6 +393,7 @@ class ProductController extends Controller
 
         $validated = $this->normalizeBookingAdvanceDays($validated);
         $validated = $this->normalizeIdRegionRestriction($validated);
+        $validated = $this->normalizeTicketProperty($validated);
 
         $product = $this->productService->updateProduct($product, $validated);
 
@@ -620,6 +624,29 @@ class ProductController extends Controller
         }
 
         $validated['id_region_prefixes'] = $prefixes === [] ? null : $prefixes;
+
+        return $validated;
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeTicketProperty(array $validated): array
+    {
+        if (! array_key_exists('ticket_property', $validated)) {
+            return $validated;
+        }
+
+        $raw = $validated['ticket_property'];
+        if ($raw === null || $raw === '') {
+            $validated['ticket_property'] = null;
+
+            return $validated;
+        }
+
+        $enum = \App\Enums\HengdianTicketProperty::tryFromMixed($raw);
+        $validated['ticket_property'] = $enum?->value;
 
         return $validated;
     }

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\HengdianTicketProperty;
 use App\Enums\PriceSource;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -64,6 +65,7 @@ class Product extends Model
         'name',
         'code',
         'external_code',
+        'ticket_property',
         'description',
         'cover_image',
         'booking_rules',
@@ -87,6 +89,7 @@ class Product extends Model
     {
         return [
             'price_source' => PriceSource::class,
+            'ticket_property' => HengdianTicketProperty::class,
             'fulfillment_mode' => 'string',
             'is_active' => 'boolean',
             'is_realname' => 'integer',

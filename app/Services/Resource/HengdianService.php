@@ -3,10 +3,12 @@
 namespace App\Services\Resource;
 
 use App\Enums\FulfillmentMode;
+use App\Enums\HengdianTicketProperty;
 use App\Enums\OrderBookingStatus;
 use App\Http\Client\HengdianClient;
 use App\Models\Order;
 use App\Models\OrderBooking;
+use App\Models\Product;
 use App\Models\ResourceConfig;
 use App\Support\MpBookingGuestInfo;
 use App\Models\SoftwareProvider;
@@ -412,6 +414,63 @@ class HengdianService implements ResourceServiceInterface
     }
 
     /**
+     * 解析横店票性质（TicketProperty）。
+     * 横店反馈：默认可不传；仅部分产品需强制传。
+     * 优先级：显式入参 > 产品配置；非法值视为未配置（不传）。
+     */
+    protected function resolveTicketProperty(mixed $explicit = null, ?Product $product = null): ?string
+    {
+        $fromExplicit = HengdianTicketProperty::tryFromMixed($explicit);
+        if ($fromExplicit !== null) {
+            return $fromExplicit->value;
+        }
+
+        if ($explicit !== null && trim((string) $explicit) !== '') {
+            Log::warning('横店票性质非法，已忽略（不传 TicketProperty）', [
+                'raw' => $explicit,
+                'product_id' => $product?->id,
+            ]);
+        }
+
+        $fromProduct = HengdianTicketProperty::tryFromMixed($product?->ticket_property);
+        if ($fromProduct !== null) {
+            return $fromProduct->value;
+        }
+
+        if ($product?->ticket_property !== null) {
+            Log::warning('产品票性质配置非法，已忽略（不传 TicketProperty）', [
+                'product_id' => $product->id,
+                'raw' => $product->ticket_property instanceof \BackedEnum
+                    ? $product->ticket_property->value
+                    : $product->ticket_property,
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * 将解析后的票性质写入请求数组；未配置则不写入节点。
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    protected function applyTicketProperty(array $data, ?Product $product = null): array
+    {
+        $explicit = $data['TicketProperty'] ?? $data['ticket_property'] ?? null;
+        unset($data['ticket_property']);
+
+        $ticketProperty = $this->resolveTicketProperty($explicit, $product);
+        if ($ticketProperty !== null) {
+            $data['TicketProperty'] = $ticketProperty;
+        } else {
+            unset($data['TicketProperty']);
+        }
+
+        return $data;
+    }
+
+    /**
      * 标准化可订检查请求数据（兼容新版文档中的入住人信息节点）。
      */
     protected function normalizeValidateData(array $data): array
@@ -451,7 +510,16 @@ class HengdianService implements ResourceServiceInterface
             $data['OrderGuests']['OrderGuest'] = $normalized;
         }
 
-        return $data;
+        $product = null;
+        if (($data['product'] ?? null) instanceof Product) {
+            $product = $data['product'];
+            unset($data['product']);
+        } elseif (isset($data['product_id']) && is_numeric($data['product_id'])) {
+            $product = Product::query()->find((int) $data['product_id']);
+            unset($data['product_id']);
+        }
+
+        return $this->applyTicketProperty($data, $product);
     }
 
     /**
@@ -469,6 +537,7 @@ class HengdianService implements ResourceServiceInterface
                 'result_code' => $errorCode,
                 'result_code_desc' => $errorDesc,
                 'message' => (string)($result['data']->Message ?? $result['message'] ?? ''),
+                'ticket_property' => $normalizedData['TicketProperty'] ?? null,
             ]);
         }
 
@@ -639,6 +708,7 @@ class HengdianService implements ResourceServiceInterface
 
             // 根据订单入住日期获取对应的外部编码
             $externalCode = $this->getExternalCodeForOrder($order);
+            $order->loadMissing('product');
             
             $data = [
                 'OtaOrderId' => $order->ota_order_no,
@@ -659,6 +729,8 @@ class HengdianService implements ResourceServiceInterface
                 'Extensions' => json_encode([]),
             ];
 
+            $data = $this->applyTicketProperty($data, $order->product);
+
             // 记录发送到景区方系统的数据（包含详细的客人信息）
             Log::info('发送到景区方系统的订单数据', [
                 'order_id' => $order->id,
@@ -666,6 +738,7 @@ class HengdianService implements ResourceServiceInterface
                 'guest_info' => $guestInfoRows,
                 'order_guest_list' => $orderGuestList,
                 'order_guest_list_count' => count($orderGuestList),
+                'ticket_property' => $data['TicketProperty'] ?? null,
                 'request_data' => $data,
             ]);
 

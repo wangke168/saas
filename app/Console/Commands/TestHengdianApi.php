@@ -44,6 +44,7 @@ class TestHengdianApi extends Command
                             {--room-num=1 : 房间数}
                             {--customer-number=2 : 入住人数}
                             {--payment-type=1 : 支付方式，文档：1 预付 5 面付 6 信用住（Validate 用）}
+                            {--ticket-property= : Validate 的票性质 TicketProperty（可选，如 student）}
                             {--notify-url= : 订阅回调地址，默认取 HENGDIAN_WEBHOOK_URL}
                             {--cancel-reason=用户取消 : Cancel 原因}
                             {--base-url= : --push-self 时的站点根 URL，默认 APP_URL}
@@ -176,6 +177,11 @@ class TestHengdianApi extends Command
             'PaymentType' => (int) $this->option('payment-type'),
             'Extensions' => json_encode([]),
         ];
+
+        $ticketProperty = trim((string) ($this->option('ticket-property') ?: ''));
+        if ($ticketProperty !== '') {
+            $data['TicketProperty'] = $ticketProperty;
+        }
 
         $result = $client->validate($data);
 

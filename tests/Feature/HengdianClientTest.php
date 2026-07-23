@@ -159,6 +159,68 @@ class HengdianClientTest extends TestCase
         });
     }
 
+    public function test_validate_includes_ticket_property_when_provided(): void
+    {
+        Http::fake([
+            self::FAKE_URL => Http::response(
+                '<Result><Message>ok</Message><ResultCode>0</ResultCode><InventoryPrice>[]</InventoryPrice></Result>',
+                200,
+                ['Content-Type' => 'application/xml']
+            ),
+        ]);
+
+        $client = new HengdianClient($this->config);
+        $result = $client->validate([
+            'HotelId' => '001',
+            'RoomType' => '标准间',
+            'CheckIn' => '2026-06-01',
+            'CheckOut' => '2026-06-03',
+            'RoomNum' => 1,
+            'CustomerNumber' => 2,
+            'PaymentType' => 1,
+            'TicketProperty' => 'student',
+            'Extensions' => '{}',
+        ]);
+
+        $this->assertTrue($result['success']);
+        Http::assertSent(function (\Illuminate\Http\Client\Request $request): bool {
+            $body = html_entity_decode($request->body(), ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+            return str_contains($body, '<ValidateRQ>')
+                && str_contains($body, '<TicketProperty>student</TicketProperty>');
+        });
+    }
+
+    public function test_validate_omits_ticket_property_when_absent(): void
+    {
+        Http::fake([
+            self::FAKE_URL => Http::response(
+                '<Result><Message>ok</Message><ResultCode>0</ResultCode><InventoryPrice>[]</InventoryPrice></Result>',
+                200,
+                ['Content-Type' => 'application/xml']
+            ),
+        ]);
+
+        $client = new HengdianClient($this->config);
+        $client->validate([
+            'HotelId' => '001',
+            'RoomType' => '标准间',
+            'CheckIn' => '2026-06-01',
+            'CheckOut' => '2026-06-03',
+            'RoomNum' => 1,
+            'CustomerNumber' => 2,
+            'PaymentType' => 1,
+            'Extensions' => '{}',
+        ]);
+
+        Http::assertSent(function (\Illuminate\Http\Client\Request $request): bool {
+            $body = html_entity_decode($request->body(), ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+            return str_contains($body, '<ValidateRQ>')
+                && ! str_contains($body, '<TicketProperty>');
+        });
+    }
+
     public function test_query_parses_status(): void
     {
         Http::fake([

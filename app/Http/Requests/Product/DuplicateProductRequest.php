@@ -18,6 +18,7 @@ class DuplicateProductRequest extends FormRequest
             'software_provider_id' => 'required|exists:software_providers,id',
             'name' => 'required|string|max:255',
             'external_code' => 'nullable|string|max:255',
+            'ticket_property' => 'nullable|string|in:adult,child,elder,teacher,student,half',
             'description' => 'nullable|string',
             'cover_image' => 'nullable|string|max:500',
             'booking_rules' => 'nullable|array',

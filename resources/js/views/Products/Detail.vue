@@ -54,6 +54,12 @@
                             （当没有时间段映射时使用此编码）
                         </span>
                     </el-descriptions-item>
+                    <el-descriptions-item label="横店票性质" :span="2">
+                        {{ ticketPropertyLabel(product.ticket_property) }}
+                        <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+                            （未设置则对接横店时不传 TicketProperty）
+                        </span>
+                    </el-descriptions-item>
                     <el-descriptions-item label="产品描述" :span="2">
                         {{ product.description || '-' }}
                     </el-descriptions-item>
@@ -1577,6 +1583,21 @@ const formatDate = (date) => {
     });
 };
 
+
+const ticketPropertyLabel = (value) => {
+    const map = {
+        adult: '成人票 (adult)',
+        child: '儿童票 (child)',
+        elder: '老年票 (elder)',
+        teacher: '教师票 (teacher)',
+        student: '学生票 (student)',
+        half: '半票 (half)',
+    };
+    if (!value) {
+        return '未设置（不传）';
+    }
+    return map[value] || value;
+};
 
 const formatDateOnly = (date) => {
     if (!date) return '';

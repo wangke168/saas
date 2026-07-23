@@ -30,6 +30,7 @@ class TestHengdianBook extends Command
                             {--contact-tel= : 联系人电话（手动模式）}
                             {--guest-name= : 客人姓名（手动模式）}
                             {--guest-id-code= : 客人身份证号（手动模式）}
+                            {--ticket-property= : 票性质 TicketProperty（可选，如 student）}
                             {--json : 以JSON格式输出}
                             {--save= : 保存请求XML到文件}';
 
@@ -157,6 +158,11 @@ class TestHengdianBook extends Command
         
         $data['Comment'] = '';
         $data['Extensions'] = json_encode([]);
+
+        $ticketProperty = trim((string) ($this->option('ticket-property') ?: ''));
+        if ($ticketProperty !== '') {
+            $data['TicketProperty'] = $ticketProperty;
+        }
 
         $this->newLine();
         $this->info("[测试数据]");
