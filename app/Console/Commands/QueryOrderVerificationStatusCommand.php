@@ -52,7 +52,7 @@ class QueryOrderVerificationStatusCommand extends Command
     {
         $this->info("查询订单 ID: {$orderId}");
 
-        $order = Order::with(['otaPlatform', 'product', 'hotel.scenicSpot.softwareProvider'])
+        $order = Order::with(['product.softwareProvider'])
             ->find($orderId);
 
         if (! $order) {
@@ -87,7 +87,7 @@ class QueryOrderVerificationStatusCommand extends Command
         $checkInFrom = $today->copy()->subDays(2)->toDateString();
         $checkInTo = $today->toDateString();
 
-        $orders = Order::with(['otaPlatform', 'product', 'hotel.scenicSpot.softwareProvider'])
+        $orders = Order::with(['product.softwareProvider'])
             ->where('status', OrderStatus::CONFIRMED)
             ->whereBetween('check_in_date', [$checkInFrom, $checkInTo])
             ->orderBy('check_in_date', 'asc')
@@ -107,20 +107,19 @@ class QueryOrderVerificationStatusCommand extends Command
         $skipCount = 0;
 
         foreach ($orders as $order) {
-            // 检查订单关联的软件服务商是否支持查询
-            $scenicSpot = $order->hotel->scenicSpot ?? null;
-            if (! $scenicSpot) {
+            // 与 ResourceServiceFactory 对齐：以产品上的软件服务商为准（景区已改为多对多，旧 BelongsTo 不可靠）
+            $product = $order->product;
+            if (! $product) {
                 $skipCount++;
-                $this->warn("订单 {$order->id} 没有关联景区，跳过");
+                $this->warn("订单 {$order->id} 没有关联产品，跳过");
 
                 continue;
             }
 
-            // 获取软件服务商
-            $softwareProvider = $scenicSpot->softwareProvider ?? null;
+            $softwareProvider = $product->softwareProvider;
             if (! $softwareProvider) {
                 $skipCount++;
-                $this->warn("订单 {$order->id} 关联的景区没有软件服务商，跳过");
+                $this->warn("订单 {$order->id} 关联的产品没有软件服务商，跳过");
 
                 continue;
             }
