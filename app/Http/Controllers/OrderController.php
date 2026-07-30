@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderBooking;
 use App\Services\OrderExportService;
 use App\Services\OrderOperationService;
+use App\Services\OrderResourcePushRetryService;
 use App\Services\OrderService;
 use App\Services\Presale\PresaleFulfillmentOrderService;
 use App\Support\ManualResourceOrderNo;
@@ -19,7 +20,8 @@ class OrderController extends Controller
 {
     public function __construct(
         protected OrderService $orderService,
-        protected OrderOperationService $orderOperationService
+        protected OrderOperationService $orderOperationService,
+        protected OrderResourcePushRetryService $orderResourcePushRetryService,
     ) {}
 
     /**
@@ -119,6 +121,10 @@ class OrderController extends Controller
             $order->setAttribute(
                 'requires_resource_order_no_input',
                 ManualResourceOrderNo::needsResourceOrderNoOnConfirm($order)
+            );
+            $order->setAttribute(
+                'can_retry_resource_push',
+                $this->orderResourcePushRetryService->canRetry($order)
             );
 
             return $order;
@@ -326,6 +332,21 @@ class OrderController extends Controller
             'success' => false,
             'message' => $result['message'],
         ], 400);
+    }
+
+    /**
+     * 重试：重新向景区侧推送接单（仅系统直连 + 确认中）
+     */
+    public function retryResourcePush(Request $request, Order $order): JsonResponse
+    {
+        $this->authorize('updateStatus', $order);
+
+        $this->orderResourcePushRetryService->retry($order, $request->user());
+
+        return response()->json([
+            'success' => true,
+            'message' => '已重新提交景区推送，请稍后刷新查看结果',
+        ]);
     }
 
     /**

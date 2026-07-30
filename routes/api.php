@@ -262,6 +262,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/{order}/update-status', [\App\Http\Controllers\OrderController::class, 'updateStatus']);
         // 订单操作
         Route::post('/{order}/confirm', [\App\Http\Controllers\OrderController::class, 'confirmOrder']);
+        Route::post('/{order}/retry-resource-push', [\App\Http\Controllers\OrderController::class, 'retryResourcePush']);
         Route::patch('/{order}/resource-order-no', [\App\Http\Controllers\OrderController::class, 'backfillResourceOrderNo']);
         Route::post('/{order}/reject', [\App\Http\Controllers\OrderController::class, 'rejectOrder']);
         Route::post('/{order}/verify', [\App\Http\Controllers\OrderController::class, 'verifyOrder']);

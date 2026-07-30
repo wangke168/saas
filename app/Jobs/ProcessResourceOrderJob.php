@@ -181,6 +181,9 @@ class ProcessResourceOrderJob implements ShouldQueue
                 $resourceOrderNo = $this->order->resource_order_no;
             }
 
+            // 景区侧推送已成功：关闭对应异常，重试按钮随状态变更消失
+            $this->resolveOpenConfirmExceptions();
+
             if (PresaleFulfillmentOrderService::isFulfillmentChild($this->order)) {
                 $this->finalizePresaleFulfillmentChild($resourceOrderNo, $presaleOtaConsumeService);
 
@@ -344,6 +347,31 @@ class ProcessResourceOrderJob implements ShouldQueue
 
         $this->order->refresh();
         NotifyResourceChannelExceptionJob::dispatch($this->order->id, $exception->id);
+    }
+
+    /**
+     * 景区接单成功后关闭未解决的 confirm 异常单
+     */
+    protected function resolveOpenConfirmExceptions(): void
+    {
+        $updated = ExceptionOrder::query()
+            ->where('order_id', $this->order->id)
+            ->whereIn('status', [
+                ExceptionOrderStatus::PENDING->value,
+                ExceptionOrderStatus::PROCESSING->value,
+            ])
+            ->where('exception_data->operation', 'confirm')
+            ->update([
+                'status' => ExceptionOrderStatus::RESOLVED,
+                'resolved_at' => now(),
+            ]);
+
+        if ($updated > 0) {
+            Log::info('ProcessResourceOrderJob: 已自动关闭确认异常单', [
+                'order_id' => $this->order->id,
+                'updated_count' => $updated,
+            ]);
+        }
     }
 
     /**

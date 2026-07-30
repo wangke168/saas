@@ -294,6 +294,18 @@
                             拒单
                         </el-button>
 
+                        <!-- 直连异常：重新向景区推送 -->
+                        <el-button
+                            v-if="order.can_retry_resource_push"
+                            size="small"
+                            type="warning"
+                            @click="handleRetryResourcePush(order)"
+                            :loading="operating[order.id] === 'retry'"
+                            class="action-btn-primary"
+                        >
+                            重试
+                        </el-button>
+
                         <!-- 核销按钮（已确认状态） -->
                         <el-button
                                 v-if="order.status === 'confirmed'"
@@ -906,6 +918,39 @@ const handleRejectOrder = async (row) => {
     } catch (error) {
         if (error !== 'cancel') {
             const message = error.response?.data?.message || '拒单失败';
+            ElMessage.error(message);
+        }
+    } finally {
+        operating.value[row.id] = null;
+    }
+};
+
+const handleRetryResourcePush = async (row) => {
+    try {
+        await ElMessageBox.confirm(
+            '确定重新向景区侧推送该订单吗？',
+            '重试确认',
+            {
+                type: 'warning',
+                confirmButtonText: '确定',
+                cancelButtonText: '取消',
+            }
+        );
+
+        operating.value[row.id] = 'retry';
+        const response = await axios.post(`/orders/${row.id}/retry-resource-push`);
+
+        if (response.data.success) {
+            ElMessage.success(response.data.message || '已重新提交景区推送');
+            fetchOrders();
+        } else {
+            ElMessage.error(response.data.message || '重试失败');
+        }
+    } catch (error) {
+        if (error !== 'cancel') {
+            const message = error.response?.data?.message
+                || error.response?.data?.errors?.order?.[0]
+                || '重试失败';
             ElMessage.error(message);
         }
     } finally {

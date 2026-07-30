@@ -1,6 +1,6 @@
 {
-  "_PublicImageUpload-DKuX-RRp.js": {
-    "file": "assets/PublicImageUpload-DKuX-RRp.js",
+  "_PublicImageUpload-CFybdFY1.js": {
+    "file": "assets/PublicImageUpload-CFybdFY1.js",
     "name": "PublicImageUpload",
     "imports": [
       "_vendor-vue-core-BNdr5BJ9.js",
@@ -14,8 +14,8 @@
     "file": "assets/PublicImageUpload-DWAjnrZx.css",
     "src": "_PublicImageUpload-DWAjnrZx.css"
   },
-  "_orderConfirm-D5F3NKip.js": {
-    "file": "assets/orderConfirm-D5F3NKip.js",
+  "_orderConfirm-Bm7Ekoiv.js": {
+    "file": "assets/orderConfirm-Bm7Ekoiv.js",
     "name": "orderConfirm",
     "imports": [
       "resources/js/app.js"
@@ -35,7 +35,7 @@
     "isEntry": true
   },
   "resources/js/app.js": {
-    "file": "assets/app-DHUebm7n.js",
+    "file": "assets/app-xEqVgumz.js",
     "name": "app",
     "src": "resources/js/app.js",
     "isEntry": true,
@@ -75,26 +75,26 @@
     ]
   },
   "resources/js/views/ExceptionOrders/Index.vue": {
-    "file": "assets/Index-BjL8IvVp.js",
+    "file": "assets/Index-UDcPr7cK.js",
     "name": "Index",
     "src": "resources/js/views/ExceptionOrders/Index.vue",
     "isDynamicEntry": true,
     "imports": [
       "resources/js/app.js",
-      "_orderConfirm-D5F3NKip.js",
+      "_orderConfirm-Bm7Ekoiv.js",
       "_vendor-vue-core-BNdr5BJ9.js",
       "_vendor-axios-B9ygI19o.js"
     ]
   },
   "resources/js/views/Hotels/Index.vue": {
-    "file": "assets/Index-X7Fq5eLf.js",
+    "file": "assets/Index-2eRE9Zvp.js",
     "name": "Index",
     "src": "resources/js/views/Hotels/Index.vue",
     "isDynamicEntry": true,
     "imports": [
       "resources/js/app.js",
       "_vendor-vue-core-BNdr5BJ9.js",
-      "_PublicImageUpload-DKuX-RRp.js",
+      "_PublicImageUpload-CFybdFY1.js",
       "_vendor-axios-B9ygI19o.js"
     ],
     "css": [
@@ -102,7 +102,7 @@
     ]
   },
   "resources/js/views/Login.vue": {
-    "file": "assets/Login-CtVZ4Qbb.js",
+    "file": "assets/Login-syAu-dW9.js",
     "name": "Login",
     "src": "resources/js/views/Login.vue",
     "isDynamicEntry": true,
@@ -116,7 +116,7 @@
     ]
   },
   "resources/js/views/OperationReport/Index.vue": {
-    "file": "assets/Index-B80W9hAc.js",
+    "file": "assets/Index-DFjGZP6q.js",
     "name": "Index",
     "src": "resources/js/views/OperationReport/Index.vue",
     "isDynamicEntry": true,
@@ -130,7 +130,7 @@
     ]
   },
   "resources/js/views/Orders/Detail.vue": {
-    "file": "assets/Detail-CyIYKhS5.js",
+    "file": "assets/Detail-CX_ve4O-.js",
     "name": "Detail",
     "src": "resources/js/views/Orders/Detail.vue",
     "isDynamicEntry": true,
@@ -144,22 +144,22 @@
     ]
   },
   "resources/js/views/Orders/Index.vue": {
-    "file": "assets/Index-Cv0EREQp.js",
+    "file": "assets/Index-CFD5Z1EK.js",
     "name": "Index",
     "src": "resources/js/views/Orders/Index.vue",
     "isDynamicEntry": true,
     "imports": [
       "_vendor-vue-core-BNdr5BJ9.js",
       "resources/js/app.js",
-      "_orderConfirm-D5F3NKip.js",
+      "_orderConfirm-Bm7Ekoiv.js",
       "_vendor-axios-B9ygI19o.js"
     ],
     "css": [
-      "assets/Index-tsPmE19M.css"
+      "assets/Index-DA1CQ7tY.css"
     ]
   },
   "resources/js/views/OtaPlatforms/Index.vue": {
-    "file": "assets/Index-mvlc3El3.js",
+    "file": "assets/Index-6IbDdxbg.js",
     "name": "Index",
     "src": "resources/js/views/OtaPlatforms/Index.vue",
     "isDynamicEntry": true,
@@ -170,7 +170,7 @@
     ]
   },
   "resources/js/views/PkgOrders/Detail.vue": {
-    "file": "assets/Detail-BLvpdXAq.js",
+    "file": "assets/Detail-CzzXvsps.js",
     "name": "Detail",
     "src": "resources/js/views/PkgOrders/Detail.vue",
     "isDynamicEntry": true,
@@ -184,7 +184,7 @@
     ]
   },
   "resources/js/views/PkgOrders/Index.vue": {
-    "file": "assets/Index-DRvomNeS.js",
+    "file": "assets/Index-2rJmrpDq.js",
     "name": "Index",
     "src": "resources/js/views/PkgOrders/Index.vue",
     "isDynamicEntry": true,
@@ -198,7 +198,7 @@
     ]
   },
   "resources/js/views/PkgProducts/Detail.vue": {
-    "file": "assets/Detail-DVs4xctA.js",
+    "file": "assets/Detail-Ddjy2ozX.js",
     "name": "Detail",
     "src": "resources/js/views/PkgProducts/Detail.vue",
     "isDynamicEntry": true,
@@ -212,7 +212,7 @@
     ]
   },
   "resources/js/views/PkgProducts/Index.vue": {
-    "file": "assets/Index-B5-ZDDQY.js",
+    "file": "assets/Index-CKWNGKTG.js",
     "name": "Index",
     "src": "resources/js/views/PkgProducts/Index.vue",
     "isDynamicEntry": true,
@@ -226,7 +226,7 @@
     ]
   },
   "resources/js/views/PkgProducts/PriceManagement.vue": {
-    "file": "assets/PriceManagement-BBn6Rt29.js",
+    "file": "assets/PriceManagement-INiwyRDi.js",
     "name": "PriceManagement",
     "src": "resources/js/views/PkgProducts/PriceManagement.vue",
     "isDynamicEntry": true,
@@ -240,7 +240,7 @@
     ]
   },
   "resources/js/views/Products/Detail.vue": {
-    "file": "assets/Detail-DvHHGWqZ.js",
+    "file": "assets/Detail-BJu6OnG-.js",
     "name": "Detail",
     "src": "resources/js/views/Products/Detail.vue",
     "isDynamicEntry": true,
@@ -254,14 +254,14 @@
     ]
   },
   "resources/js/views/Products/Edit.vue": {
-    "file": "assets/Edit-5q0cSpjT.js",
+    "file": "assets/Edit-tB6q1SxM.js",
     "name": "Edit",
     "src": "resources/js/views/Products/Edit.vue",
     "isDynamicEntry": true,
     "imports": [
       "_vendor-vue-core-BNdr5BJ9.js",
       "resources/js/app.js",
-      "_PublicImageUpload-DKuX-RRp.js",
+      "_PublicImageUpload-CFybdFY1.js",
       "_vendor-axios-B9ygI19o.js"
     ],
     "css": [
@@ -269,7 +269,7 @@
     ]
   },
   "resources/js/views/Products/Index.vue": {
-    "file": "assets/Index-BfanHITM.js",
+    "file": "assets/Index-DDR5dPp8.js",
     "name": "Index",
     "src": "resources/js/views/Products/Index.vue",
     "isDynamicEntry": true,
@@ -283,7 +283,7 @@
     ]
   },
   "resources/js/views/Profile/Index.vue": {
-    "file": "assets/Index-BOfVsQ4D.js",
+    "file": "assets/Index-BaSxkeQO.js",
     "name": "Index",
     "src": "resources/js/views/Profile/Index.vue",
     "isDynamicEntry": true,
@@ -294,7 +294,7 @@
     ]
   },
   "resources/js/views/ResHotels/Detail.vue": {
-    "file": "assets/Detail-0LjZLbf5.js",
+    "file": "assets/Detail-JabYOQyu.js",
     "name": "Detail",
     "src": "resources/js/views/ResHotels/Detail.vue",
     "isDynamicEntry": true,
@@ -305,7 +305,7 @@
     ]
   },
   "resources/js/views/ResHotels/Index.vue": {
-    "file": "assets/Index--Oyt1uqZ.js",
+    "file": "assets/Index-CFdWBnRS.js",
     "name": "Index",
     "src": "resources/js/views/ResHotels/Index.vue",
     "isDynamicEntry": true,
@@ -319,7 +319,7 @@
     ]
   },
   "resources/js/views/ResourceProviders/Index.vue": {
-    "file": "assets/Index-BFmFZTNm.js",
+    "file": "assets/Index-Bu3Ee9Fz.js",
     "name": "Index",
     "src": "resources/js/views/ResourceProviders/Index.vue",
     "isDynamicEntry": true,
@@ -333,7 +333,7 @@
     ]
   },
   "resources/js/views/ScenicSpots/Index.vue": {
-    "file": "assets/Index-CBeC-6Oq.js",
+    "file": "assets/Index-B4FPuYt8.js",
     "name": "Index",
     "src": "resources/js/views/ScenicSpots/Index.vue",
     "isDynamicEntry": true,
@@ -347,7 +347,7 @@
     ]
   },
   "resources/js/views/SoftwareProviders/Index.vue": {
-    "file": "assets/Index-CluVT-YG.js",
+    "file": "assets/Index-KCPLseip.js",
     "name": "Index",
     "src": "resources/js/views/SoftwareProviders/Index.vue",
     "isDynamicEntry": true,
@@ -361,7 +361,7 @@
     ]
   },
   "resources/js/views/Tickets/Detail.vue": {
-    "file": "assets/Detail-C7qvhh6g.js",
+    "file": "assets/Detail-BvVCaflq.js",
     "name": "Detail",
     "src": "resources/js/views/Tickets/Detail.vue",
     "isDynamicEntry": true,
@@ -375,7 +375,7 @@
     ]
   },
   "resources/js/views/Tickets/Index.vue": {
-    "file": "assets/Index-Cr3NeAts.js",
+    "file": "assets/Index-DQ9v5vXw.js",
     "name": "Index",
     "src": "resources/js/views/Tickets/Index.vue",
     "isDynamicEntry": true,
@@ -389,7 +389,7 @@
     ]
   },
   "resources/js/views/Users/Index.vue": {
-    "file": "assets/Index-BsfNiqbA.js",
+    "file": "assets/Index-7ZT1xouW.js",
     "name": "Index",
     "src": "resources/js/views/Users/Index.vue",
     "isDynamicEntry": true,
