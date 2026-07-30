@@ -291,7 +291,7 @@
                             :loading="operating[order.id] === 'retry'"
                             class="action-btn-primary"
                         >
-                            重试推送
+                            重新推送
                         </el-button>
 
                         <!-- 拒单按钮（待确认或确认中状态） -->
@@ -1435,9 +1435,9 @@ onUnmounted(() => {
     font-weight: 500;
 }
 
-/* 操作列 */
+/* 操作列：左对齐，与其它列内容一致 */
 .col-actions {
-    justify-content: flex-end;
+    justify-content: flex-start;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
@@ -1445,11 +1445,10 @@ onUnmounted(() => {
     min-width: 220px;
 }
 
-/* PC端也允许换行，避免按钮被裁切 */
 @media (min-width: 1201px) {
     .col-actions {
         flex-wrap: wrap;
-        justify-content: flex-end;
+        justify-content: flex-start;
     }
 }
 
