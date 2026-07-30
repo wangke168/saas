@@ -272,7 +272,7 @@
 
                         <!-- 接单按钮（待确认或确认中状态） -->
                         <el-button
-                                v-if="['paid_pending', 'confirming'].includes(order.status)"
+                                v-if="['paid_pending', 'confirming'].includes(getOrderStatus(order))"
                             size="small"
                             type="success"
                                 @click="handleConfirmOrder(order)"
@@ -282,9 +282,21 @@
                             接单
                         </el-button>
 
+                        <!-- 直连异常：重新向景区推送（确认中显示；后端校验是否可推） -->
+                        <el-button
+                            v-if="getOrderStatus(order) === 'confirming'"
+                            size="small"
+                            type="warning"
+                            @click="handleRetryResourcePush(order)"
+                            :loading="operating[order.id] === 'retry'"
+                            class="action-btn-primary"
+                        >
+                            重试推送
+                        </el-button>
+
                         <!-- 拒单按钮（待确认或确认中状态） -->
                         <el-button
-                                v-if="['paid_pending', 'confirming'].includes(order.status)"
+                                v-if="['paid_pending', 'confirming'].includes(getOrderStatus(order))"
                             size="small"
                             type="danger"
                                 @click="handleRejectOrder(order)"
@@ -294,21 +306,9 @@
                             拒单
                         </el-button>
 
-                        <!-- 直连异常：重新向景区推送 -->
-                        <el-button
-                            v-if="order.can_retry_resource_push"
-                            size="small"
-                            type="warning"
-                            @click="handleRetryResourcePush(order)"
-                            :loading="operating[order.id] === 'retry'"
-                            class="action-btn-primary"
-                        >
-                            重试
-                        </el-button>
-
                         <!-- 核销按钮（已确认状态） -->
                         <el-button
-                                v-if="order.status === 'confirmed'"
+                                v-if="getOrderStatus(order) === 'confirmed'"
                             size="small"
                             type="primary"
                                 @click="handleVerifyOrder(order)"
@@ -857,6 +857,10 @@ const getStatusType = (status) => {
 
 const viewDetail = (row) => {
     router.push(`/orders/${row.id}`);
+};
+
+const getOrderStatus = (order) => {
+    return order?.status?.value || order?.status || '';
 };
 
 const handleConfirmOrder = async (row) => {
@@ -1438,12 +1442,14 @@ onUnmounted(() => {
     gap: 8px;
     flex-wrap: wrap;
     padding-right: 16px;
+    min-width: 220px;
 }
 
-/* PC端操作按钮不换行 */
+/* PC端也允许换行，避免按钮被裁切 */
 @media (min-width: 1201px) {
     .col-actions {
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
+        justify-content: flex-end;
     }
 }
 
