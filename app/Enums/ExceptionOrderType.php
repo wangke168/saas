@@ -8,6 +8,7 @@ enum ExceptionOrderType: string
     case TIMEOUT = 'timeout'; // 超时
     case INVENTORY_MISMATCH = 'inventory_mismatch'; // 库存不匹配
     case PRICE_MISMATCH = 'price_mismatch'; // 价格不匹配
+    case SKU_PENDING = 'sku_pending'; // 美团 SKU 待确认
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum ExceptionOrderType: string
             self::TIMEOUT => '超时',
             self::INVENTORY_MISMATCH => '库存不匹配',
             self::PRICE_MISMATCH => '价格不匹配',
+            self::SKU_PENDING => 'SKU待确认',
         };
     }
 }

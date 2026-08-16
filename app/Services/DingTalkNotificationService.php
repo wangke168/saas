@@ -619,6 +619,31 @@ class DingTalkNotificationService
         $message .= "**产品：** {$productName}\n\n";
         $message .= "**当前订单状态：** {$order->status->label()}\n\n";
         $message .= "**异常摘要：** {$exception->exception_message}\n\n";
+
+        $exceptionData = $exception->exception_data ?? [];
+        if (($exceptionData['missing_partner_primary_key'] ?? false) === true
+            || $exception->exception_type === \App\Enums\ExceptionOrderType::SKU_PENDING) {
+            $levelIds = $exceptionData['level_ids'] ?? [];
+            $levelText = is_array($levelIds) ? implode(',', $levelIds) : (string) $levelIds;
+            $unitPrice = $exceptionData['unit_price'] ?? '-';
+            $message .= "**levelIds：** {$levelText}\n";
+            $message .= "**美团单价：** {$unitPrice}\n";
+            if (($exceptionData['sku_confirmed'] ?? false) !== true) {
+                $message .= "**注意：** 当前订单酒店仅为占位，接单前必须选择正确酒店房型\n";
+            }
+            $candidates = $exceptionData['candidates'] ?? [];
+            if (is_array($candidates) && $candidates !== []) {
+                $message .= "**候选房型：**\n";
+                foreach (array_slice($candidates, 0, 20) as $candidate) {
+                    $hotelName = $candidate['hotel_name'] ?? '';
+                    $roomName = $candidate['room_type_name'] ?? '';
+                    $salePrice = $candidate['sale_price'] ?? '';
+                    $message .= "- {$hotelName} / {$roomName} ¥{$salePrice}\n";
+                }
+                $message .= "\n";
+            }
+        }
+
         $message .= "---\n";
         $message .= "⏰ 时间：" . now()->format('Y-m-d H:i:s') . "\n";
         $message .= "💡 请尽快登录后台处理「异常订单」";

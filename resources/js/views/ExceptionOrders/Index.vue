@@ -2,7 +2,7 @@
     <div>
         <h2>异常订单处理</h2>
         <el-alert type="warning" :closable="false" style="margin-bottom: 20px">
-            所有接口报错、超时、库存不匹配的订单都会显示在这里，请及时处理
+            接口报错、超时、库存不匹配、SKU待确认的订单都会显示在这里。美团缺 SKU 主键的订单请选择正确酒店房型后再接单，不要直接用占位酒店下发。
         </el-alert>
         <el-card>
             <el-table :data="exceptions" v-loading="loading" border>
@@ -102,6 +102,7 @@
                 </el-table-column>
             </el-table>
         </el-card>
+        <SkuConfirmDialog ref="skuConfirmDialog" />
     </div>
 </template>
 
@@ -110,10 +111,11 @@ import { ref, onMounted } from 'vue';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { promptConfirmOrder } from '../../utils/orderConfirm';
+import SkuConfirmDialog from '../../components/SkuConfirmDialog.vue';
 
 const exceptions = ref([]);
 const loading = ref(false);
-const processing = ref({}); // 记录正在处理中的异常订单 { exceptionId: 'confirm'|'reject'|'approve' }
+const skuConfirmDialog = ref(null);
 
 const fetchExceptions = async () => {
     loading.value = true;
@@ -132,7 +134,8 @@ const getExceptionTypeLabel = (type) => {
         'api_error': '接口报错',
         'timeout': '超时',
         'inventory_mismatch': '库存不匹配',
-        'price_mismatch': '价格不匹配'
+        'price_mismatch': '价格不匹配',
+        'sku_pending': 'SKU待确认',
     };
     return labels[type] || type;
 };
@@ -205,9 +208,27 @@ const formatDate = (date) => {
 // 处理接单
 const handleConfirmOrder = async (row) => {
     try {
-        const payload = await promptConfirmOrder(row.order);
-        if (!payload) {
-            return;
+        const sku = row.order?.sku_confirmation || {
+            required: row.exception_type === 'sku_pending'
+                || row.exception_data?.missing_partner_primary_key === true
+                    ? row.exception_data?.sku_confirmed !== true
+                    : false,
+            candidates: row.exception_data?.candidates || [],
+            level_ids: row.exception_data?.level_ids,
+            unit_price: row.exception_data?.unit_price,
+            message: row.exception_message,
+        };
+        let payload = {};
+        if (sku.required) {
+            payload = await skuConfirmDialog.value.open(sku);
+            if (!payload) {
+                return;
+            }
+        } else {
+            payload = await promptConfirmOrder(row.order);
+            if (!payload) {
+                return;
+            }
         }
 
         processing.value[row.id] = 'confirm';

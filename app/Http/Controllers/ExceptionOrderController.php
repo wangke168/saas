@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\ExceptionOrderStatus;
 use App\Models\ExceptionOrder;
 use App\Support\ManualResourceOrderNo;
+use App\Support\MeituanSkuConfirmation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,7 +18,7 @@ class ExceptionOrderController extends Controller
     {
         $this->authorize('viewAny', ExceptionOrder::class);
 
-        $query = ExceptionOrder::with(['order.product.scenicSpot', 'order.hotel.scenicSpot', 'order.otaPlatform', 'handler']);
+        $query = ExceptionOrder::with(['order.product.scenicSpot', 'order.hotel.scenicSpot', 'order.roomType', 'order.otaPlatform', 'handler']);
 
         // 权限过滤：非管理员只能查看所属资源方下的所有景区下的异常订单
         if (! $request->user()->isAdmin()) {
@@ -53,6 +54,10 @@ class ExceptionOrderController extends Controller
                 $exceptionOrder->order->setAttribute(
                     'requires_resource_order_no_input',
                     ManualResourceOrderNo::needsResourceOrderNoOnConfirm($exceptionOrder->order)
+                );
+                $exceptionOrder->order->setAttribute(
+                    'sku_confirmation',
+                    MeituanSkuConfirmation::payload($exceptionOrder, $exceptionOrder->order)
                 );
             }
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\OrderStatus;
+use App\Http\Requests\ConfirmOrderRequest;
 use App\Http\Requests\OrderExportRequest;
 use App\Models\Order;
 use App\Models\OrderBooking;
@@ -12,6 +13,7 @@ use App\Services\OrderResourcePushRetryService;
 use App\Services\OrderService;
 use App\Services\Presale\PresaleFulfillmentOrderService;
 use App\Support\ManualResourceOrderNo;
+use App\Support\MeituanSkuConfirmation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -114,7 +116,11 @@ class OrderController extends Controller
         $orders = $query->orderBy('created_at', 'desc')
             ->paginate($request->get('per_page', 15));
 
-        $orders->getCollection()->transform(function (Order $order): Order {
+        $skuExceptions = MeituanSkuConfirmation::pendingExceptionsByOrderIds(
+            $orders->getCollection()->pluck('id')
+        );
+
+        $orders->getCollection()->transform(function (Order $order) use ($skuExceptions): Order {
             $flags = PresaleFulfillmentOrderService::presaleDisplayFlags($order);
             $order->setAttribute('is_presale_parent', $flags['is_presale_parent']);
             $order->setAttribute('is_presale_fulfillment_child', $flags['is_presale_fulfillment_child']);
@@ -125,6 +131,10 @@ class OrderController extends Controller
             $order->setAttribute(
                 'can_retry_resource_push',
                 $this->orderResourcePushRetryService->canRetry($order)
+            );
+            $order->setAttribute(
+                'sku_confirmation',
+                MeituanSkuConfirmation::payload($skuExceptions->get($order->id), $order)
             );
 
             return $order;
@@ -241,6 +251,10 @@ class OrderController extends Controller
         }
 
         $payload['can_backfill_resource_order_no'] = ManualResourceOrderNo::canBackfillResourceOrderNo($order);
+        $payload['sku_confirmation'] = MeituanSkuConfirmation::payload(
+            MeituanSkuConfirmation::pendingException($order),
+            $order
+        );
 
         return response()->json($payload);
     }
@@ -276,7 +290,7 @@ class OrderController extends Controller
     /**
      * 接单（确认订单）
      */
-    public function confirmOrder(Request $request, Order $order): JsonResponse
+    public function confirmOrder(ConfirmOrderRequest $request, Order $order): JsonResponse
     {
         $this->authorize('updateStatus', $order);
 
@@ -288,10 +302,7 @@ class OrderController extends Controller
             ], 400);
         }
 
-        $validated = $request->validate([
-            'remark' => 'nullable|string|max:500',
-            'resource_order_no' => 'nullable|string|max:100',
-        ]);
+        $validated = $request->validated();
 
         if (ManualResourceOrderNo::needsResourceOrderNoOnConfirm($order)
             && empty(trim((string) ($validated['resource_order_no'] ?? '')))) {
@@ -315,6 +326,8 @@ class OrderController extends Controller
             $validated['remark'] ?? null,
             $request->user()->id,
             isset($validated['resource_order_no']) ? trim($validated['resource_order_no']) : null,
+            isset($validated['hotel_id']) ? (int) $validated['hotel_id'] : null,
+            isset($validated['room_type_id']) ? (int) $validated['room_type_id'] : null,
         );
 
         if ($result['success']) {

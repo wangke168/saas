@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ExceptionOrderStatus;
+use App\Enums\ExceptionOrderType;
 use App\Enums\OrderStatus;
 use App\Enums\OtaPlatform;
 use App\Models\ExceptionOrder;
@@ -28,6 +29,9 @@ class OrderOperationService
         protected CtripService $ctripService,
         protected OtaConfigResolver $otaConfigResolver,
         protected MeituanNotificationService $meituanNotificationService,
+        protected InventoryService $inventoryService,
+        protected \App\Services\OTA\MeituanLevelMapService $meituanLevelMapService,
+        protected \App\Services\ProductService $productService,
     ) {}
 
     /**
@@ -42,23 +46,41 @@ class OrderOperationService
      * @param  string|null  $remark  备注
      * @param  int|null  $operatorId  操作人ID（人工操作时）
      * @param  string|null  $resourceOrderNo  资源方订单号（手工接单时填写）
+     * @param  int|null  $hotelId  SKU 待确认时选择的酒店
+     * @param  int|null  $roomTypeId  SKU 待确认时选择的房型
      */
     public function confirmOrder(
         Order $order,
         ?string $remark = null,
         ?int $operatorId = null,
         ?string $resourceOrderNo = null,
+        ?int $hotelId = null,
+        ?int $roomTypeId = null,
     ): array {
         // 检查是否是异常订单（包括库存不匹配异常）
         $exceptionOrder = ExceptionOrder::where('order_id', $order->id)
             ->where('status', ExceptionOrderStatus::PENDING)
             ->where(function ($query) {
                 $query->where('exception_data->operation', 'confirm')
-                    ->orWhere('exception_type', \App\Enums\ExceptionOrderType::INVENTORY_MISMATCH);
+                    ->orWhere('exception_type', \App\Enums\ExceptionOrderType::INVENTORY_MISMATCH)
+                    ->orWhere('exception_type', \App\Enums\ExceptionOrderType::SKU_PENDING)
+                    ->orWhere('exception_data->missing_partner_primary_key', true);
             })
             ->first();
 
         $resourceService = ResourceServiceFactory::getService($order, 'order');
+
+        if ($exceptionOrder && $this->isMeituanSkuPendingException($exceptionOrder)) {
+            return $this->confirmMeituanSkuPendingOrder(
+                $order,
+                $exceptionOrder,
+                $remark,
+                $operatorId,
+                $resourceOrderNo,
+                $hotelId,
+                $roomTypeId,
+            );
+        }
 
         if ($exceptionOrder) {
             // 异常订单处理：直接走人工流程，不再调用资源方接口，直接对接OTA平台
@@ -82,6 +104,165 @@ class OrderOperationService
             // 非系统直连：人工操作
             return $this->confirmOrderManually($order, $remark, $operatorId, null, $resourceOrderNo);
         }
+    }
+
+    private function isMeituanSkuPendingException(ExceptionOrder $exceptionOrder): bool
+    {
+        if ($exceptionOrder->exception_type === ExceptionOrderType::SKU_PENDING) {
+            return true;
+        }
+
+        $data = $exceptionOrder->exception_data ?? [];
+
+        return ($data['missing_partner_primary_key'] ?? false) === true;
+    }
+
+    /**
+     * 美团 SKU 待确认：可改酒店房型、锁库存，直连则下发资源方。
+     */
+    protected function confirmMeituanSkuPendingOrder(
+        Order $order,
+        ExceptionOrder $exceptionOrder,
+        ?string $remark,
+        ?int $operatorId,
+        ?string $resourceOrderNo,
+        ?int $hotelId,
+        ?int $roomTypeId,
+    ): array {
+        $data = $exceptionOrder->exception_data ?? [];
+        $skuConfirmed = (bool) ($data['sku_confirmed'] ?? false);
+        $alreadyLocked = ! (bool) ($data['skip_inventory'] ?? true);
+
+        if (! $skuConfirmed && ($hotelId === null || $roomTypeId === null)) {
+            return [
+                'success' => false,
+                'message' => '请选择正确的酒店和房型后再接单',
+            ];
+        }
+
+        $targetHotelId = $hotelId ?? (int) $order->hotel_id;
+        $targetRoomTypeId = $roomTypeId ?? (int) $order->room_type_id;
+        $product = $order->product;
+        if ($product === null) {
+            return [
+                'success' => false,
+                'message' => '订单未关联产品',
+            ];
+        }
+
+        $useDate = $order->check_in_date->format('Y-m-d');
+        $price = $product->prices()
+            ->where('date', $useDate)
+            ->where('room_type_id', $targetRoomTypeId)
+            ->with(['roomType.hotel'])
+            ->first();
+        $roomType = $price?->roomType;
+        $hotel = $roomType?->hotel;
+        if ($price === null || $hotel === null || $roomType === null || (int) $hotel->id !== $targetHotelId) {
+            return [
+                'success' => false,
+                'message' => '所选酒店房型不在该产品当天可售范围内',
+            ];
+        }
+
+        $unitPrice = floatval($data['unit_price'] ?? 0);
+        if ($unitPrice > 0) {
+            $priceData = $this->productService->calculatePrice($product, $targetRoomTypeId, $useDate);
+            $salePrice = round((float) ($priceData['sale_price'] ?? 0), 2);
+            if (abs($salePrice - round($unitPrice, 2)) > 0.01) {
+                return [
+                    'success' => false,
+                    'message' => "所选房型售价({$salePrice})与美团单价({$unitPrice})不一致",
+                ];
+            }
+        }
+
+        $stayDays = $product->stay_days ?: 1;
+        $dates = $this->inventoryService->getDateRange($useDate, $stayDays);
+        $roomChanged = (int) $order->hotel_id !== $targetHotelId || (int) $order->room_type_id !== $targetRoomTypeId;
+
+        if ($roomChanged || ! $alreadyLocked) {
+            $locked = $this->inventoryService->lockInventoryForDates(
+                $targetRoomTypeId,
+                $dates,
+                (int) $order->room_count
+            );
+            if (! $locked) {
+                return [
+                    'success' => false,
+                    'message' => '库存锁定失败：库存不足或并发冲突',
+                ];
+            }
+        }
+
+        if ($alreadyLocked && $roomChanged) {
+            $this->inventoryService->releaseInventoryForDates(
+                (int) $order->room_type_id,
+                $dates,
+                (int) $order->room_count
+            );
+        }
+
+        $order->update([
+            'hotel_id' => $targetHotelId,
+            'room_type_id' => $targetRoomTypeId,
+        ]);
+        $order->refresh();
+        $order->load(['hotel', 'roomType', 'product', 'otaPlatform']);
+
+        $levelIds = $order->meituan_level_ids ?? ($data['level_ids'] ?? []);
+        if (is_array($levelIds) && $levelIds !== []) {
+            $this->meituanLevelMapService->rememberFromMatchedSku($product, $hotel, $roomType, $levelIds);
+        }
+
+        $exceptionOrder->update([
+            'status' => ExceptionOrderStatus::RESOLVED,
+            'handler_id' => $operatorId,
+            'resolved_at' => now(),
+            'exception_data' => array_merge($data, [
+                'confirmed_hotel_id' => $targetHotelId,
+                'confirmed_room_type_id' => $targetRoomTypeId,
+                'confirmed_hotel_name' => $hotel->name,
+                'confirmed_room_type_name' => $roomType->name,
+            ]),
+        ]);
+
+        $isSystemConnected = ResourceServiceFactory::isSystemConnected($order, 'order');
+        if ($isSystemConnected) {
+            if ($order->status === OrderStatus::PAID_PENDING) {
+                $this->orderService->updateOrderStatus(
+                    $order,
+                    OrderStatus::CONFIRMING,
+                    $remark ?? 'SKU 已确认，等待向景区下发订单',
+                    $operatorId
+                );
+            }
+
+            \App\Jobs\ProcessResourceOrderJob::dispatch($order, 'confirm');
+
+            Log::info('OrderOperationService: SKU 待确认已改房型并派发资源方接单', [
+                'order_id' => $order->id,
+                'hotel_id' => $targetHotelId,
+                'room_type_id' => $targetRoomTypeId,
+            ]);
+
+            return [
+                'success' => true,
+                'message' => '已确认酒店房型并提交景区接单',
+                'data' => [
+                    'order_id' => $order->id,
+                    'status' => $order->fresh()->status->value,
+                ],
+            ];
+        }
+
+        return $this->confirmOrderManually(
+            $order,
+            $remark ?? 'SKU 已人工确认后接单',
+            $operatorId,
+            $exceptionOrder,
+            $resourceOrderNo
+        );
     }
 
     /**

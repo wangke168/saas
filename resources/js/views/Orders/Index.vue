@@ -393,6 +393,7 @@
                 <el-button type="primary" :loading="exporting" @click="handleExport">确认导出</el-button>
             </template>
         </el-dialog>
+        <SkuConfirmDialog ref="skuConfirmDialog" />
     </div>
 </template>
 
@@ -402,6 +403,7 @@ import { useRouter } from 'vue-router';
 import axios from '../../utils/axios';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { promptConfirmOrder } from '../../utils/orderConfirm';
+import SkuConfirmDialog from '../../components/SkuConfirmDialog.vue';
 import { useAuthStore } from '../../stores/auth';
 
 const router = useRouter();
@@ -419,6 +421,7 @@ const currentPage = ref(1);
 const pageSize = ref(15);
 const total = ref(0);
 const operating = ref({});
+const skuConfirmDialog = ref(null);
 const selectedOrders = ref([]);
 const otaPlatforms = ref([]);
 const scenicSpots = ref([]);
@@ -865,9 +868,17 @@ const getOrderStatus = (order) => {
 
 const handleConfirmOrder = async (row) => {
     try {
-        const payload = await promptConfirmOrder(row);
-        if (!payload) {
-            return;
+        let payload = {};
+        if (row.sku_confirmation?.required) {
+            payload = await skuConfirmDialog.value.open(row.sku_confirmation);
+            if (!payload) {
+                return;
+            }
+        } else {
+            payload = await promptConfirmOrder(row);
+            if (!payload) {
+                return;
+            }
         }
 
         operating.value[row.id] = 'confirm';

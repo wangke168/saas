@@ -28,6 +28,7 @@ use App\Services\Resource\ResourceServiceFactory;
 use App\Jobs\NotifyMeituanOrderForceCancelledJob;
 use App\Jobs\NotifyResourceChannelExceptionJob;
 use App\Services\OTA\MeituanService;
+use App\Services\OTA\MeituanLevelMapService;
 use App\Services\OTA\NotificationFactory;
 use App\Services\ProductUnavailableNightService;
 use App\Services\Presale\PresaleOtaConsumeService;
@@ -62,6 +63,7 @@ class MeituanController extends Controller
         protected OtaConfigResolver $otaConfigResolver,
         protected OtaAutoAcceptConfigService $otaAutoAcceptConfigService,
         protected PresaleOrderService $presaleOrderService,
+        protected MeituanLevelMapService $meituanLevelMapService,
     ) {}
 
     /**
@@ -973,6 +975,10 @@ class MeituanController extends Controller
                 $missingPartnerPrimaryKey = empty($partnerPrimaryKey);
                 $skuResolveMethod = null;
                 $skipInventory = false;
+                $createSkuException = false;
+                $skuConfirmed = true;
+                $skuCandidates = [];
+                $levelIds = is_array($body['levelIds'] ?? null) ? $body['levelIds'] : [];
 
                 if (!empty($partnerPrimaryKey)) {
                     foreach ($prices as $p) {
@@ -997,6 +1003,12 @@ class MeituanController extends Controller
                         ]);
                         return $this->errorResponse(400, '无法匹配酒店和房型', $partnerId, true);
                     }
+                    $this->meituanLevelMapService->rememberFromMatchedSku(
+                        $product,
+                        $price->roomType->hotel,
+                        $price->roomType,
+                        $levelIds,
+                    );
                 } else {
                     $unitPrice = floatval($body['unitPrice'] ?? $body['totalPrice'] ?? 0);
                     $resolved = $meituanService->resolvePriceWithoutPartnerPrimaryKey(
@@ -1004,19 +1016,25 @@ class MeituanController extends Controller
                         $prices,
                         $useDate,
                         $unitPrice,
+                        $levelIds,
                     );
                     $price = $resolved['price'];
                     $skuResolveMethod = $resolved['resolve_method'];
                     $skipInventory = $resolved['skip_inventory'];
+                    $createSkuException = $resolved['create_exception'];
+                    $skuConfirmed = $resolved['sku_confirmed'];
+                    $skuCandidates = $resolved['candidates'];
 
                     Log::warning('美团订单创建V2：缺少 partnerPrimaryKey，已按备用规则匹配酒店房型', [
                         'meituan_order_id' => $orderId,
                         'partner_deal_id' => $partnerDealId,
                         'use_date' => $useDate,
                         'unit_price' => $unitPrice,
-                        'level_ids' => $body['levelIds'] ?? null,
+                        'level_ids' => $levelIds,
                         'resolve_method' => $skuResolveMethod,
                         'skip_inventory' => $skipInventory,
+                        'create_exception' => $createSkuException,
+                        'sku_confirmed' => $skuConfirmed,
                         'hotel_id' => $price->roomType?->hotel?->id,
                         'room_type_id' => $price->roomType?->id,
                     ]);
@@ -1031,6 +1049,15 @@ class MeituanController extends Controller
                         'product_id' => $product->id,
                     ]);
                     return $this->errorResponse(400, '产品未关联酒店或房型', $partnerId, true);
+                }
+
+                if ($missingPartnerPrimaryKey && $skuConfirmed) {
+                    $this->meituanLevelMapService->rememberFromMatchedSku(
+                        $product,
+                        $hotel,
+                        $roomType,
+                        $levelIds,
+                    );
                 }
 
                 // 检查库存（考虑入住天数）
@@ -1235,6 +1262,7 @@ class MeituanController extends Controller
                     'guest_info' => $guestInfo, // 使用构建好的 guest_info，包含 name 和 idCode
                     'real_name_type' => $realNameType,
                     'credential_list' => $credentialListData,
+                    'meituan_level_ids' => $levelIds !== [] ? $levelIds : null,
                     'total_amount' => round($salePrice * $quantity, 2), // 单位：元
                     'settlement_amount' => round($settlementPrice * $quantity, 2), // 单位：元
                     'paid_at' => null, // 订单创建时还未支付
@@ -1261,7 +1289,7 @@ class MeituanController extends Controller
                 }
 
                 $skuException = null;
-                if ($missingPartnerPrimaryKey) {
+                if ($missingPartnerPrimaryKey && $createSkuException) {
                     $skuException = $this->createMeituanMissingPartnerPrimaryKeyException(
                         $order,
                         (string) $orderId,
@@ -1269,6 +1297,9 @@ class MeituanController extends Controller
                         $skuResolveMethod ?? 'unknown',
                         $hotel,
                         $roomType,
+                        $skuConfirmed,
+                        $skuCandidates,
+                        $skipInventory,
                     );
                 }
 
@@ -1285,6 +1316,7 @@ class MeituanController extends Controller
                     'missing_partner_primary_key' => $missingPartnerPrimaryKey,
                     'sku_resolve_method' => $skuResolveMethod,
                     'skip_inventory' => $skipInventory,
+                    'create_sku_exception' => $createSkuException,
                 ]);
 
                 return $this->successResponse([
@@ -3278,24 +3310,33 @@ class MeituanController extends Controller
         string $resolveMethod,
         \App\Models\Hotel $hotel,
         \App\Models\RoomType $roomType,
+        bool $skuConfirmed,
+        array $candidates,
+        bool $skipInventory,
     ): ExceptionOrder {
         $unitPrice = floatval($body['unitPrice'] ?? $body['totalPrice'] ?? 0);
-        $exceptionMessage = $resolveMethod === 'unit_price_unique'
-            ? "美团下单未传 partnerPrimaryKey，已通过单价({$unitPrice})匹配到酒店/房型，请核实美团 SKU 并重推价格日历"
-            : '美团下单未传 partnerPrimaryKey，且无法通过单价唯一识别酒店/房型，已临时落单待人工确认';
+        $levelIds = $body['levelIds'] ?? null;
+        $exceptionMessage = match ($resolveMethod) {
+            'unit_price_unique' => "美团下单未传 partnerPrimaryKey，已通过单价({$unitPrice})匹配到酒店/房型，请核实后接单",
+            'first_price_fallback' => '美团下单未传 partnerPrimaryKey，无法唯一识别酒店/房型，请选择正确 SKU 后再接单（当前订单酒店仅为占位）',
+            default => '美团下单未传 partnerPrimaryKey，等待人工确认酒店房型',
+        };
 
         $exception = ExceptionOrder::create([
             'order_id' => $order->id,
-            'exception_type' => ExceptionOrderType::API_ERROR,
+            'exception_type' => ExceptionOrderType::SKU_PENDING,
             'exception_message' => $exceptionMessage,
             'exception_data' => [
                 'operation' => 'confirm',
                 'source' => 'meituan_order_create_v2',
                 'missing_partner_primary_key' => true,
                 'meituan_order_id' => $meituanOrderId,
-                'level_ids' => $body['levelIds'] ?? null,
+                'level_ids' => $levelIds,
                 'unit_price' => $unitPrice,
                 'resolve_method' => $resolveMethod,
+                'sku_confirmed' => $skuConfirmed,
+                'skip_inventory' => $skipInventory,
+                'candidates' => $candidates,
                 'resolved_hotel_id' => $hotel->id,
                 'resolved_room_type_id' => $roomType->id,
                 'resolved_hotel_name' => $hotel->name,
@@ -3309,6 +3350,7 @@ class MeituanController extends Controller
             'meituan_order_id' => $meituanOrderId,
             'exception_order_id' => $exception->id,
             'resolve_method' => $resolveMethod,
+            'sku_confirmed' => $skuConfirmed,
         ]);
 
         return $exception;
@@ -3319,7 +3361,10 @@ class MeituanController extends Controller
         return ExceptionOrder::query()
             ->where('order_id', $order->id)
             ->where('status', ExceptionOrderStatus::PENDING)
-            ->where('exception_data->missing_partner_primary_key', true)
+            ->where(function ($query) {
+                $query->where('exception_type', ExceptionOrderType::SKU_PENDING)
+                    ->orWhere('exception_data->missing_partner_primary_key', true);
+            })
             ->first();
     }
 

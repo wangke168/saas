@@ -31,7 +31,8 @@ class MeituanService
     public function __construct(
         protected ProductService $productService,
         protected OtaConfigResolver $otaConfigResolver,
-        protected InventoryService $inventoryService
+        protected InventoryService $inventoryService,
+        protected MeituanLevelMapService $levelMapService,
     ) {}
 
     /**
@@ -67,60 +68,34 @@ class MeituanService
         return md5($key);
     }
 
-    private const UNIT_PRICE_MATCH_TOLERANCE = 0.01;
-
     /**
      * 无 partnerPrimaryKey 时解析酒店/房型价格行
      *
      * @param  Collection<int, Price>  $prices
-     * @return array{price: Price, resolve_method: string, skip_inventory: bool}
+     * @param  array<int, mixed>  $levelIds
+     * @return array{
+     *     price: Price,
+     *     resolve_method: string,
+     *     skip_inventory: bool,
+     *     create_exception: bool,
+     *     sku_confirmed: bool,
+     *     candidates: list<array{hotel_id: int, hotel_name: string, room_type_id: int, room_type_name: string, sale_price: float}>
+     * }
      */
     public function resolvePriceWithoutPartnerPrimaryKey(
         Product $product,
         Collection $prices,
         string $useDate,
         float $unitPrice,
+        array $levelIds = [],
     ): array {
-        $targetUnitPrice = round($unitPrice, 2);
-        $matches = [];
-
-        foreach ($prices as $price) {
-            $roomType = $price->roomType;
-            $hotel = $roomType?->hotel;
-            if ($hotel === null || $roomType === null) {
-                continue;
-            }
-
-            $priceData = $this->productService->calculatePrice($product, (int) $roomType->id, $useDate);
-            $salePrice = round((float) ($priceData['sale_price'] ?? 0), 2);
-
-            if (abs($salePrice - $targetUnitPrice) <= self::UNIT_PRICE_MATCH_TOLERANCE) {
-                $matches[] = $price;
-            }
-        }
-
-        if (count($matches) === 1) {
-            return [
-                'price' => $matches[0],
-                'resolve_method' => 'unit_price_unique',
-                'skip_inventory' => false,
-            ];
-        }
-
-        $fallback = $prices->first(function (Price $price): bool {
-            $roomType = $price->roomType;
-            if ($roomType === null) {
-                return false;
-            }
-
-            return $roomType->hotel !== null;
-        }) ?? $prices->first();
-
-        return [
-            'price' => $fallback,
-            'resolve_method' => 'first_price_fallback',
-            'skip_inventory' => true,
-        ];
+        return $this->levelMapService->resolveWithoutPartnerPrimaryKey(
+            $product,
+            $prices,
+            $useDate,
+            $unitPrice,
+            $levelIds,
+        );
     }
 
     /**
@@ -1581,6 +1556,18 @@ class MeituanService
                 'total_sku' => count($allBodyItems),
                 'start_date' => $startDate,
                 'end_date' => $endDate,
+            ]);
+
+            Log::info('美团价格推送（整产品单次请求）：SKU明细', [
+                'product_id' => $product->id,
+                'items' => array_map(static fn (array $item): array => [
+                    'partnerPrimaryKey' => $item['partnerPrimaryKey'] ?? null,
+                    'priceDate' => $item['priceDate'] ?? null,
+                    'hotel' => $item['skuInfo']['levelInfoList'][0]['levelName'] ?? null,
+                    'room_type' => $item['skuInfo']['levelInfoList'][1]['levelName'] ?? null,
+                    'mtPrice' => $item['mtPrice'] ?? null,
+                    'stock' => $item['stock'] ?? null,
+                ], $allBodyItems),
             ]);
 
             $result = $client->notifyLevelPriceStock($requestData);
