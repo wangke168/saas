@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Jobs\PushProductToOtaJob;
 use App\Models\Price;
 use App\Models\PriceRule;
 use App\Models\Product;
@@ -275,7 +274,6 @@ class ProductService
 
             if (is_array($periods)) {
                 $this->replaceUnavailablePeriods($product, $periods);
-                $this->scheduleOtaResyncForProduct($product->fresh());
             }
 
             return $product->load(['scenicSpot', 'softwareProvider', 'prices', 'priceRules', 'unavailablePeriods']);
@@ -420,16 +418,6 @@ class ProductService
                 'end_date' => Carbon::parse($row['end_date'])->toDateString(),
                 'note' => isset($row['note']) && $row['note'] !== '' ? (string) $row['note'] : null,
             ]);
-        }
-    }
-
-    private function scheduleOtaResyncForProduct(Product $product): void
-    {
-        $product->load(['otaProducts' => function ($q): void {
-            $q->where('is_active', true)->whereNotNull('pushed_at');
-        }]);
-        foreach ($product->otaProducts as $otaProduct) {
-            PushProductToOtaJob::dispatch($otaProduct->id)->onQueue('ota-push');
         }
     }
 

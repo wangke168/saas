@@ -557,44 +557,6 @@ class ResourceController extends Controller
 
                             DB::commit();
                             $successCount++;
-
-                            // 记录同步日志
-                            $scenicSpot = $hotel->scenicSpot ?? null;
-                            if ($scenicSpot) {
-                                ResourceSyncLog::create([
-                                    'software_provider_id' => $scenicSpot->software_provider_id ?? null,
-                                    'scenic_spot_id' => $scenicSpot->id,
-                                    'sync_type' => 'inventory',
-                                    'sync_mode' => 'push',
-                                    'status' => 'success',
-                                    'message' => "成功更新库存：酒店{$hotelNo}，房型{$roomType}，共" . count($dirtyInventories) . "条记录（变化）",
-                                    'synced_count' => count($dirtyInventories),
-                                    'last_synced_at' => now(),
-                                ]);
-                            }
-
-                            // 触发推送到 OTA（如果启用自动推送）
-                            if (!empty($changedDates) && config('inventory.enable_auto_push_inventory_to_ota', true)) {
-                                $pushToMeituan = $this->computePushToMeituanForResource(
-                                    $dirtyInventories,
-                                    $existingInventories,
-                                    $hotel->scenic_spot_id ?? null
-                                );
-                                if (!$pushToMeituan) {
-                                    Log::info('资源方库存推送：本次变更未满足美团推送条件（无库存跨越阈值），不推美团', [
-                                        'room_type_id' => $roomTypeModel->id,
-                                        'hotel_id' => $hotel->id,
-                                        'dates_count' => count($changedDates),
-                                        'dates' => array_slice(array_unique($changedDates), 0, 10),
-                                    ]);
-                                }
-                                $this->triggerOtaPushForRoomType(
-                                    $roomTypeModel,
-                                    array_unique($changedDates),
-                                    $pushToMeituan
-                                );
-                            }
-
                         } catch (\Exception $e) {
                             DB::rollBack();
                             // 可选：回滚 Redis 指纹（但为了简单，这里不处理）
@@ -605,6 +567,53 @@ class ResourceController extends Controller
                                 'room_type_id' => $roomTypeModel->id,
                                 'error' => $e->getMessage(),
                             ]);
+                            continue;
+                        }
+
+                        // 同步日志与 OTA 推送独立于库存事务：日志失败不得回滚库存，也不得阻断 OTA
+                        $scenicSpot = $hotel->scenicSpot ?? null;
+                        if ($scenicSpot) {
+                            try {
+                                ResourceSyncLog::create([
+                                    'software_provider_id' => $softwareProviderId,
+                                    'scenic_spot_id' => $scenicSpot->id,
+                                    'sync_type' => 'inventory',
+                                    'sync_mode' => 'push',
+                                    'status' => 'success',
+                                    'message' => "成功更新库存：酒店{$hotelNo}，房型{$roomType}，共" . count($dirtyInventories) . "条记录（变化）",
+                                    'synced_count' => count($dirtyInventories),
+                                    'last_synced_at' => now(),
+                                ]);
+                            } catch (\Exception $e) {
+                                Log::warning('资源方库存推送：写入同步日志失败', [
+                                    'hotel_id' => $hotel->id,
+                                    'room_type_id' => $roomTypeModel->id,
+                                    'scenic_spot_id' => $scenicSpot->id,
+                                    'software_provider_id' => $softwareProviderId,
+                                    'error' => $e->getMessage(),
+                                ]);
+                            }
+                        }
+
+                        if (!empty($changedDates) && config('inventory.enable_auto_push_inventory_to_ota', true)) {
+                            $pushToMeituan = $this->computePushToMeituanForResource(
+                                $dirtyInventories,
+                                $existingInventories,
+                                $hotel->scenic_spot_id ?? null
+                            );
+                            if (!$pushToMeituan) {
+                                Log::info('资源方库存推送：本次变更未满足美团推送条件（无库存跨越阈值），不推美团', [
+                                    'room_type_id' => $roomTypeModel->id,
+                                    'hotel_id' => $hotel->id,
+                                    'dates_count' => count($changedDates),
+                                    'dates' => array_slice(array_unique($changedDates), 0, 10),
+                                ]);
+                            }
+                            $this->triggerOtaPushForRoomType(
+                                $roomTypeModel,
+                                array_unique($changedDates),
+                                $pushToMeituan
+                            );
                         }
                     } else {
                         // 没有变化的库存，只记录日志

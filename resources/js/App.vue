@@ -112,6 +112,10 @@
                         <el-icon><Setting /></el-icon>
                         <span>账号设置</span>
                     </el-menu-item>
+                    <el-menu-item @click="openHelpCenter">
+                        <el-icon><QuestionFilled /></el-icon>
+                        <span>帮助中心</span>
+                    </el-menu-item>
                 </el-menu>
             </el-aside>
             <el-main>
@@ -128,7 +132,9 @@
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './stores/auth';
-import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine, Ticket, OfficeBuilding, Goods, Tools, DataBoard } from '@element-plus/icons-vue';
+import { Document, Warning, Box, House, Location, User, Setting, Connection, DataLine, Ticket, OfficeBuilding, Goods, Tools, DataBoard, QuestionFilled } from '@element-plus/icons-vue';
+
+const HELP_CENTER_URL = 'https://saas.jiusutong.com/docs/admin/getting-started';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -188,6 +194,10 @@ const onUserMenuCommand = (command) => {
     if (command === 'logout') {
         handleLogout();
     }
+};
+
+const openHelpCenter = () => {
+    window.open(HELP_CENTER_URL, '_blank', 'noopener,noreferrer');
 };
 </script>
 
